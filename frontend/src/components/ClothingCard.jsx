@@ -41,7 +41,7 @@ function ClothingCard({ item }) {
         <p className="text-[12px] font-medium uppercase tracking-[0.15em] text-dusty-rose">
           {item.category}
         </p>
-        <p className="font-display text-[17px] font-semibold italic leading-snug text-ink">
+        <p className="font-body text-[17px] font-medium leading-snug text-ink">
           {item.name}
         </p>
       </div>

@@ -1,8 +1,9 @@
-@import url('https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,500;0,600;1,400;1,500;1,600&family=Inter:wght@400;500;600&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,500;0,600;1,400;1,500;1,600&family=Inter:wght@400;500;600&family=Lora:wght@400;500;600&display=swap');
 @import "tailwindcss";
 
 @theme {
   --font-display: "Playfair Display", ui-serif, Georgia, serif;
+  --font-body: "Lora", ui-serif, Georgia, serif;
   --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
 
   --color-ivory: #f7f3ed;
