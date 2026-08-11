@@ -1,6 +1,7 @@
 const VARIANTS = {
   primary: 'bg-burgundy text-ivory hover:opacity-90',
   outline: 'border border-ink/15 text-ink hover:border-dusty-rose hover:text-dusty-rose',
+  rose: 'border border-dusty-rose text-dusty-rose hover:bg-dusty-rose hover:text-ivory',
 }
 
 const SIZES = {
