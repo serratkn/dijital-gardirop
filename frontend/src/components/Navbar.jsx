@@ -8,10 +8,10 @@ const links = [
 
 function Navbar() {
   return (
-    <nav className="bg-white border-b border-gray-200">
-      <div className="max-w-6xl mx-auto px-4 flex items-center justify-between h-16">
-        <span className="text-lg font-semibold text-gray-900">Dijital Gardırop</span>
-        <ul className="flex items-center gap-6">
+    <nav className="border-b border-ink/10 bg-ivory">
+      <div className="mx-auto flex h-16 max-w-6xl items-center justify-between px-4">
+        <span className="font-display text-lg text-ink">Dijital Gardırop</span>
+        <ul className="flex items-center gap-8">
           {links.map((link) => (
             <li key={link.to}>
               <NavLink
@@ -19,7 +19,7 @@ function Navbar() {
                 end={link.to === '/'}
                 className={({ isActive }) =>
                   `text-sm font-medium transition-colors ${
-                    isActive ? 'text-indigo-600' : 'text-gray-600 hover:text-gray-900'
+                    isActive ? 'text-ink' : 'text-ink/50 hover:text-ink'
                   }`
                 }
               >
