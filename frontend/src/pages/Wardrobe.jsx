@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { Shirt, PanelBottom, Triangle, Footprints, Handbag, Sparkles } from 'lucide-react'
 import { CATEGORIES, CLOTHES } from '../data/clothing'
 import ClothingCard from '../components/ClothingCard'
 import QuickAddModal from '../components/QuickAddModal'
@@ -7,6 +8,15 @@ import FilterPills from '../components/ui/FilterPills'
 import EmptyState from '../components/ui/EmptyState'
 
 const ALL = 'Tümü'
+
+const CATEGORY_ICONS = {
+  Üst: Shirt,
+  Alt: PanelBottom,
+  Elbise: Triangle,
+  Ayakkabı: Footprints,
+  Çanta: Handbag,
+  Makyaj: Sparkles,
+}
 
 // Test amaçlı: empty state tasarımını görmek için true yapın.
 const DEV_FORCE_EMPTY = false
@@ -29,7 +39,7 @@ function Wardrobe() {
           <EmptyState
             title="Gardırobun henüz boş."
             subtitle="İlk parçanı ekleyerek kendi stil koleksiyonunu oluşturmaya başla."
-            actionLabel="+ İlk Parçamı Ekle"
+            actionLabel="İlk Parçamı Ekle"
             onAction={() => setIsAddModalOpen(true)}
           />
         ) : (
@@ -38,7 +48,7 @@ function Wardrobe() {
               title="Gardırobum"
               subtitle="Tarzını oluşturan tüm parçalar, tek yerde."
               stats={[`${CLOTHES.length} Parça`, '8 Kombin', '5 Favori']}
-              actionLabel="+ Yeni Parça Ekle"
+              actionLabel="Yeni Parça Ekle"
               onAction={() => setIsAddModalOpen(true)}
             />
 
@@ -47,6 +57,7 @@ function Wardrobe() {
                 options={[ALL, ...CATEGORIES]}
                 active={activeCategory}
                 onChange={setActiveCategory}
+                icons={CATEGORY_ICONS}
               />
             </div>
 

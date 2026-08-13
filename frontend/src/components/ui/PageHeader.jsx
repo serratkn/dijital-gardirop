@@ -1,3 +1,4 @@
+import { Plus } from 'lucide-react'
 import Button from './Button'
 
 function PageHeader({ title, tagline, subtitle, stats = [], actionLabel, onAction }) {
@@ -15,7 +16,8 @@ function PageHeader({ title, tagline, subtitle, stats = [], actionLabel, onActio
         )}
       </div>
       {actionLabel && (
-        <Button variant="primary" onClick={onAction}>
+        <Button variant="primary" onClick={onAction} className="inline-flex items-center gap-1.5">
+          <Plus size={16} strokeWidth={1.75} />
           {actionLabel}
         </Button>
       )}

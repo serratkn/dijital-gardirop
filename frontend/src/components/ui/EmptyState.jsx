@@ -1,3 +1,4 @@
+import { Plus } from 'lucide-react'
 import Button from './Button'
 
 function EmptyState({ title, subtitle, actionLabel, onAction }) {
@@ -6,7 +7,13 @@ function EmptyState({ title, subtitle, actionLabel, onAction }) {
       <h2 className="font-display text-2xl text-ink">{title}</h2>
       {subtitle && <p className="max-w-sm text-sm text-ink/60">{subtitle}</p>}
       {actionLabel && (
-        <Button variant="primary" size="lg" onClick={onAction} className="mt-2">
+        <Button
+          variant="primary"
+          size="lg"
+          onClick={onAction}
+          className="mt-2 inline-flex items-center gap-1.5"
+        >
+          <Plus size={16} strokeWidth={1.75} />
           {actionLabel}
         </Button>
       )}
