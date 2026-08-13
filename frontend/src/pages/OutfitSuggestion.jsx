@@ -79,7 +79,10 @@ function OutfitSuggestion() {
 
         {selectedOccasion && (
           <section className="mt-16">
-            <h2 className="font-display text-2xl italic text-ink">Senin İçin Önerimiz</h2>
+            <p className="font-display text-sm font-light italic text-ink/45">
+              Her gün yeni bir hikaye.
+            </p>
+            <h2 className="mt-2 font-display text-2xl italic text-ink">Senin İçin Önerimiz</h2>
             <p className="mt-2 text-sm text-ink/50">{selectedOccasion} için seçtiklerimiz</p>
 
             <div className="mt-6 grid grid-cols-2 gap-6 sm:grid-cols-4">

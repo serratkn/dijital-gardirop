@@ -17,7 +17,11 @@ function Dashboard() {
   return (
     <div className="min-h-screen bg-ivory">
       <div className="mx-auto max-w-6xl px-6 py-14 sm:px-8">
-        <PageHeader title={greeting} subtitle="Bugün ne giyeceğine karar verelim." />
+        <PageHeader
+          title={greeting}
+          tagline="Tarzın, senin kuralların."
+          subtitle="Bugün ne giyeceğine karar verelim."
+        />
 
         <div className="mt-12 grid grid-cols-1 gap-4 sm:grid-cols-3">
           <StatCard value={CLOTHES.length} label="Toplam Parça" />
