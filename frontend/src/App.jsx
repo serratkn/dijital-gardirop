@@ -1,5 +1,6 @@
 import { Routes, Route, useLocation } from 'react-router-dom'
 import Navbar from './components/Navbar'
+import ScrollToTopButton from './components/ScrollToTopButton'
 import Dashboard from './pages/Dashboard'
 import Wardrobe from './pages/Wardrobe'
 import OutfitSuggestion from './pages/OutfitSuggestion'
@@ -19,6 +20,7 @@ function App() {
           <Route path="/kiyafet/:id" element={<ClothingDetail />} />
         </Routes>
       </div>
+      <ScrollToTopButton />
     </div>
   )
 }

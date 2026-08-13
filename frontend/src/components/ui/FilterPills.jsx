@@ -1,9 +1,10 @@
-function FilterPills({ options, active, onChange, icons }) {
+function FilterPills({ options, active, onChange, icons, counts }) {
   return (
     <div className="flex flex-wrap gap-2.5">
       {options.map((option) => {
         const isActive = option === active
         const Icon = icons?.[option]
+        const count = counts?.[option]
         return (
           <button
             key={option}
@@ -17,6 +18,11 @@ function FilterPills({ options, active, onChange, icons }) {
           >
             {Icon && <Icon size={16} strokeWidth={1.75} />}
             {option}
+            {typeof count === 'number' && (
+              <span className={`text-xs font-normal ${isActive ? 'text-ivory/70' : 'text-ink/40'}`}>
+                ({count})
+              </span>
+            )}
           </button>
         )
       })}

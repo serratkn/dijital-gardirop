@@ -1,6 +1,6 @@
 import { useState } from 'react'
-import { Shirt, PanelBottom, Triangle, Footprints, Handbag, Sparkles } from 'lucide-react'
 import { CATEGORIES, CLOTHES } from '../data/clothing'
+import { CATEGORY_ICONS } from '../lib/categoryIcons'
 import ClothingCard from '../components/ClothingCard'
 import QuickAddModal from '../components/QuickAddModal'
 import PageHeader from '../components/ui/PageHeader'
@@ -9,14 +9,11 @@ import EmptyState from '../components/ui/EmptyState'
 
 const ALL = 'Tümü'
 
-const CATEGORY_ICONS = {
-  Üst: Shirt,
-  Alt: PanelBottom,
-  Elbise: Triangle,
-  Ayakkabı: Footprints,
-  Çanta: Handbag,
-  Makyaj: Sparkles,
-}
+const CATEGORY_COUNTS = [ALL, ...CATEGORIES].reduce((acc, category) => {
+  acc[category] =
+    category === ALL ? CLOTHES.length : CLOTHES.filter((item) => item.category === category).length
+  return acc
+}, {})
 
 // Test amaçlı: empty state tasarımını görmek için true yapın.
 const DEV_FORCE_EMPTY = false
@@ -58,6 +55,7 @@ function Wardrobe() {
                 active={activeCategory}
                 onChange={setActiveCategory}
                 icons={CATEGORY_ICONS}
+                counts={CATEGORY_COUNTS}
               />
             </div>
 

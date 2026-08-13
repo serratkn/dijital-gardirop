@@ -1,8 +1,10 @@
 import { useState } from 'react'
 import { Link } from 'react-router-dom'
+import { CATEGORY_ICONS } from '../lib/categoryIcons'
 
 function ClothingCard({ item }) {
   const [isFavorite, setIsFavorite] = useState(false)
+  const CategoryIcon = CATEGORY_ICONS[item.category]
 
   const toggleFavorite = (event) => {
     event.preventDefault()
@@ -38,7 +40,8 @@ function ClothingCard({ item }) {
         </button>
       </div>
       <div className="space-y-2 p-5">
-        <p className="text-[12px] font-medium uppercase tracking-[0.15em] text-dusty-rose">
+        <p className="flex items-center gap-1 text-[12px] font-medium uppercase tracking-[0.15em] text-dusty-rose">
+          {CategoryIcon && <CategoryIcon size={12} strokeWidth={1.75} />}
           {item.category}
         </p>
         <p className="font-body text-[17px] font-medium leading-snug text-ink">
