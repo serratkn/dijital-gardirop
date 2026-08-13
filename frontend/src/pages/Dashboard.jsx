@@ -1,4 +1,5 @@
 import { Link } from 'react-router-dom'
+import { GraduationCap, Utensils } from 'lucide-react'
 import PageHeader from '../components/ui/PageHeader'
 import StatCard from '../components/ui/StatCard'
 import QuickActionCard from '../components/ui/QuickActionCard'
@@ -37,12 +38,14 @@ function Dashboard() {
               eyebrow="Kombin Önerisi"
               title="Üniversite Kombini"
               subtitle="Rahat ve şık, gün boyu kampüste."
+              icon={GraduationCap}
             />
             <QuickActionCard
               to="/kombin-oner"
               eyebrow="Kombin Önerisi"
               title="Akşam Yemeği Kombini"
               subtitle="Zarif bir buluşma için özel bir seçim."
+              icon={Utensils}
             />
           </div>
         </section>

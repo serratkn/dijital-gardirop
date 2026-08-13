@@ -31,15 +31,32 @@ function ClothingDetail() {
   return (
     <div className="min-h-screen bg-ivory">
       <div className="mx-auto max-w-6xl px-6 py-14 sm:px-8">
-        <Link
-          to="/gardirop"
-          className="inline-flex items-center gap-2 text-sm text-ink/60 transition-colors hover:text-dusty-rose"
-        >
-          <svg viewBox="0 0 24 24" strokeWidth="1.5" className="h-4 w-4 fill-none stroke-current">
-            <path d="M15 19l-7-7 7-7" strokeLinecap="round" strokeLinejoin="round" />
-          </svg>
-          Gardıroba Geri Dön
-        </Link>
+        <div className="flex flex-wrap items-center justify-between gap-4">
+          <Link
+            to="/gardirop"
+            className="inline-flex items-center gap-2 text-sm text-ink/60 transition-colors hover:text-dusty-rose"
+          >
+            <svg viewBox="0 0 24 24" strokeWidth="1.5" className="h-4 w-4 fill-none stroke-current">
+              <path d="M15 19l-7-7 7-7" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+            Gardıroba Geri Dön
+          </Link>
+
+          <nav className="flex items-center gap-1.5 text-xs text-ink/40">
+            <Link to="/gardirop" className="transition-colors hover:text-dusty-rose">
+              Gardırop
+            </Link>
+            <span className="text-ink/25">/</span>
+            <Link
+              to={`/gardirop?kategori=${encodeURIComponent(item.category)}`}
+              className="transition-colors hover:text-dusty-rose"
+            >
+              {item.category}
+            </Link>
+            <span className="text-ink/25">/</span>
+            <span className="text-ink/50">{item.name}</span>
+          </nav>
+        </div>
 
         <div className="mt-8 grid gap-10 md:grid-cols-2 md:gap-14">
           <div className="min-h-[24rem] rounded-3xl border border-ink/10 bg-warm-gray shadow-[0_8px_24px_-14px_rgba(28,26,23,0.18)] md:min-h-[32rem]" />

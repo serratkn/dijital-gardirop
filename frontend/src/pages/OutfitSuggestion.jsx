@@ -3,15 +3,26 @@ import PageHeader from '../components/ui/PageHeader'
 import FilterPills from '../components/ui/FilterPills'
 import Button from '../components/ui/Button'
 import ClothingCard from '../components/ClothingCard'
-import { CLOTHES, OUTFITS } from '../data/clothing'
+import { CLOTHES } from '../data/clothing'
 
 const OCCASIONS = ['Üniversite', 'İş', 'Akşam Yemeği', 'Buluşma', 'Spor', 'Özel Davet']
 const LOADING_DURATION = 900
+const OUTFIT_CATEGORIES = ['Üst', 'Alt', 'Ayakkabı', 'Çanta']
+
+const pickRandom = (list) => list[Math.floor(Math.random() * list.length)]
+
+const buildRandomOutfit = () =>
+  OUTFIT_CATEGORIES.map((category) =>
+    pickRandom(CLOTHES.filter((item) => item.category === category)),
+  ).filter(Boolean)
+
+const isSameOutfit = (a, b) =>
+  a.length === b.length && a.every((item, index) => item.id === b[index]?.id)
 
 function OutfitSuggestion() {
   const [selectedOccasion, setSelectedOccasion] = useState('')
   const [customText, setCustomText] = useState('')
-  const [suggestionIndex, setSuggestionIndex] = useState(0)
+  const [suggestionItems, setSuggestionItems] = useState([])
   const [isSaved, setIsSaved] = useState(false)
   const [isLoading, setIsLoading] = useState(false)
   const loadingTimeoutRef = useRef(null)
@@ -22,7 +33,7 @@ function OutfitSuggestion() {
 
   const selectOccasion = (occasion) => {
     setSelectedOccasion(occasion)
-    setSuggestionIndex(0)
+    setSuggestionItems(buildRandomOutfit())
     setIsSaved(false)
     setIsLoading(true)
 
@@ -39,13 +50,17 @@ function OutfitSuggestion() {
   }
 
   const showAnother = () => {
-    setSuggestionIndex((prev) => (prev + 1) % OUTFITS.length)
+    setSuggestionItems((prev) => {
+      let next = buildRandomOutfit()
+      let attempts = 0
+      while (attempts < 5 && isSameOutfit(next, prev)) {
+        next = buildRandomOutfit()
+        attempts += 1
+      }
+      return next
+    })
     setIsSaved(false)
   }
-
-  const suggestionItems = OUTFITS[suggestionIndex].itemIds
-    .map((id) => CLOTHES.find((item) => item.id === id))
-    .filter(Boolean)
 
   return (
     <div className="min-h-screen bg-ivory">

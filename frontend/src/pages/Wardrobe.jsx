@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
-import { Plus } from 'lucide-react'
+import { useSearchParams } from 'react-router-dom'
+import { Plus, Search } from 'lucide-react'
 import { CATEGORIES, CLOTHES } from '../data/clothing'
 import { CATEGORY_ICONS } from '../lib/categoryIcons'
 import ClothingCard from '../components/ClothingCard'
@@ -25,8 +26,13 @@ const DEV_FORCE_EMPTY = false
 const DEV_FORCE_EMPTY_CATEGORY = null
 
 function Wardrobe() {
-  const [activeCategory, setActiveCategory] = useState(ALL)
+  const [searchParams] = useSearchParams()
+  const [activeCategory, setActiveCategory] = useState(() => {
+    const requested = searchParams.get('kategori')
+    return CATEGORIES.includes(requested) ? requested : ALL
+  })
   const [isAddModalOpen, setIsAddModalOpen] = useState(false)
+  const [searchQuery, setSearchQuery] = useState('')
   const [isLoading, setIsLoading] = useState(true)
   const loadingTimeoutRef = useRef(null)
 
@@ -39,12 +45,17 @@ function Wardrobe() {
 
   const isEmpty = DEV_FORCE_EMPTY || CLOTHES.length === 0
 
-  const items =
+  const categoryItems =
     activeCategory === DEV_FORCE_EMPTY_CATEGORY
       ? []
       : activeCategory === ALL
         ? CLOTHES
         : CLOTHES.filter((item) => item.category === activeCategory)
+
+  const trimmedQuery = searchQuery.trim().toLowerCase()
+  const items = trimmedQuery
+    ? categoryItems.filter((item) => item.name.toLowerCase().includes(trimmedQuery))
+    : categoryItems
 
   return (
     <div className="min-h-screen bg-ivory">
@@ -66,7 +77,24 @@ function Wardrobe() {
               onAction={() => setIsAddModalOpen(true)}
             />
 
-            <div className="mt-10">
+            <div className="mt-10 max-w-xs">
+              <div className="relative">
+                <Search
+                  size={16}
+                  strokeWidth={1.75}
+                  className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-ink/40"
+                />
+                <input
+                  type="text"
+                  value={searchQuery}
+                  onChange={(event) => setSearchQuery(event.target.value)}
+                  placeholder="Kıyafet ara..."
+                  className="w-full rounded-full border border-ink/15 bg-white py-2.5 pl-10 pr-4 text-sm text-ink placeholder:text-ink/40 focus:border-dusty-rose focus:outline-none"
+                />
+              </div>
+            </div>
+
+            <div className="mt-4">
               <FilterPills
                 options={[ALL, ...CATEGORIES]}
                 active={activeCategory}
@@ -78,15 +106,21 @@ function Wardrobe() {
 
             {items.length === 0 ? (
               <div className="flex flex-col items-center justify-center gap-3 py-24 text-center">
-                <p className="text-sm text-ink/50">Bu kategoride henüz parça yok.</p>
-                <Button
-                  variant="primary"
-                  onClick={() => setIsAddModalOpen(true)}
-                  className="mt-1 inline-flex items-center gap-1.5"
-                >
-                  <Plus size={16} strokeWidth={1.75} />
-                  Parça Ekle
-                </Button>
+                <p className="text-sm text-ink/50">
+                  {trimmedQuery
+                    ? 'Aramanızla eşleşen bir parça bulunamadı.'
+                    : 'Bu kategoride henüz parça yok.'}
+                </p>
+                {!trimmedQuery && (
+                  <Button
+                    variant="primary"
+                    onClick={() => setIsAddModalOpen(true)}
+                    className="mt-1 inline-flex items-center gap-1.5"
+                  >
+                    <Plus size={16} strokeWidth={1.75} />
+                    Parça Ekle
+                  </Button>
+                )}
               </div>
             ) : isLoading ? (
               <div className="mt-12 columns-2 gap-6 sm:columns-3 lg:columns-4">
