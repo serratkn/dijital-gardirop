@@ -21,10 +21,7 @@ export const CLOTHES = [
   { id: 7, name: 'Mango Pileli Midi Etek', category: 'Alt', color: 'Siyah', imgHeight: HEIGHTS[6] },
   { id: 8, name: 'H&M Jogger Eşofman Altı', category: 'Alt', color: 'Gri', imgHeight: HEIGHTS[7] },
 
-  { id: 9, name: 'Zara Uzun Saten Elbise', category: 'Elbise', color: 'Bordo', imgHeight: HEIGHTS[8] },
-  { id: 10, name: 'H&M Volanlı Mini Elbise', category: 'Elbise', color: 'Pudra', imgHeight: HEIGHTS[9] },
-  { id: 11, name: 'Mango Keten Midi Elbise', category: 'Elbise', color: 'Bej', imgHeight: HEIGHTS[10] },
-  { id: 12, name: 'Bershka Askılı Yazlık Elbise', category: 'Elbise', color: 'Beyaz', imgHeight: HEIGHTS[11] },
+  // Elbise kategorisi geçici olarak boş bırakıldı (boş kategori durumunu test etmek için).
 
   { id: 13, name: 'Nike Air Force 1 Beyaz Sneaker', category: 'Ayakkabı', color: 'Beyaz', imgHeight: HEIGHTS[12] },
   { id: 14, name: 'Zara Topuklu Rugan Ayakkabı', category: 'Ayakkabı', color: 'Siyah', imgHeight: HEIGHTS[13] },

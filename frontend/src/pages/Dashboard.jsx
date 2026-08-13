@@ -5,7 +5,7 @@ import QuickActionCard from '../components/ui/QuickActionCard'
 import ClothingCard from '../components/ClothingCard'
 import { CLOTHES } from '../data/clothing'
 
-const RECENT_IDS = [1, 9, 13, 17]
+const RECENT_IDS = [1, 5, 13, 17]
 const recentItems = CLOTHES.filter((item) => RECENT_IDS.includes(item.id))
 
 // Kullanıcı sistemi kurulduğunda giriş yapan kişinin adı buraya gelecek.

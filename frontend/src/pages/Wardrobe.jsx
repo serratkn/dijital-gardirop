@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { Plus } from 'lucide-react'
 import { CATEGORIES, CLOTHES } from '../data/clothing'
 import { CATEGORY_ICONS } from '../lib/categoryIcons'
 import ClothingCard from '../components/ClothingCard'
@@ -6,6 +7,7 @@ import QuickAddModal from '../components/QuickAddModal'
 import PageHeader from '../components/ui/PageHeader'
 import FilterPills from '../components/ui/FilterPills'
 import EmptyState from '../components/ui/EmptyState'
+import Button from '../components/ui/Button'
 
 const ALL = 'Tümü'
 
@@ -15,8 +17,10 @@ const CATEGORY_COUNTS = [ALL, ...CATEGORIES].reduce((acc, category) => {
   return acc
 }, {})
 
-// Test amaçlı: empty state tasarımını görmek için true yapın.
+// Test amaçlı: gardırobun tamamını boş göstermek için true yapın.
 const DEV_FORCE_EMPTY = false
+// Test amaçlı: belirli bir kategoriyi boş göstermek için kategori adını yazın (örn. 'Elbise'), kapatmak için null yapın.
+const DEV_FORCE_EMPTY_CATEGORY = null
 
 function Wardrobe() {
   const [activeCategory, setActiveCategory] = useState(ALL)
@@ -25,9 +29,11 @@ function Wardrobe() {
   const isEmpty = DEV_FORCE_EMPTY || CLOTHES.length === 0
 
   const items =
-    activeCategory === ALL
-      ? CLOTHES
-      : CLOTHES.filter((item) => item.category === activeCategory)
+    activeCategory === DEV_FORCE_EMPTY_CATEGORY
+      ? []
+      : activeCategory === ALL
+        ? CLOTHES
+        : CLOTHES.filter((item) => item.category === activeCategory)
 
   return (
     <div className="min-h-screen bg-ivory">
@@ -59,11 +65,25 @@ function Wardrobe() {
               />
             </div>
 
-            <div className="mt-12 columns-2 gap-6 sm:columns-3 lg:columns-4">
-              {items.map((item) => (
-                <ClothingCard key={item.id} item={item} />
-              ))}
-            </div>
+            {items.length === 0 ? (
+              <div className="flex flex-col items-center justify-center gap-3 py-24 text-center">
+                <p className="text-sm text-ink/50">Bu kategoride henüz parça yok.</p>
+                <Button
+                  variant="primary"
+                  onClick={() => setIsAddModalOpen(true)}
+                  className="mt-1 inline-flex items-center gap-1.5"
+                >
+                  <Plus size={16} strokeWidth={1.75} />
+                  Parça Ekle
+                </Button>
+              </div>
+            ) : (
+              <div className="mt-12 columns-2 gap-6 sm:columns-3 lg:columns-4">
+                {items.map((item) => (
+                  <ClothingCard key={item.id} item={item} />
+                ))}
+              </div>
+            )}
           </>
         )}
       </div>
