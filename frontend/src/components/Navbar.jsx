@@ -1,3 +1,4 @@
+import { useEffect, useState } from 'react'
 import { NavLink } from 'react-router-dom'
 
 const links = [
@@ -7,8 +8,21 @@ const links = [
 ]
 
 function Navbar() {
+  const [isScrolled, setIsScrolled] = useState(false)
+
+  useEffect(() => {
+    const handleScroll = () => setIsScrolled(window.scrollY > 8)
+    handleScroll()
+    window.addEventListener('scroll', handleScroll, { passive: true })
+    return () => window.removeEventListener('scroll', handleScroll)
+  }, [])
+
   return (
-    <nav className="border-b border-ink/10 bg-ivory">
+    <nav
+      className={`sticky top-0 z-40 border-b bg-ivory transition-shadow duration-200 ${
+        isScrolled ? 'border-ink/10 shadow-[0_1px_3px_rgba(28,26,23,0.06)]' : 'border-transparent'
+      }`}
+    >
       <div className="mx-auto flex h-16 max-w-6xl items-center justify-between px-4">
         <span className="font-display text-lg text-ink">Dijital Gardırop</span>
         <ul className="flex items-center gap-8">
