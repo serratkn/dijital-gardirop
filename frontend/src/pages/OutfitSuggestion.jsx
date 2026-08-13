@@ -3,16 +3,9 @@ import PageHeader from '../components/ui/PageHeader'
 import FilterPills from '../components/ui/FilterPills'
 import Button from '../components/ui/Button'
 import ClothingCard from '../components/ClothingCard'
-import { CLOTHES } from '../data/clothing'
+import { CLOTHES, OUTFITS } from '../data/clothing'
 
 const OCCASIONS = ['Üniversite', 'İş', 'Akşam Yemeği', 'Buluşma', 'Spor', 'Özel Davet']
-
-// Üst + Alt + Ayakkabı + Çanta kombinasyonları (mock veri, mevcut gardırop öğelerinden).
-const OUTFIT_SUGGESTIONS = [
-  [1, 5, 13, 17],
-  [3, 6, 15, 18],
-  [4, 7, 16, 19],
-]
 
 function OutfitSuggestion() {
   const [selectedOccasion, setSelectedOccasion] = useState('')
@@ -33,11 +26,11 @@ function OutfitSuggestion() {
   }
 
   const showAnother = () => {
-    setSuggestionIndex((prev) => (prev + 1) % OUTFIT_SUGGESTIONS.length)
+    setSuggestionIndex((prev) => (prev + 1) % OUTFITS.length)
     setIsSaved(false)
   }
 
-  const suggestionItems = OUTFIT_SUGGESTIONS[suggestionIndex]
+  const suggestionItems = OUTFITS[suggestionIndex].itemIds
     .map((id) => CLOTHES.find((item) => item.id === id))
     .filter(Boolean)
 
