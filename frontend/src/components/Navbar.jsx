@@ -18,12 +18,19 @@ function Navbar() {
                 to={link.to}
                 end={link.to === '/'}
                 className={({ isActive }) =>
-                  `text-sm font-medium transition-colors ${
+                  `relative inline-block pb-1.5 text-sm font-medium transition-colors ${
                     isActive ? 'text-ink' : 'text-ink/50 hover:text-ink'
                   }`
                 }
               >
-                {link.label}
+                {({ isActive }) => (
+                  <>
+                    {link.label}
+                    {isActive && (
+                      <span className="absolute inset-x-0 -bottom-0.5 h-px bg-burgundy" />
+                    )}
+                  </>
+                )}
               </NavLink>
             </li>
           ))}
