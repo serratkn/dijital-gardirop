@@ -7,6 +7,7 @@ const HEIGHTS = [
   'h-44', 'h-72', 'h-52', 'h-64', 'h-48',
   'h-60', 'h-40', 'h-68', 'h-56', 'h-44',
   'h-52', 'h-68', 'h-44', 'h-60',
+  'h-56', 'h-72',
 ]
 
 export const CLOTHES = [
@@ -35,8 +36,10 @@ export const CLOTHES = [
   { id: 19, name: 'Bershka Crossbody Çanta', category: 'Çanta', imgHeight: HEIGHTS[18] },
   { id: 20, name: 'Pull&Bear Askılı Mini Çanta', category: 'Çanta', imgHeight: HEIGHTS[19] },
 
-  { id: 21, name: 'MAC Ruby Woo Mat Ruj', category: 'Makyaj', imgHeight: HEIGHTS[20] },
+  { id: 21, name: 'MAC Ruby Woo Ruj', category: 'Makyaj', imgHeight: HEIGHTS[20] },
   { id: 22, name: 'Maybelline Fit Me Fondöten', category: 'Makyaj', imgHeight: HEIGHTS[21] },
   { id: 23, name: 'Rimmel Scandaleyes Maskara', category: 'Makyaj', imgHeight: HEIGHTS[22] },
   { id: 24, name: 'NYX Allık Paleti', category: 'Makyaj', imgHeight: HEIGHTS[23] },
+  { id: 25, name: 'Rare Beauty Soft Pinch Allık', category: 'Makyaj', imgHeight: HEIGHTS[24] },
+  { id: 26, name: 'Charlotte Tilbury Pillow Talk Far Paleti', category: 'Makyaj', imgHeight: HEIGHTS[25] },
 ]
