@@ -1,8 +1,9 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Plus } from 'lucide-react'
 import { CATEGORIES, CLOTHES } from '../data/clothing'
 import { CATEGORY_ICONS } from '../lib/categoryIcons'
 import ClothingCard from '../components/ClothingCard'
+import SkeletonCard from '../components/SkeletonCard'
 import QuickAddModal from '../components/QuickAddModal'
 import PageHeader from '../components/ui/PageHeader'
 import FilterPills from '../components/ui/FilterPills'
@@ -10,6 +11,7 @@ import EmptyState from '../components/ui/EmptyState'
 import Button from '../components/ui/Button'
 
 const ALL = 'Tümü'
+const LOADING_DURATION = 550
 
 const CATEGORY_COUNTS = [ALL, ...CATEGORIES].reduce((acc, category) => {
   acc[category] =
@@ -25,6 +27,15 @@ const DEV_FORCE_EMPTY_CATEGORY = null
 function Wardrobe() {
   const [activeCategory, setActiveCategory] = useState(ALL)
   const [isAddModalOpen, setIsAddModalOpen] = useState(false)
+  const [isLoading, setIsLoading] = useState(true)
+  const loadingTimeoutRef = useRef(null)
+
+  useEffect(() => {
+    setIsLoading(true)
+    clearTimeout(loadingTimeoutRef.current)
+    loadingTimeoutRef.current = setTimeout(() => setIsLoading(false), LOADING_DURATION)
+    return () => clearTimeout(loadingTimeoutRef.current)
+  }, [activeCategory])
 
   const isEmpty = DEV_FORCE_EMPTY || CLOTHES.length === 0
 
@@ -77,8 +88,14 @@ function Wardrobe() {
                   Parça Ekle
                 </Button>
               </div>
-            ) : (
+            ) : isLoading ? (
               <div className="mt-12 columns-2 gap-6 sm:columns-3 lg:columns-4">
+                {items.map((item) => (
+                  <SkeletonCard key={item.id} imgHeight={item.imgHeight} />
+                ))}
+              </div>
+            ) : (
+              <div className="mt-12 columns-2 gap-6 sm:columns-3 lg:columns-4 animate-fade-in">
                 {items.map((item) => (
                   <ClothingCard key={item.id} item={item} />
                 ))}
