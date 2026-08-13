@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import PageHeader from '../components/ui/PageHeader'
 import FilterPills from '../components/ui/FilterPills'
 import Button from '../components/ui/Button'
@@ -6,17 +6,30 @@ import ClothingCard from '../components/ClothingCard'
 import { CLOTHES, OUTFITS } from '../data/clothing'
 
 const OCCASIONS = ['Üniversite', 'İş', 'Akşam Yemeği', 'Buluşma', 'Spor', 'Özel Davet']
+const LOADING_DURATION = 900
 
 function OutfitSuggestion() {
   const [selectedOccasion, setSelectedOccasion] = useState('')
   const [customText, setCustomText] = useState('')
   const [suggestionIndex, setSuggestionIndex] = useState(0)
   const [isSaved, setIsSaved] = useState(false)
+  const [isLoading, setIsLoading] = useState(false)
+  const loadingTimeoutRef = useRef(null)
+
+  useEffect(() => {
+    return () => clearTimeout(loadingTimeoutRef.current)
+  }, [])
 
   const selectOccasion = (occasion) => {
     setSelectedOccasion(occasion)
     setSuggestionIndex(0)
     setIsSaved(false)
+    setIsLoading(true)
+
+    clearTimeout(loadingTimeoutRef.current)
+    loadingTimeoutRef.current = setTimeout(() => {
+      setIsLoading(false)
+    }, LOADING_DURATION)
   }
 
   const handleCustomSubmit = (event) => {
@@ -78,20 +91,29 @@ function OutfitSuggestion() {
             <h2 className="mt-2 font-display text-2xl italic text-ink">Senin İçin Önerimiz</h2>
             <p className="mt-2 text-sm text-ink/50">{selectedOccasion} için seçtiklerimiz</p>
 
-            <div className="mt-6 grid grid-cols-2 gap-6 sm:grid-cols-4">
-              {suggestionItems.map((item) => (
-                <ClothingCard key={item.id} item={item} />
-              ))}
-            </div>
+            {isLoading ? (
+              <div className="flex flex-col items-center justify-center gap-4 py-16">
+                <span className="h-8 w-8 animate-spin rounded-full border-2 border-burgundy/25 border-t-burgundy" />
+                <p className="text-sm text-ink/50">Kombinin hazırlanıyor...</p>
+              </div>
+            ) : (
+              <div className="animate-fade-in">
+                <div className="mt-6 grid grid-cols-2 gap-6 sm:grid-cols-4">
+                  {suggestionItems.map((item) => (
+                    <ClothingCard key={item.id} item={item} />
+                  ))}
+                </div>
 
-            <div className="mt-8 flex flex-wrap gap-3">
-              <Button variant="outline" onClick={showAnother}>
-                Başka Öneri Göster
-              </Button>
-              <Button variant="rose" onClick={() => setIsSaved((prev) => !prev)}>
-                {isSaved ? 'Kaydedildi' : 'Bu Kombini Kaydet'}
-              </Button>
-            </div>
+                <div className="mt-8 flex flex-wrap gap-3">
+                  <Button variant="outline" onClick={showAnother}>
+                    Başka Öneri Göster
+                  </Button>
+                  <Button variant="rose" onClick={() => setIsSaved((prev) => !prev)}>
+                    {isSaved ? 'Kaydedildi' : 'Bu Kombini Kaydet'}
+                  </Button>
+                </div>
+              </div>
+            )}
           </section>
         )}
       </div>

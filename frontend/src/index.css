@@ -11,4 +11,17 @@
   --color-warm-gray: #e8e3db;
   --color-dusty-rose: #c9a0a0;
   --color-burgundy: #7a3b3b;
+
+  --animate-fade-in: fade-in 0.5s ease-out both;
+}
+
+@keyframes fade-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
