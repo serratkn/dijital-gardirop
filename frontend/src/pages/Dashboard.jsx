@@ -5,14 +5,13 @@ import StatCard from '../components/ui/StatCard'
 import QuickActionCard from '../components/ui/QuickActionCard'
 import ClothingCard from '../components/ClothingCard'
 import { CLOTHES } from '../data/clothing'
+import { getUserName } from '../lib/onboarding'
 
 const RECENT_IDS = [1, 5, 13, 17]
 const recentItems = CLOTHES.filter((item) => RECENT_IDS.includes(item.id))
 
-// Kullanıcı sistemi kurulduğunda giriş yapan kişinin adı buraya gelecek.
-const currentUserName = null
-
 function Dashboard() {
+  const currentUserName = getUserName()
   const greeting = currentUserName ? `Hoş Geldin, ${currentUserName}` : 'Hoş Geldin'
 
   return (
