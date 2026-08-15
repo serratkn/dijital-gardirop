@@ -6,6 +6,7 @@ const links = [
   { to: '/', label: 'Ana Sayfa' },
   { to: '/gardirop', label: 'Gardırop' },
   { to: '/kombin-oner', label: 'Kombin Öner' },
+  { to: '/profil', label: 'Profil' },
 ]
 
 function Navbar({ onReplayOnboarding }) {
@@ -26,7 +27,7 @@ function Navbar({ onReplayOnboarding }) {
     >
       <div className="mx-auto flex h-16 max-w-6xl items-center justify-between px-4">
         <span className="font-display text-lg text-ink">Dijital Gardırop</span>
-        <ul className="flex items-center gap-8">
+        <ul className="hidden items-center gap-8 sm:flex">
           {links.map((link) => (
             <li key={link.to}>
               <NavLink

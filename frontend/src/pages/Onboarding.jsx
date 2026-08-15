@@ -3,7 +3,7 @@ import { Square, Crown, Sparkles, Heart } from 'lucide-react'
 import RegistrationStep from '../components/onboarding/RegistrationStep'
 import QuizStep from '../components/onboarding/QuizStep'
 import WelcomeStep from '../components/onboarding/WelcomeStep'
-import { setUserName } from '../lib/onboarding'
+import { setUserProfile } from '../lib/onboarding'
 
 const QUESTIONS = [
   {
@@ -91,7 +91,11 @@ function Onboarding({ onFinish }) {
         <WelcomeStep
           name={formData.name.trim()}
           onFinish={() => {
-            setUserName(formData.name.trim())
+            setUserProfile({
+              name: formData.name.trim(),
+              email: formData.email.trim(),
+              age: formData.age,
+            })
             onFinish()
           }}
         />
