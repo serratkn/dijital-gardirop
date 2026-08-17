@@ -1,5 +1,8 @@
-class HealthController {
+const BaseController = require('./BaseController')
+
+class HealthController extends BaseController {
   constructor(healthService) {
+    super()
     this.healthService = healthService
   }
 
