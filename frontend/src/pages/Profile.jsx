@@ -1,22 +1,36 @@
+import { Link } from 'react-router-dom'
 import { UserCog, KeyRound, Crown, Palette, Bell, HelpCircle, ChevronRight, LogOut } from 'lucide-react'
 import Button from '../components/ui/Button'
 import { getUserProfile } from '../lib/onboarding'
 
-function ProfileListItem({ icon: Icon, label, onClick }) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className="flex w-full items-center gap-4 px-5 py-4 text-left transition-colors hover:bg-warm-gray/50"
-    >
+const listItemClass =
+  'flex w-full items-center gap-4 px-5 py-4 text-left transition-colors hover:bg-warm-gray/50'
+
+function ProfileListItem({ icon: Icon, label, to, onClick }) {
+  const content = (
+    <>
       <Icon size={18} strokeWidth={1.5} className="text-ink/40" />
       <span className="flex-1 text-sm font-medium text-ink">{label}</span>
       <ChevronRight size={16} strokeWidth={1.75} className="text-ink/25" />
+    </>
+  )
+
+  if (to) {
+    return (
+      <Link to={to} className={listItemClass}>
+        {content}
+      </Link>
+    )
+  }
+
+  return (
+    <button type="button" onClick={onClick} className={listItemClass}>
+      {content}
     </button>
   )
 }
 
-function Profile({ onReplayOnboarding }) {
+function Profile() {
   const { name, email } = getUserProfile()
   const initial = name ? name.trim().charAt(0).toUpperCase() : '?'
 
@@ -37,8 +51,8 @@ function Profile({ onReplayOnboarding }) {
 
         <div className="mt-12 space-y-6">
           <div className="overflow-hidden rounded-2xl border border-ink/10 bg-white divide-y divide-ink/10">
-            <ProfileListItem icon={UserCog} label="Hesap Bilgilerim" />
-            <ProfileListItem icon={KeyRound} label="Şifre Değiştir" />
+            <ProfileListItem icon={UserCog} label="Hesap Bilgilerim" to="/profil/hesap-bilgilerim" />
+            <ProfileListItem icon={KeyRound} label="Şifre Değiştir" to="/profil/sifre-degistir" />
           </div>
 
           <div className="rounded-2xl border border-dusty-rose/40 bg-dusty-rose/10 p-6">
@@ -57,9 +71,9 @@ function Profile({ onReplayOnboarding }) {
           </div>
 
           <div className="overflow-hidden rounded-2xl border border-ink/10 bg-white divide-y divide-ink/10">
-            <ProfileListItem icon={Palette} label="Tarz Tercihlerim" onClick={onReplayOnboarding} />
-            <ProfileListItem icon={Bell} label="Bildirimler" />
-            <ProfileListItem icon={HelpCircle} label="Yardım & Destek" />
+            <ProfileListItem icon={Palette} label="Tarz Tercihlerim" to="/profil/tarz-tercihlerim" />
+            <ProfileListItem icon={Bell} label="Bildirimler" to="/profil/bildirimler" />
+            <ProfileListItem icon={HelpCircle} label="Yardım & Destek" to="/profil/yardim-destek" />
           </div>
         </div>
 

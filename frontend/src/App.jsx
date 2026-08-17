@@ -9,6 +9,10 @@ import Wardrobe from './pages/Wardrobe'
 import OutfitSuggestion from './pages/OutfitSuggestion'
 import ClothingDetail from './pages/ClothingDetail'
 import Profile from './pages/Profile'
+import AccountInfo from './pages/AccountInfo'
+import ChangePassword from './pages/ChangePassword'
+import StylePreferences from './pages/StylePreferences'
+import ComingSoon from './pages/ComingSoon'
 import { isOnboardingCompleted, setOnboardingCompleted } from './lib/onboarding'
 
 function App() {
@@ -35,7 +39,12 @@ function App() {
           <Route path="/gardirop" element={<Wardrobe />} />
           <Route path="/kombin-oner" element={<OutfitSuggestion />} />
           <Route path="/kiyafet/:id" element={<ClothingDetail />} />
-          <Route path="/profil" element={<Profile onReplayOnboarding={() => setShowOnboarding(true)} />} />
+          <Route path="/profil" element={<Profile />} />
+          <Route path="/profil/hesap-bilgilerim" element={<AccountInfo />} />
+          <Route path="/profil/sifre-degistir" element={<ChangePassword />} />
+          <Route path="/profil/tarz-tercihlerim" element={<StylePreferences />} />
+          <Route path="/profil/bildirimler" element={<ComingSoon title="Bildirimler" />} />
+          <Route path="/profil/yardim-destek" element={<ComingSoon title="Yardım & Destek" />} />
         </Routes>
       </div>
       <ScrollToTopButton />
