@@ -4,7 +4,7 @@ import FilterPills from '../components/ui/FilterPills'
 import EmptyState from '../components/ui/EmptyState'
 import Button from '../components/ui/Button'
 import ClothingCard from '../components/ClothingCard'
-import { CURRENT_USER_ID, createOutfit, fetchCategories, fetchClothingItems } from '../lib/api'
+import { getCurrentUserId, createOutfit, fetchCategories, fetchClothingItems } from '../lib/api'
 import { toCategoryNameMap, toClothingItems } from '../lib/transformers'
 
 const OCCASIONS = ['Üniversite', 'İş', 'Akşam Yemeği', 'Buluşma', 'Spor', 'Özel Davet']
@@ -52,7 +52,7 @@ function OutfitSuggestion() {
         // category_id taşır, seçim ise kategori adına göre yapılır.
         const [categoryRows, itemRows] = await Promise.all([
           fetchCategories(),
-          fetchClothingItems(CURRENT_USER_ID),
+          fetchClothingItems(getCurrentUserId()),
         ])
 
         if (isStale) return
@@ -111,7 +111,7 @@ function OutfitSuggestion() {
 
     try {
       await createOutfit({
-        userId: CURRENT_USER_ID,
+        userId: getCurrentUserId(),
         occasion: selectedOccasion,
         clothingItemIds: suggestionItems.map((item) => item.id),
       })

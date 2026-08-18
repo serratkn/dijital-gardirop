@@ -7,7 +7,7 @@ import QuickActionCard from '../components/ui/QuickActionCard'
 import ClothingCard from '../components/ClothingCard'
 import SkeletonCard from '../components/SkeletonCard'
 import { getUserProfile } from '../lib/onboarding'
-import { CURRENT_USER_ID, fetchCategories, fetchClothingItems, fetchOutfits } from '../lib/api'
+import { getCurrentUserId, fetchCategories, fetchClothingItems, fetchOutfits } from '../lib/api'
 import { toCategoryNameMap, toClothingItems } from '../lib/transformers'
 
 const RECENT_COUNT = 4
@@ -43,8 +43,8 @@ function Dashboard() {
         // parçalar yalnızca category_id taşır, ikon eşlemesi ada göre yapılır.
         const [categoryRows, itemRows, outfitRows] = await Promise.all([
           fetchCategories(),
-          fetchClothingItems(CURRENT_USER_ID),
-          fetchOutfits(CURRENT_USER_ID),
+          fetchClothingItems(getCurrentUserId()),
+          fetchOutfits(getCurrentUserId()),
         ])
 
         if (isStale) return

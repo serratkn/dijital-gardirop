@@ -44,3 +44,43 @@ export function toClothingItem(row, categoryNames) {
 export function toClothingItems(rows, categoryNames) {
   return rows.map((row) => toClothingItem(row, categoryNames))
 }
+
+// Anket soru anahtarı (styleQuestions.js) ↔ style_preferences kolonu eşlemesi.
+const STYLE_ANSWER_TO_FIELD = {
+  style: 'dailyStyle',
+  colors: 'colorPreference',
+  priority: 'priority',
+  icon: 'styleIcon',
+  frequency: 'frequency',
+}
+
+// { style: '...', colors: '...' } → { dailyStyle: '...', colorPreference: '...' }
+export function toStylePreferencePayload(answers) {
+  const payload = {}
+  for (const [answerKey, field] of Object.entries(STYLE_ANSWER_TO_FIELD)) {
+    payload[field] = answers[answerKey] ?? null
+  }
+  return payload
+}
+
+// API satırı (snake_case) → anket cevap nesnesi
+export function toStyleAnswers(row) {
+  if (!row) return {}
+  return {
+    style: row.daily_style ?? undefined,
+    colors: row.color_preference ?? undefined,
+    priority: row.priority ?? undefined,
+    icon: row.style_icon ?? undefined,
+    frequency: row.frequency ?? undefined,
+  }
+}
+
+export function toUserProfile(row) {
+  return {
+    id: row.id,
+    name: row.name ?? '',
+    email: row.email ?? '',
+    age: row.age === null || row.age === undefined ? '' : String(row.age),
+    subscriptionTier: row.subscription_tier ?? 'free',
+  }
+}

@@ -1,8 +1,19 @@
 const STORAGE_KEY = 'dg_onboarding_completed'
+const USER_ID_STORAGE_KEY = 'dg_user_id'
 const NAME_STORAGE_KEY = 'dg_user_name'
 const EMAIL_STORAGE_KEY = 'dg_user_email'
 const AGE_STORAGE_KEY = 'dg_user_age'
 const STYLE_ANSWERS_STORAGE_KEY = 'dg_style_answers'
+
+// Kimlik doğrulama gelene kadarki geçici çözüm: onboarding'de oluşturulan
+// gerçek kullanıcının id'si burada tutulur ve tüm API çağrılarında kullanılır.
+export function getUserId() {
+  return localStorage.getItem(USER_ID_STORAGE_KEY) || ''
+}
+
+export function setUserId(userId) {
+  localStorage.setItem(USER_ID_STORAGE_KEY, userId || '')
+}
 
 export function isOnboardingCompleted() {
   return localStorage.getItem(STORAGE_KEY) === 'true'

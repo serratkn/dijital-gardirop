@@ -1,6 +1,6 @@
 import Button from '../ui/Button'
 
-function WelcomeStep({ name, onFinish }) {
+function WelcomeStep({ name, onFinish, isSaving, errorMessage, onEditDetails }) {
   return (
     <div className="mx-auto w-full max-w-md animate-fade-in text-center">
       <span className="mx-auto block h-px w-16 bg-dusty-rose" />
@@ -9,9 +9,28 @@ function WelcomeStep({ name, onFinish }) {
       </h1>
       <p className="mt-4 text-sm text-ink/60">Tarzına uygun kombinler hazırlamaya hazırız.</p>
 
-      <Button variant="primary" size="lg" onClick={onFinish} className="mt-10 w-full">
-        Gardırobuma Git
+      <Button
+        variant="primary"
+        size="lg"
+        onClick={onFinish}
+        disabled={isSaving}
+        className="mt-10 w-full"
+      >
+        {isSaving ? 'Kaydediliyor...' : 'Gardırobuma Git'}
       </Button>
+
+      {errorMessage && (
+        <div className="mt-5">
+          <p className="text-sm text-burgundy">{errorMessage}</p>
+          <button
+            type="button"
+            onClick={onEditDetails}
+            className="mt-2 text-sm text-ink/50 underline transition-colors hover:text-dusty-rose"
+          >
+            Bilgilerimi düzenle
+          </button>
+        </div>
+      )}
     </div>
   )
 }

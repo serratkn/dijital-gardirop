@@ -226,25 +226,30 @@ olduğu için iskelet oraya taşındı, kombin üretimi istemci tarafında anlı
 
 ### Çalışanlar
 
-- **Gardırop** — gerçek API; kategori filtresi, arama, skeleton, boş/hata durumları
-- **Ana Sayfa** — gerçek istatistikler ve son eklenen 4 parça
-- **Kombin Öner** — gerçek gardıroptan kombin üretimi ve **kalıcı kaydetme**
-- **Kıyafet Detay** — gerçek API (UUID ile)
-- **Backend** — 6 kaynak için tam CRUD, transaction'lı kombin yazımı, tipli hata yönetimi
-- **Onboarding / Profil ekranları** — çalışır durumda (localStorage ile)
+**Uygulamanın tamamı gerçek API üzerinde çalışır; mock veri kalmamıştır.**
+
+- **Gardırop** — listeleme, kategori filtresi, arama, parça ekleme (QuickAddModal), favori
+- **Ana Sayfa** — gerçek istatistikler (parça/kombin/favori) ve son eklenen 4 parça
+- **Kombin Öner** — gerçek gardıroptan kombin üretimi ve kalıcı kaydetme
+- **Kombinlerim** — kayıtlı kombinler; parçaları, tarihi, favori ve silme işlemleriyle
+- **Kıyafet Detay** — görüntüleme, favori, onaylı silme
+- **Onboarding** — kullanıcıyı `POST /api/users` ile oluşturur, tarz anketini
+  `PUT /api/style-preferences` ile kaydeder; e-posta çakışmasında (409) anlamlı mesaj gösterir
+- **Profil > Hesap Bilgilerim / Tarz Tercihlerim** — veritabanından okur ve günceller
+- **Backend** — 6 kaynak için tam CRUD, transaction'lı kombin yazımı, tipli hata yönetimi,
+  alan uzunluğu ve foreign key doğrulamaları
 
 ### Eksikler ve bilinen sınırlamalar
 
 | Konu | Durum |
 |---|---|
-| **Kimlik doğrulama yok** | `api.js` içinde sabit `CURRENT_USER_ID` kullanılır. Oturum sistemi geldiğinde kaldırılacak. |
-| **Onboarding verisi backend'e gitmiyor** | Kayıt ekranı ve tarz anketi yalnızca localStorage'a yazar; `POST /api/users` ve `PUT /api/style-preferences` uçları hazır ama kullanılmıyor. |
-| **Profil ekranları localStorage'da** | `AccountInfo`, `StylePreferences` localStorage okur/yazar; `Bildirimler` ve `Yardım & Destek` "yakında" sayfasıdır. |
+| **Kimlik doğrulama yok** | Parola alanı, oturum, token yok. Onboarding'de oluşturulan kullanıcının id'si localStorage'da (`dg_user_id`) tutulur ve `getCurrentUserId()` bunu okur — bu geçici bir çözümdür, `ChangePassword` sayfası da hâlâ mock'tur. |
 | **Fotoğraf yükleme yok** | `image_url` kolonu var ama dosya yükleme akışı yok; tüm kartlar `warm-gray` placeholder gösterir. QuickAddModal'daki "Fotoğraf Yükle" butonu bilinçli olarak devre dışıdır. |
-| **Kombin listeleme ekranı yok** | Kombinler kaydedilebiliyor ama kayıtlı kombinleri gösteren bir sayfa yok (Ana Sayfa'daki "Hızlı Kombin Öner" kartları hâlâ statik metin). |
 | **Kıyafet düzenleme yok** | `PUT /api/clothing-items/:id` ucu hazır ama arayüzde düzenleme akışı yok. |
-| **Kombin favori/giyildi** | `PATCH /outfits/:id/favorite` ve `.../worn` uçları hazır ama arayüzde kullanılmıyor. |
-| **Test altyapısı yok** | Test framework'ü yoktur. Doğrulama: `npm run lint` + elle deneme + `backend/test-scripts/`. |
+| **Kombin "giyildi" sayacı** | `PATCH /outfits/:id/worn` ucu hazır; Kombinlerim sayfası `times_worn` değerini gösterir ama artırma butonu yoktur. |
+| **Bildirimler / Yardım & Destek** | "Yakında" sayfalarıdır, işlevleri yoktur. |
+| **Ana Sayfa hızlı kombin kartları** | "Üniversite Kombini" / "Akşam Yemeği Kombini" kartları statik metindir, gerçek kombinlere bağlı değildir (bilinçli tercih). |
+| **Test altyapısı yok** | Test framework'ü yoktur. Doğrulama: `npm run lint` + `backend/test-scripts/` + elle deneme. |
 | **Onboarding sıfırlama butonu** | `Navbar`'daki düşük kontrastlı `RotateCcw` butonu geçicidir, yayına çıkmadan kaldırılmalıdır. |
 
 ---
@@ -473,13 +478,25 @@ docker exec dijitalgardirop-db-1 psql -U postgres -d dijital_gardirop \
 
 ```bash
 cd backend
-node test-scripts/test-clothing-items.js             # POST + snake_case + GET doğrulaması
+
+# Tüm uçları uçtan uca doğrular (77 kontrol); kendi verisini oluşturup siler.
+node test-scripts/test-all-endpoints.js
+
+# Tek uca odaklı: POST + snake_case + GET doğrulaması
+node test-scripts/test-clothing-items.js
 node test-scripts/test-clothing-items.js --cleanup   # oluşturduğu kaydı sonda siler
+
+# Test artıklarını temizler
+node test-scripts/cleanup.js --dry-run               # önce neyin silineceğini göster
+node test-scripts/cleanup.js                         # test parçaları + @example.com kullanıcıları
+node test-scripts/cleanup.js --all --user <uuid>     # bir kullanıcının TÜM verisi
 ```
 
-Script `test-data.json`'ı gövde olarak kullanır ve üç şeyi doğrular: kayıt `201` ile
-oluşuyor mu, yanıt snake_case mi (camelCase sızmış mı), kayıt `GET` listesinde görünüyor mu.
-Sunucu kapalıysa yığın izi yerine anlaşılır bir mesaj basıp `1` ile çıkar.
+`test-all-endpoints.js` mutlu yolun yanı sıra doğrulama hatalarını (400), bulunamayan
+kayıtları (404), benzersizlik ihlalini (409), soft delete davranışını ve `ON DELETE CASCADE`
+zincirini kontrol eder. `cleanup.js` API üzerinden değil doğrudan veritabanına bağlanır;
+test kullanıcıları `@example.com` deseniyle tanınır. Sunucu kapalıysa scriptler yığın izi
+yerine anlaşılır bir mesaj basıp `1` ile çıkar.
 
 **Not:** `backend/test-data.json` bir çalışma dosyasıdır; alan adları **camelCase** olmalıdır
 (`userId`, `categoryId`). Bir kez snake_case yazıldığı için istek `400` dönmüştü.
@@ -541,6 +558,9 @@ Katman sorumlulukları:
 - **Service** — doğrulama ve iş kuralları. `ValidationError` / `NotFoundError` / `ConflictError`
   fırlatır. Update/delete öncesi varlık kontrolü yapar ki controller gerçek `404` alsın.
   Postgres hata kodları burada anlamlı HTTP sonuçlarına çevrilir: `23505` → 409, `23503` → 400.
+  Alan uzunlukları `utils/validators.js` içindeki `FIELD_LIMITS` tablosuna göre denetlenir —
+  aksi hâlde sınırı aşan değer `22001` ile 500'e düşer. Yeni bir VARCHAR kolonu eklerken
+  limitini bu tabloya da yazın.
 - **Controller** — ince HTTP adaptörü. Her metod servis çağrısını `try/catch`'e alır ve
   `this.handleError(error, res)`'e devreder.
 
@@ -556,9 +576,14 @@ Backend ayrı `DB_HOST` / `DB_PORT` / `DB_NAME` / `DB_USER` / `DB_PASSWORD` değ
 
 ### Frontend
 
-**API katmanı:** `src/lib/api.js` tek fetch noktasıdır; `CURRENT_USER_ID` sabiti burada
-tanımlıdır. `request` yanıt `ok` değilse gövdedeki `{ error }` mesajını okuyup fırlatır,
-böylece backend'in Türkçe hataları kullanıcıya gösterilebilir. `204` için `null` döner.
+**API katmanı:** `src/lib/api.js` tek fetch noktasıdır. `request` yanıt `ok` değilse
+gövdedeki `{ error }` mesajını okuyup fırlatır, böylece backend'in Türkçe hataları
+kullanıcıya gösterilebilir. `204` için `null` döner.
+
+**Kullanıcı kimliği:** `getCurrentUserId()` localStorage'daki `dg_user_id` değerini okur
+(onboarding'de `POST /api/users` ile oluşturulan gerçek kullanıcı), yoksa sabit bir yedek
+id'ye düşer. **Sabit değil fonksiyondur** — onboarding sonrası id değişir, bu yüzden her
+çağrıda güncel değer okunmalıdır. Auth geldiğinde ikisi de kaldırılacak.
 
 **Dönüştürücü:** `src/lib/transformers.js` snake_case → camelCase çevirisini ve
 `category_id` → kategori **adı** eşlemesini yapar (ikon eşlemesi ada göre çalışır).
@@ -569,8 +594,10 @@ Masonry yüksekliği id'den deterministik türetilir.
 durumları iskelet ve boş/hata ekranlarını sürer.
 
 **Kalıcı durum:** `src/lib/onboarding.js` `dg_` önekli tüm localStorage anahtarlarının
-tek sahibidir (onboarding bayrağı, kullanıcı profili, anket cevapları). `localStorage`'a
-doğrudan dokunmayın — `Dashboard`, `Profile`, `AccountInfo`, `StylePreferences` bu şekle bağlıdır.
+tek sahibidir (onboarding bayrağı, `dg_user_id`, kullanıcı profili, anket cevapları).
+`localStorage`'a doğrudan dokunmayın. **Tek doğru kaynak veritabanıdır**; localStorage
+yalnızca hızlı erişim önbelleğidir (örn. Ana Sayfa karşılamasının ismi ilk boyamada
+buradan gelir, sonra API yanıtıyla tazelenir).
 
 **Onboarding kapısı:** `App.jsx` `showOnboarding` durumunu `isOnboardingCompleted()` ile
 başlatır; true iken router/nav ağacı yerine `<Onboarding>` döner.
@@ -579,6 +606,13 @@ başlatır; true iken router/nav ağacı yerine `<Onboarding>` döner.
 `BottomNav` (mobil, `sm:hidden`) ayrı bileşenlerdir, ayrı sekme dizileri vardır.
 **Yeni üst seviye rota eklemek ikisini de düzenlemek demektir.** İçerik sarmalayıcısı
 `pb-24 sm:pb-0` taşır; `ScrollToTopButton` aynı sebeple `bottom-24 sm:bottom-6` konumundadır.
+
+Mobil sekme sayısı 5'e çıktığı için `BottomNav` kısa etiketler kullanır
+("Kombin Öner" → "Öner", "Kombinlerim" → "Kombinler"); masaüstü `Navbar` tam adları gösterir.
+Yeni sekme eklerken dar ekranda taşma olup olmadığını kontrol edin.
+
+Üst seviye rotalar: `/`, `/gardirop`, `/kombin-oner`, `/kombinlerim`, `/profil`
+(ayrıca `/kiyafet/:id` ve `/profil/*` alt sayfaları).
 
 ### Tasarım sistemi
 
@@ -613,6 +647,37 @@ Kategori → lucide ikon eşlemesi `src/lib/categoryIcons.js` içinde merkezidir
 
 > Bundan sonraki her çalışma buraya tarihiyle işlenir: eklenen özellikler, düzeltilen
 > hatalar, alınan mimari kararlar. En yeni kayıt en üstte.
+
+### 2026-08-18 — Onboarding/profil veritabanına bağlandı, Kombinlerim sayfası eklendi
+- **Onboarding artık veritabanına yazıyor:** "Gardırobuma Git" `POST /api/users` ile kullanıcıyı
+  oluşturur, dönen id `dg_user_id` anahtarına yazılır, ardından `PUT /api/style-preferences`
+  ile anket cevapları kaydedilir. E-posta çakışmasında (409) akış onboarding'de kalır,
+  Türkçe hata mesajı ve "Bilgilerimi düzenle" bağlantısı gösterilir.
+- **`CURRENT_USER_ID` sabiti kaldırıldı**, yerine `getCurrentUserId()` geldi: localStorage'daki
+  gerçek kullanıcıyı okur, yoksa yedek id'ye düşer. Tüm sayfalar bunu kullanır.
+- **Profil > Hesap Bilgilerim ve Tarz Tercihlerim** veritabanından okuyup yazıyor;
+  localStorage yalnızca önbellek. `StylePreferences` henüz kayıt yoksa gelen 404'ü
+  hata saymaz, önbellekle devam eder.
+- **Yeni sayfa: Kombinlerim** (`/kombinlerim`) — kayıtlı kombinler, parçaları, tarihi
+  (`Intl.DateTimeFormat('tr-TR')`), iyimser güncellemeli favori ve onaylı silme.
+  Hem `Navbar` hem `BottomNav`'a eklendi; mobilde 5 sekme sığsın diye kısa etiketler kullanıldı.
+- **Backend doğrulamaları:** `utils/validators.js` eklendi; tüm servislerde alan uzunluğu
+  denetimi (`occasion` 50, `name` 200, `brand` 100, `season` 20, `imageUrl` 500 vb.) —
+  daha önce sınırı aşan değer Postgres `22001` ile **500** dönüyordu, artık **400**.
+- **Düzeltme:** `ClothingItemService` foreign key ihlalini (`23503`) yakalamıyordu; olmayan
+  kategori/kullanıcı ile parça eklemek **500** dönüyordu, artık anlamlı **400**.
+  (`OutfitService` ve `StylePreferenceService` bunu zaten yapıyordu.)
+- **Yeni test scriptleri:** `test-all-endpoints.js` (77 kontrol, tüm uçlar + ilişkisel
+  davranış + CASCADE) ve `cleanup.js` (`--dry-run` / `--all --user <uuid>`).
+
+### 2026-08-18 — QuickAdd, favori ve silme gerçek API'ye bağlandı
+- QuickAddModal kategorileri `GET /api/categories`'den çeker, `POST /api/clothing-items`
+  ile kaydeder; kayıt sonrası Gardırop listesi iskelete dönmeden tazelenir.
+- `ClothingCard` artık `item.isFavorite` değerini okuyor (önceden `useState(false)` ile
+  başlıyordu, favori parçanın kalbi boş görünüyordu) ve `PATCH .../favorite` çağırıyor.
+  İyimser güncelleme + hata halinde geri alma.
+- Kıyafet Detay'a onaylı silme (`DELETE`) eklendi, silince Gardırop'a yönlendirir.
+- **`src/data/clothing.js` silindi** — mock veri tamamen kalktı.
 
 ### 2026-08-18 — Kombin Öner sayfası API'ye bağlandı
 - `OutfitSuggestion.jsx` gerçek gardıroptan kombin üretir; "Bu Kombini Kaydet" gerçek

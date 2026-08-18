@@ -6,6 +6,7 @@ const links = [
   { to: '/', label: 'Ana Sayfa' },
   { to: '/gardirop', label: 'Gardırop' },
   { to: '/kombin-oner', label: 'Kombin Öner' },
+  { to: '/kombinlerim', label: 'Kombinlerim' },
   { to: '/profil', label: 'Profil' },
 ]
 

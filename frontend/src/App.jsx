@@ -7,6 +7,7 @@ import Onboarding from './pages/Onboarding'
 import Dashboard from './pages/Dashboard'
 import Wardrobe from './pages/Wardrobe'
 import OutfitSuggestion from './pages/OutfitSuggestion'
+import OutfitHistory from './pages/OutfitHistory'
 import ClothingDetail from './pages/ClothingDetail'
 import Profile from './pages/Profile'
 import AccountInfo from './pages/AccountInfo'
@@ -38,6 +39,7 @@ function App() {
           <Route path="/" element={<Dashboard />} />
           <Route path="/gardirop" element={<Wardrobe />} />
           <Route path="/kombin-oner" element={<OutfitSuggestion />} />
+          <Route path="/kombinlerim" element={<OutfitHistory />} />
           <Route path="/kiyafet/:id" element={<ClothingDetail />} />
           <Route path="/profil" element={<Profile />} />
           <Route path="/profil/hesap-bilgilerim" element={<AccountInfo />} />

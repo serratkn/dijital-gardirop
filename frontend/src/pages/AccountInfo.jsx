@@ -1,29 +1,91 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { ChevronLeft } from 'lucide-react'
 import Button from '../components/ui/Button'
-import { getUserProfile, setUserProfile } from '../lib/onboarding'
+import { getCurrentUserId, fetchUser, updateUser } from '../lib/api'
+import { toUserProfile } from '../lib/transformers'
+import { setUserProfile } from '../lib/onboarding'
 
 const fieldLabel = 'text-xs font-medium uppercase tracking-[0.15em] text-ink/50'
 const fieldInput =
   'mt-2 w-full rounded-xl border border-ink/15 bg-white px-4 py-3 text-sm text-ink placeholder:text-ink/40 focus:border-dusty-rose focus:outline-none'
 
 function AccountInfo() {
-  const profile = getUserProfile()
-  const [name, setName] = useState(profile.name)
-  const [email, setEmail] = useState(profile.email)
-  const [age, setAge] = useState(profile.age)
+  const [name, setName] = useState('')
+  const [email, setEmail] = useState('')
+  const [age, setAge] = useState('')
+  const [subscriptionTier, setSubscriptionTier] = useState('free')
+
+  const [isLoading, setIsLoading] = useState(true)
+  const [hasError, setHasError] = useState(false)
+  const [isSaving, setIsSaving] = useState(false)
   const [isSaved, setIsSaved] = useState(false)
+  const [errorMessage, setErrorMessage] = useState('')
+
+  // Tek doğru kaynak veritabanıdır; localStorage yalnızca önbellektir.
+  useEffect(() => {
+    let isStale = false
+
+    async function loadUser() {
+      setIsLoading(true)
+      setHasError(false)
+
+      try {
+        const row = await fetchUser(getCurrentUserId())
+        if (isStale) return
+
+        const profile = toUserProfile(row)
+        setName(profile.name)
+        setEmail(profile.email)
+        setAge(profile.age)
+        setSubscriptionTier(profile.subscriptionTier)
+      } catch (error) {
+        if (isStale) return
+        console.error('Hesap bilgileri alınamadı:', error)
+        setHasError(true)
+      } finally {
+        if (!isStale) setIsLoading(false)
+      }
+    }
+
+    loadUser()
+
+    return () => {
+      isStale = true
+    }
+  }, [])
 
   const handleChange = (setter) => (event) => {
     setter(event.target.value)
     setIsSaved(false)
+    setErrorMessage('')
   }
 
-  const handleSubmit = (event) => {
+  const handleSubmit = async (event) => {
     event.preventDefault()
-    setUserProfile({ name: name.trim(), email: email.trim(), age })
-    setIsSaved(true)
+    if (isSaving) return
+
+    setIsSaving(true)
+    setErrorMessage('')
+
+    try {
+      const updated = await updateUser(getCurrentUserId(), {
+        name: name.trim(),
+        email: email.trim(),
+        age: age === '' ? null : Number(age),
+        subscriptionTier,
+      })
+
+      const profile = toUserProfile(updated)
+      // Önbelleği tazele: Ana Sayfa karşılaması buradan okuyor.
+      setUserProfile({ name: profile.name, email: profile.email, age: profile.age })
+      setIsSaved(true)
+    } catch (error) {
+      console.error('Hesap bilgileri kaydedilemedi:', error)
+      setErrorMessage(error.message)
+    } finally {
+      setIsSaving(false)
+    }
   }
 
   return (
@@ -42,42 +104,61 @@ function AccountInfo() {
           Bilgilerini güncel tut, sana daha iyi öneriler sunalım.
         </p>
 
-        <form onSubmit={handleSubmit} className="mt-10 space-y-5">
-          <div>
-            <label className={fieldLabel}>İsim</label>
-            <input
-              type="text"
-              value={name}
-              onChange={handleChange(setName)}
-              placeholder="Adın"
-              className={fieldInput}
-            />
+        {isLoading ? (
+          <div className="mt-10 space-y-6">
+            {[0, 1, 2].map((index) => (
+              <div key={index}>
+                <div className="h-3 w-20 animate-pulse rounded-full bg-warm-gray" />
+                <div className="mt-2 h-12 w-full animate-pulse rounded-xl bg-warm-gray" />
+              </div>
+            ))}
           </div>
-          <div>
-            <label className={fieldLabel}>E-posta</label>
-            <input
-              type="email"
-              value={email}
-              onChange={handleChange(setEmail)}
-              placeholder="ornek@mail.com"
-              className={fieldInput}
-            />
-          </div>
-          <div>
-            <label className={fieldLabel}>Yaş</label>
-            <input
-              type="number"
-              value={age}
-              onChange={handleChange(setAge)}
-              placeholder="25"
-              className={fieldInput}
-            />
-          </div>
+        ) : hasError ? (
+          <p className="mt-10 text-sm text-ink/60">
+            Hesap bilgilerine şu an ulaşılamıyor. Bağlantını kontrol edip sayfayı yenilemeyi dene.
+          </p>
+        ) : (
+          <form onSubmit={handleSubmit} className="mt-10 space-y-5">
+            <div>
+              <label className={fieldLabel}>İsim</label>
+              <input
+                type="text"
+                value={name}
+                onChange={handleChange(setName)}
+                maxLength={100}
+                placeholder="Adın"
+                className={fieldInput}
+              />
+            </div>
+            <div>
+              <label className={fieldLabel}>E-posta</label>
+              <input
+                type="email"
+                value={email}
+                onChange={handleChange(setEmail)}
+                maxLength={255}
+                placeholder="ornek@mail.com"
+                className={fieldInput}
+              />
+            </div>
+            <div>
+              <label className={fieldLabel}>Yaş</label>
+              <input
+                type="number"
+                value={age}
+                onChange={handleChange(setAge)}
+                placeholder="25"
+                className={fieldInput}
+              />
+            </div>
 
-          <Button type="submit" variant="primary" size="lg" className="w-full">
-            {isSaved ? 'Kaydedildi' : 'Kaydet'}
-          </Button>
-        </form>
+            {errorMessage && <p className="text-sm text-burgundy">{errorMessage}</p>}
+
+            <Button type="submit" variant="primary" size="lg" disabled={isSaving} className="w-full">
+              {isSaving ? 'Kaydediliyor...' : isSaved ? 'Kaydedildi' : 'Kaydet'}
+            </Button>
+          </form>
+        )}
       </div>
     </div>
   )

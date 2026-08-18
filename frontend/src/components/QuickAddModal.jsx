@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import Modal from './ui/Modal'
 import Button from './ui/Button'
-import { CURRENT_USER_ID, createClothingItem, fetchCategories } from '../lib/api'
+import { getCurrentUserId, createClothingItem, fetchCategories } from '../lib/api'
 
 const COLORS = ['Beyaz', 'Siyah', 'Bej', 'Lacivert', 'Kahverengi', 'Pudra']
 
@@ -75,7 +75,7 @@ function QuickAddModal({ isOpen, onClose, onCreated }) {
 
     try {
       await createClothingItem({
-        userId: CURRENT_USER_ID,
+        userId: getCurrentUserId(),
         categoryId: Number(categoryId),
         name: name.trim(),
         color,

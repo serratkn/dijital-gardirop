@@ -1,10 +1,13 @@
 import { NavLink } from 'react-router-dom'
-import { Home, Shirt, Sparkles, User } from 'lucide-react'
+import { Home, Shirt, Sparkles, Layers, User } from 'lucide-react'
 
+// label mobil sekmede gösterilir; 5 sekme dar ekrana sığsın diye
+// uzun adlar burada kısaltılır (masaüstü Navbar tam adı kullanır).
 const tabs = [
   { to: '/', label: 'Ana Sayfa', icon: Home, end: true },
   { to: '/gardirop', label: 'Gardırop', icon: Shirt },
-  { to: '/kombin-oner', label: 'Kombin Öner', icon: Sparkles },
+  { to: '/kombin-oner', label: 'Öner', icon: Sparkles },
+  { to: '/kombinlerim', label: 'Kombinler', icon: Layers },
   { to: '/profil', label: 'Profil', icon: User },
 ]
 
@@ -18,7 +21,7 @@ function BottomNav() {
               to={tab.to}
               end={tab.end}
               className={({ isActive }) =>
-                `flex flex-col items-center gap-1 py-2.5 text-[11px] font-medium transition-colors ${
+                `flex flex-col items-center gap-1 px-1 py-2.5 text-center text-[10px] font-medium leading-tight transition-colors ${
                   isActive ? 'text-burgundy' : 'text-ink/45'
                 }`
               }
