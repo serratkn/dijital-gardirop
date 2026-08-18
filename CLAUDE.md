@@ -2,73 +2,527 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-## Project
+> **Bu dosya projenin kalıcı hafızasıdır.** Her önemli değişiklikten sonra güncellenir:
+> yeni özellikler, düzeltilen hatalar, alınan mimari kararlar. En sonda tarihli bir
+> **Değişiklik Günlüğü** bulunur — her yeni çalışma oraya işlenir.
 
-"Dijital Gardırop" — a digital wardrobe / outfit-suggestion app. **All user-facing copy, code comments, and commit messages are in Turkish.** Route paths use Turkish slugs (`/gardirop`, `/kombin-oner`, `/profil/hesap-bilgilerim`). Keep writing in Turkish to stay consistent.
+---
 
-Commits follow conventional-commit prefixes with Turkish descriptions, e.g. `feat(profil): profil sayfası ve hesap yönetimi ekranı eklendi`.
+## 1. Proje Özeti
 
-## Repo layout
+**Dijital Gardırop**, kullanıcının kendi kıyafetlerini dijital ortama taşıyıp bunlardan
+kombin önerileri üreten bir stil platformudur.
 
-Three independent pieces at the root; there is **no monorepo tooling** — each is run separately from its own directory.
+- **Hedef kitle:** Kadın kullanıcılar; konumlandırma "premium stil platformu" — editöryal,
+  sakin ve moda dergisi estetiğinde bir arayüz hedeflenir. Tasarım kararlarında bu ton belirleyicidir.
+- **Dil:** Tüm kullanıcı arayüzü metinleri, kod yorumları ve commit mesajları **Türkçe**.
+  Rota adresleri de Türkçe slug kullanır (`/gardirop`, `/kombin-oner`, `/profil/hesap-bilgilerim`).
+- **Commit formatı:** conventional-commit öneki + Türkçe açıklama —
+  `feat(profil): profil sayfası ve hesap yönetimi ekranı eklendi`
 
-| Path | What it is |
+### Temel özellikler
+
+| Özellik | Durum |
 |---|---|
-| `frontend/` | Vite + React 19 SPA (Tailwind v4, react-router, lucide-react, Capacitor for Android) |
-| `backend/` | Express + `pg` REST API, layered architecture |
-| `docker-compose.yml` | PostgreSQL 16 for local dev |
+| Gardırop yönetimi (kategori filtresi, arama) | Gerçek API'ye bağlı |
+| Kombin önerisi (duruma göre rastgele kombin) | Gerçek API'ye bağlı |
+| Ana sayfa istatistikleri ve son eklenenler | Gerçek API'ye bağlı |
+| İlk açılış onboarding akışı + tarz anketi | localStorage |
+| Profil / hesap yönetimi ekranları | localStorage |
+| Mobil uygulama (Android, Capacitor) | Kurulu |
 
-The root `package.json` holds only stray Capacitor deps and no scripts — ignore it; the real Capacitor config lives in `frontend/capacitor.config.json`.
+---
 
-## Commands
+## 2. Teknoloji Yığını
+
+### Depo yapısı
+
+Kökte üç bağımsız parça var; **monorepo aracı yok** — her biri kendi klasöründen çalıştırılır.
+
+| Yol | Ne |
+|---|---|
+| `frontend/` | Vite + React 19 SPA |
+| `backend/` | Express + `pg` REST API |
+| `docker-compose.yml` | PostgreSQL 16 (yerel geliştirme) |
+
+Kökteki `package.json` yalnızca artık Capacitor bağımlılıkları içerir, script'i yoktur —
+**yok sayın**. Gerçek Capacitor yapılandırması `frontend/capacitor.config.json` içindedir
+(`appId: com.serra.digitalgardirop`).
+
+### Frontend
+
+React 19, Vite 8, Tailwind v4, react-router-dom 7, lucide-react (ikonlar),
+Capacitor 8 (Android paketleme). Lint: **oxlint** (depodaki tek otomatik kontrol).
+
+### Backend
+
+Express 4, `pg` (PostgreSQL sürücüsü), `cors`, `dotenv`. CommonJS (`require`).
+
+### Veritabanı
+
+PostgreSQL 16, Docker Compose ile ayağa kalkar. Container adı: `dijitalgardirop-db-1`.
+Kalıcılık `postgres_data` adlı named volume ile sağlanır.
+
+### Mimari desenler
+
+- **Layered architecture (katmanlı mimari)** — `routes → controllers → services → repositories → pg Pool`
+- **Repository pattern** — SQL yalnızca repository katmanında
+- **Dependency Injection** — her katman bir üstünü constructor'da alır; bağlama route dosyasında yapılır
+- **Class-based OOP** — tüm controller/service/repository'ler sınıftır
+- **Template Method benzeri hata yönetimi** — `BaseController.handleError` ortak hata çevirisini üstlenir
+
+---
+
+## 3. Gelişim Geçmişi (kronolojik)
+
+### Aşama 1 — Frontend tasarım sistemi (11–13 Ağustos 2026)
+
+Vite + React iskeleti üzerine premium tasarım sistemi kuruldu: renk paleti, tipografi,
+kategori filtreleri. Ardından Ana Sayfa, Kombin Öner, Gardırop ve Kıyafet Detay sayfaları
+tasarlandı. Bu dönemde eklenenler: quick add modal, empty state, editöryal ifadeler,
+kategori ikonları, sticky navigasyon, sayfa geçiş animasyonları, skeleton loading,
+scroll-to-top butonu, breadcrumb ve arama çubuğu.
+
+Tüm ekranlar bu aşamada `src/data/clothing.js` içindeki **mock veriyle** çalışıyordu.
+
+**Karar:** Tailwind v4'ün CSS-first yapılandırması benimsendi — `tailwind.config.js` **yok**,
+tasarım token'ları `src/index.css` içindeki `@theme` bloğunda tanımlı.
+
+### Aşama 2 — Mobil dönüşüm (Capacitor / Android)
+
+Capacitor eklendi, `webDir: dist` olarak ayarlandı, Android platformu kuruldu
+(`frontend/android/`). Mobil için ayrı bir alt navigasyon (bottom tab bar) gereksinimi
+bu aşamada ortaya çıktı ve Aşama 4'te eklendi.
+
+### Aşama 3 — Onboarding akışı (15 Ağustos 2026)
+
+İlk açılışta gösterilen, navigasyonsuz (chrome-free) bir tanışma akışı eklendi:
+kayıt ekranı → 5 soruluk tarz anketi → karşılama ekranı. Tamamlanma durumu ve kullanıcı
+bilgileri localStorage'da `dg_` önekli anahtarlarda tutulur.
+
+**Karar:** `App.jsx` içinde `showOnboarding` true iken router/nav ağacı yerine doğrudan
+`<Onboarding>` döndürülür — böylece akış tamamen chrome-free kalır.
+
+Ardından Ana Sayfa'daki karşılama mesajı bu isimle kişiselleştirildi
+("Hoş Geldin, Serra") ve profil sayfası + hesap yönetimi ekranları eklendi.
+
+### Aşama 4 — Profil, alt navigasyon ve routing düzeltmeleri (15–17 Ağustos 2026)
+
+Profil sayfası, mobil bottom tab bar ve profil alt sayfaları (Hesap Bilgilerim,
+Şifre Değiştir, Tarz Tercihlerim, Bildirimler, Yardım & Destek) eklendi.
+
+**Karşılaşılan sorun — eksik routing.** Profil listesindeki maddeler yalnızca görsel
+`<button>` olarak bırakılmıştı; tıklanınca hiçbir şey olmuyordu. Ayrıca "Tarz Tercihlerim"
+tüm onboarding'i (kayıt formu dahil) baştan başlatıyordu — oysa yalnızca 5 soruyu
+düzenlenebilir biçimde göstermesi gerekiyordu.
+
+**Çözüm:** Anket soruları (`src/data/styleQuestions.js`) ve seçenek render mantığı
+(`components/onboarding/QuestionOptions.jsx`) ortak modüllere çıkarıldı; hem ilk kurulum
+sihirbazı hem de düzenleme sayfası aynı kodu kullanır. Eksik sayfalar oluşturulup
+rotalara bağlandı.
+
+### Aşama 5 — Altyapı: Docker + Backend + Şema (17 Ağustos 2026)
+
+PostgreSQL 16 `docker-compose.yml` ile eklendi. Ardından Express backend katmanlı mimariyle
+kuruldu (`health` uç noktası referans uygulama olarak), sonra veritabanı şeması yazılıp
+uygulandı.
+
+**Karşılaşılan sorun — `pg.Pool` süreç çökertmesi.** Postgres yeniden başladığında `pg`,
+boştaki bağlantılar için `'error'` olayı yayar. Dinleyici olmadığında Node bunu
+yakalanmamış hata sayıp **tüm API sürecini öldürür**. Testte container durdurulduğunda
+sunucu tamamen çöktü.
+
+**Çözüm:** `config/database.js` içinde `pool.on('error', ...)` dinleyicisi eklendi.
+Artık veritabanı gidip geldiğinde sunucu ayakta kalır, `/api/health` `503` döner ve
+bağlantı geri geldiğinde kendiliğinden `200`'e döner. **Bu dinleyici silinmemelidir.**
+
+### Aşama 6 — CRUD API'leri ve kritik düzeltmeler (17 Ağustos 2026)
+
+`clothing-items` için tam CRUD yazıldı, ardından kalan kaynaklar eklendi:
+`categories` (salt okunur), `users`, `style-preferences`, `outfits`.
+
+Bu aşamada üç önemli sorun çıktı:
+
+**a) Türkçe karakter bozulması (UTF-8).** `001_initial_schema.sql` Windows kabuğu üzerinden
+`psql`e aktarılırken Türkçe karakterler bozuldu: `Üst` veritabanına `??st` olarak yazıldı
+(`3f3f7374` — iki literal soru işareti; doğrusu `c39c7374`). Bu yalnızca kozmetik değildi:
+frontend'in ikon eşlemesi `Üst`/`Ayakkabı`/`Çanta` adlarıyla yapıldığı için bozuk isimlerle
+**hiçbir kategori ikonu görünmezdi**.
+**Çözüm:** Kayıtlar Node + `pg` üzerinden (kabuk katmanı atlanarak) düzeltildi ve byte
+seviyesinde doğrulandı. Migration uygulama yöntemi `docker cp` + `psql -f` olarak değiştirildi.
+
+**b) `password_hash` sızıntısı riski.** Diğer repository'lerdeki `RETURNING *` deseni
+`users` tablosunda parola özetini API yanıtına koyardı.
+**Çözüm:** `UserRepository` açık kolon listesi (`SAFE_COLUMNS`) kullanır. Bu liste
+korunmalıdır — yeni kolon eklenirken `password_hash` dışarıda bırakılmalıdır.
+
+**c) `style_preferences` şema eksiği.** Tablo mantıksal olarak kullanıcı başına tek satır
+tutar ama `user_id` üzerinde UNIQUE kısıtı yoktu; bu hem çift kayda izin veriyor hem de
+atomik upsert yazmayı imkânsız kılıyordu.
+**Çözüm:** `002` migration'ı ile `UNIQUE (user_id)` eklendi; `ON CONFLICT (user_id) DO UPDATE`
+ile tek sorgulu upsert mümkün oldu. Aynı migration `outfit_items` için eksik FK index'lerini
+de ekledi (PostgreSQL foreign key'ler için otomatik index oluşturmaz).
+
+**Yapısal düzenleme:** Beş controller'da tekrarlanacak hata çevirisi `BaseController`'a
+çıkarıldı; `utils/errors.js` `AppError` tabanı + `ConflictError` (409) ile genişletildi.
+
+### Aşama 7 — Gardırop sayfası API'ye bağlandı (17 Ağustos 2026)
+
+`Wardrobe.jsx` mock veriden gerçek API'ye geçirildi. Ortak altyapı kuruldu:
+`src/lib/api.js` (fetch katmanı) ve `src/lib/transformers.js` (dönüştürücü).
+
+**Karşılaşılan sorun — camelCase/snake_case asimetrisi.** Backend `category_id` (sayı)
+döndürür ama frontend kategori **adıyla** filtreler ve ikonları adla eşler.
+**Çözüm:** `GET /api/categories` paralel çekilip id→ad haritası kuruldu; dönüştürücü
+`category` alanını doldurur.
+
+**Karşılaşılan sorun — masonry düzeni.** Mock veride kartlara `imgHeight` alanı vardı,
+backend'de yok; tüm kartlar aynı yükseklikte kalıp ızgara düzleşecekti.
+**Çözüm:** Yükseklik, id'den deterministik hash ile türetilir. **Index kullanılmaz** —
+filtreleme/arama sırasında kartlar yeniden sıralandığında yükseklikler zıplardı.
+
+**Karşılaşılan sorun — kırık detay sayfası.** Gardırop artık gerçek UUID'lerle link
+veriyordu ama `ClothingDetail` mock veride `Number(id)` ile arıyordu; `Number(uuid)` = `NaN`
+olduğu için **her karta tıklamak "Kıyafet bulunamadı" sayfasına gidiyordu**.
+**Çözüm:** `ClothingDetail` de aynı API katmanına bağlandı.
+
+### Aşama 8 — Ana Sayfa API'ye bağlandı (18 Ağustos 2026)
+
+`Dashboard.jsx` gerçek veriye geçti: istatistikler (Toplam Parça / Kombin / Favori) ve
+"Son Eklenenler" bölümü. Kombin sayısı için `fetchOutfits` eklendi.
+
+"Son Eklenenler" için ek parametre gerekmedi: `ClothingItemRepository.findAll` zaten
+`ORDER BY created_at DESC` yapar, baştan 4 kayıt almak yeterlidir.
+
+**Karar:** Hata durumunda istatistiklerde `0` yerine **`–`** gösterilir; sıfır göstermek
+"gardırobun boş" gibi yanlış bir mesaj verirdi. Ayrıca Gardırop'tan farklı olarak tüm sayfa
+boş duruma çevrilmez — karşılama ve hızlı eylem kartları veri olmadan da anlamlıdır.
+
+**Not:** Mock'ta sabit duran `8 Kombin` istatistiği bu aşamada gerçek veriye bağlandı.
+
+### Aşama 9 — Kombin Öner sayfası API'ye bağlandı (18 Ağustos 2026)
+
+`OutfitSuggestion.jsx` gerçek gardıroptan kombin üretir hale getirildi; "Bu Kombini Kaydet"
+artık gerçek `POST /api/outfits` isteği atar. `api.js` POST desteği ve backend'in Türkçe
+hata mesajlarını yakalama yeteneği kazandı.
+
+**Karşılaşılan sorun — devre dışı butonda hover hatası.** Kaydetme sonrası "Kaydedildi"
+metni okunmuyordu: fare butonun üzerinde kaldığı için `variant="rose"` içindeki
+`hover:bg-dusty-rose hover:text-ivory` kuralı devrede kalıyor, pembe zeminde açık renk
+metin kayboluyordu.
+**Çözüm:** Paylaşılan `Button` bileşenine `disabled:pointer-events-none disabled:opacity-60`
+eklendi — bu tüm devre dışı butonları düzeltir.
+
+**Karşılaşılan sorun — `occasion` uzunluğu.** Kolon `VARCHAR(50)`; serbest metin girişinde
+daha uzun bir değer Postgres `22001` hatasıyla 500'e düşerdi.
+**Çözüm:** Girişe `maxLength={50}` eklendi. (Backend tarafında uzunluk doğrulaması hâlâ yok.)
+
+**Karar:** Yapay `LOADING_DURATION` gecikmesi kaldırıldı; gerçek bekleme ilk veri çekmede
+olduğu için iskelet oraya taşındı, kombin üretimi istemci tarafında anlıktır.
+
+---
+
+## 4. Mevcut Durum
+
+### Çalışanlar
+
+- **Gardırop** — gerçek API; kategori filtresi, arama, skeleton, boş/hata durumları
+- **Ana Sayfa** — gerçek istatistikler ve son eklenen 4 parça
+- **Kombin Öner** — gerçek gardıroptan kombin üretimi ve **kalıcı kaydetme**
+- **Kıyafet Detay** — gerçek API (UUID ile)
+- **Backend** — 6 kaynak için tam CRUD, transaction'lı kombin yazımı, tipli hata yönetimi
+- **Onboarding / Profil ekranları** — çalışır durumda (localStorage ile)
+
+### Eksikler ve bilinen sınırlamalar
+
+| Konu | Durum |
+|---|---|
+| **Kimlik doğrulama yok** | `api.js` içinde sabit `CURRENT_USER_ID` kullanılır. Oturum sistemi geldiğinde kaldırılacak. |
+| **QuickAddModal kaydetmiyor** | "Yeni Parça Ekle" formu `POST /api/clothing-items`'a bağlı değil; `handleSave` yalnızca modalı kapatır. Kategori dropdown'u hâlâ mock `CATEGORIES` kullanır — bu yüzden `src/data/clothing.js` silinemiyor. |
+| **ClothingCard favori butonu** | `useState(false)` ile başlar; `item.isFavorite` **hiç okunmaz**. Yani favori bir parçanın kartında kalp dolu görünmez ve tıklama `PATCH .../favorite`'e gitmez. (Detay sayfası doğru başlatır ama o da kaydetmez.) |
+| **Kıyafet silme** | Detay sayfasındaki "Sil" butonu bağlı değil (`DELETE` ucu hazır). |
+| **Onboarding verisi backend'e gitmiyor** | Kayıt ekranı ve tarz anketi yalnızca localStorage'a yazar; `POST /api/users` ve `PUT /api/style-preferences` uçları hazır ama kullanılmıyor. |
+| **Profil ekranları localStorage'da** | `AccountInfo`, `StylePreferences` localStorage okur/yazar; `Bildirimler` ve `Yardım & Destek` "yakında" sayfasıdır. |
+| **Fotoğraf yükleme yok** | `image_url` kolonu var ama dosya yükleme akışı yok; tüm kartlar `warm-gray` placeholder gösterir. |
+| **Kombin listeleme ekranı yok** | Kombinler kaydedilebiliyor ama kayıtlı kombinleri gösteren bir sayfa yok (Ana Sayfa'daki "Hızlı Kombin Öner" kartları hâlâ statik metin). |
+| **Test altyapısı yok** | Test framework'ü yoktur. Doğrulama: `npm run lint` + elle deneme + `backend/test-scripts/`. |
+| **Onboarding sıfırlama butonu** | `Navbar`'daki düşük kontrastlı `RotateCcw` butonu geçicidir, yayına çıkmadan kaldırılmalıdır. |
+
+---
+
+## 5. Veritabanı Şeması
+
+`backend/src/db/migrations/` altında tanımlı. UUID birincil anahtarlar `pgcrypto` /
+`gen_random_uuid()` ile üretilir; yalnızca `categories.id` `SERIAL`'dir.
+
+### `users`
+| Kolon | Tip | Not |
+|---|---|---|
+| `id` | UUID PK | `gen_random_uuid()` |
+| `name` | VARCHAR(100) | |
+| `email` | VARCHAR(255) | **UNIQUE, NOT NULL** |
+| `email_verified` | BOOLEAN | `false` |
+| `age` | INTEGER | |
+| `password_hash` | VARCHAR(255) | **API yanıtlarında asla dönmez** |
+| `subscription_tier` | VARCHAR(20) | `'free'` — `free` \| `premium` |
+| `created_at` / `updated_at` | TIMESTAMP | `NOW()` |
+
+### `style_preferences` — kullanıcı başına tek satır
+| Kolon | Tip | Not |
+|---|---|---|
+| `id` | UUID PK | |
+| `user_id` | UUID → `users(id)` | **UNIQUE**, ON DELETE CASCADE |
+| `daily_style`, `color_preference`, `priority`, `style_icon`, `frequency` | VARCHAR(50) | anketin 5 sorusu |
+| `updated_at` | TIMESTAMP | |
+
+### `categories` — salt okunur, seed veriyle gelir
+| Kolon | Tip | Not |
+|---|---|---|
+| `id` | SERIAL PK | |
+| `name` | VARCHAR(50) | `Üst`, `Alt`, `Elbise`, `Ayakkabı`, `Çanta`, `Makyaj` |
+| `icon` | VARCHAR(50) | lucide adları: `shirt`, `panel-bottom`, `triangle`, `footprints`, `handbag`, `sparkles` |
+| `is_active` | BOOLEAN | `true` — okumalar bunu filtreler |
+
+### `clothing_items`
+| Kolon | Tip | Not |
+|---|---|---|
+| `id` | UUID PK | |
+| `user_id` | UUID → `users(id)` | ON DELETE CASCADE, **index'li** |
+| `category_id` | INTEGER → `categories(id)` | |
+| `name`, `color`, `brand`, `season`, `image_url` | VARCHAR | |
+| `is_favorite` | BOOLEAN | `false` |
+| `is_deleted` | BOOLEAN | `false` — **soft delete**, her okuma filtreler |
+| `created_at` / `updated_at` | TIMESTAMP | |
+
+### `outfits`
+| Kolon | Tip | Not |
+|---|---|---|
+| `id` | UUID PK | |
+| `user_id` | UUID → `users(id)` | ON DELETE CASCADE, **index'li** |
+| `occasion` | VARCHAR(50) | uzunluk sınırı önemli |
+| `is_favorite` | BOOLEAN | `false` |
+| `times_worn` | INTEGER | `0` |
+| `created_at` | TIMESTAMP | |
+
+### `outfit_items` — kombin ↔ parça bağlantı tablosu
+| Kolon | Tip | Not |
+|---|---|---|
+| `id` | UUID PK | |
+| `outfit_id` | UUID → `outfits(id)` | ON DELETE CASCADE, index'li |
+| `clothing_item_id` | UUID → `clothing_items(id)` | ON DELETE CASCADE, index'li |
+
+### İlişkiler
+
+```
+users ─┬─< style_preferences   (1:1, UNIQUE user_id)
+       ├─< clothing_items      (1:N)
+       └─< outfits             (1:N)
+
+outfits >─── outfit_items ───< clothing_items   (N:M)
+categories ──< clothing_items                   (1:N)
+```
+
+`users` ve `outfits` **hard delete** edilir ve `ON DELETE CASCADE`'e güvenir;
+yalnızca `clothing_items` soft delete kullanır.
+
+---
+
+## 6. API Referansı
+
+Taban adres: `http://localhost:3001/api`
+
+> **İstek gövdeleri camelCase, yanıtlar snake_case.** Servisler `userId`, `categoryId`,
+> `imageUrl` bekler; yanıtlar `RETURNING *`'dan geldiği için `user_id`, `category_id`,
+> `is_favorite` döner. Arada serileştirme katmanı yoktur — frontend'de
+> `src/lib/transformers.js` bu çeviriyi yapar.
+
+### Hata biçimi
+
+Tüm hatalar `{ "error": "Türkçe mesaj" }` döner.
+
+| Kod | Anlam |
+|---|---|
+| `400` | `ValidationError` — eksik/geçersiz alan, FK ihlali (`23503`) |
+| `404` | `NotFoundError` |
+| `409` | `ConflictError` — benzersizlik ihlali (`23505`), örn. tekrarlı e-posta |
+| `500` | Beklenmeyen hata → `{ "error": "Sunucu hatası" }` |
+
+### Health
+
+| Metod | Yol | Açıklama |
+|---|---|---|
+| `GET` | `/health` | Sunucu + veritabanı durumu. DB kapalıysa `503` ve `status: "degraded"`. |
+
+```json
+{"status":"ok","uptime":99.14,"timestamp":"2026-08-18T07:29:16.208Z",
+ "database":{"connected":true,"time":"2026-08-18T07:29:16.210Z"}}
+```
+
+### Categories (salt okunur)
+
+| Metod | Yol | Açıklama |
+|---|---|---|
+| `GET` | `/categories` | Aktif kategoriler, `id` sırasına göre |
+| `GET` | `/categories/:id` | Tek kategori. Sayı olmayan id → `400`, bulunamazsa `404` |
+
+```json
+{"id":1,"name":"Üst","icon":"shirt","is_active":true}
+```
+
+### Users
+
+| Metod | Yol | Gövde / Parametre |
+|---|---|---|
+| `GET` | `/users/:id` | — |
+| `POST` | `/users` | `{ name, email*, age }` |
+| `PUT` | `/users/:id` | `{ name, email*, age, subscriptionTier }` |
+| `DELETE` | `/users/:id` | → `204`; tercih/kıyafet/kombinleri CASCADE ile siler |
+
+`email` zorunlu, küçük harfe çevrilir ve biçimi doğrulanır; tekrarı `409` döner.
+`age` verilirse 0–120 arası tam sayı olmalıdır. `subscriptionTier` yalnızca
+`free` veya `premium`. **Yanıtta `password_hash` bulunmaz.**
+
+### Style Preferences
+
+| Metod | Yol | Gövde / Parametre |
+|---|---|---|
+| `GET` | `/style-preferences?userId=` | Kayıt yoksa `404` |
+| `PUT` | `/style-preferences` | `{ userId*, dailyStyle, colorPreference, priority, styleIcon, frequency }` |
+
+`PUT` hem oluşturur hem günceller (upsert). Olmayan `userId` → `400`.
+
+### Clothing Items
+
+| Metod | Yol | Gövde / Parametre |
+|---|---|---|
+| `GET` | `/clothing-items?userId=*&categoryId=` | `categoryId` opsiyonel filtre; `created_at DESC` sıralı |
+| `GET` | `/clothing-items/:id` | Silinmişse `404` |
+| `POST` | `/clothing-items` | `{ userId*, categoryId*, name*, color, brand, season, imageUrl }` → `201` |
+| `PUT` | `/clothing-items/:id` | `{ categoryId*, name*, color, brand, season, imageUrl }` |
+| `DELETE` | `/clothing-items/:id` | **Soft delete** → `204` |
+| `PATCH` | `/clothing-items/:id/favorite` | Favori durumunu tersine çevirir (atomik) |
+
+```json
+{"id":"58b9f6da-…","user_id":"e4553e3e-…","category_id":5,"name":"Küçük Omuz Çantası",
+ "color":"Kahverengi","brand":"Mango","season":null,"image_url":null,
+ "is_favorite":false,"is_deleted":false,"created_at":"…","updated_at":"…"}
+```
+
+### Outfits
+
+| Metod | Yol | Gövde / Parametre |
+|---|---|---|
+| `GET` | `/outfits?userId=*` | Parçalarıyla birlikte, `created_at DESC` |
+| `GET` | `/outfits/:id` | |
+| `POST` | `/outfits` | `{ userId*, occasion, clothingItemIds*[] }` → `201` |
+| `PUT` | `/outfits/:id` | `{ occasion, clothingItemIds }` — `clothingItemIds` verilmezse parçalara dokunulmaz |
+| `DELETE` | `/outfits/:id` | Hard delete → `204` |
+| `PATCH` | `/outfits/:id/favorite` | Favori toggle |
+| `PATCH` | `/outfits/:id/worn` | `times_worn` +1 |
+
+`clothingItemIds` en az bir parça içermeli, tekrar barındıramaz ve **yalnızca o kullanıcıya
+ait, silinmemiş** parçalar olabilir — aksi hâlde `400`.
+
+Yanıt, parçaları gömülü `items` dizisiyle döner. Silinmiş parçalar `JOIN` koşulunda
+filtrelendiği için, tüm parçaları silinmiş bir kombin kaybolmaz — `items: []` ile döner:
+
+```json
+{"id":"c5c0e303-…","user_id":"e4553e3e-…","occasion":"Üniversite","is_favorite":false,
+ "times_worn":0,"created_at":"…",
+ "items":[{"id":"8bb81410-…","name":"Zara Oversize Beyaz Gömlek","category_id":1,
+           "color":"Beyaz","image_url":null}]}
+```
+
+---
+
+## 7. Geliştirme Rehberi
+
+### Çalıştırma
 
 ```bash
-# Database (from repo root)
-docker compose up -d                 # start postgres 16 on :5432
-docker compose down                  # stop (keeps the postgres_data volume)
+# 1) Veritabanı (depo kökünden)
+docker compose up -d                 # postgres 16, :5432
+docker compose down                  # durdur (postgres_data volume korunur)
 
-# Apply a migration — there is NO migration runner, do it by hand.
-# Copy the file INTO the container first: piping SQL through a Windows shell
-# corrupts Turkish characters (it silently turned 'Üst' into '??st' once).
-docker cp backend/src/db/migrations/001_initial_schema.sql dijitalgardirop-db-1:/tmp/m.sql
-docker exec dijitalgardirop-db-1 psql -U postgres -d dijital_gardirop \
-  -v ON_ERROR_STOP=1 -f /tmp/m.sql
-
-# Backend (from backend/)
-cp .env.example .env                 # required; nothing runs without it
+# 2) Backend (backend/ klasöründen)
+cp .env.example .env                 # zorunlu; .env olmadan hiçbir şey çalışmaz
 npm install
 npm run dev                          # node --watch server.js, :3001
-npm start
 
-# Frontend (from frontend/)
+# 3) Frontend (frontend/ klasöründen)
 npm install
-npm run dev                          # vite dev server
-npm run lint                         # oxlint — the only automated check in the repo
+npm run dev                          # vite dev sunucusu
+npm run lint                         # oxlint — depodaki tek otomatik kontrol
 npm run build
 ```
 
-**There is no test framework anywhere.** Verification means `npm run lint` for the frontend plus exercising the app/API by hand (browser, `curl`, or a throwaway Node `fetch` script). Don't invent test commands.
+### Migration uygulama
 
-**Turkish characters and the Windows shell.** Git Bash mangles UTF-8 on the way through it, in both directions:
+**Migration runner yoktur, elle uygulanır.** Şema değişiklikleri `backend/src/db/migrations/`
+altında **yeni** numaralı bir `.sql` dosyasına yazılır; uygulanmış bir migration düzenlenmez.
 
-- `curl -d '{"name":"Gömlek"}'` sends a corrupted byte — the row lands broken in the database.
-- Piping `.sql` into `psql` corrupts seed data the same way (this is how `Üst` became `??st` in `categories`).
-- Console *output* is also unreliable, so a mangled `ö` on screen is not proof of a bug.
+```bash
+# Dosyayı önce container'a KOPYALAYIN. SQL'i Windows kabuğundan psql'e
+# pipe etmek Türkçe karakterleri bozar ('Üst' bir kez '??st' oldu).
+docker cp backend/src/db/migrations/002_style_preferences_unique_and_indexes.sql \
+  dijitalgardirop-db-1:/tmp/m.sql
+docker exec dijitalgardirop-db-1 psql -U postgres -d dijital_gardirop \
+  -v ON_ERROR_STOP=1 -f /tmp/m.sql
+```
 
-When encoding matters, bypass the shell: drive the API from a Node `fetch` script, and `docker cp` migrations into the container instead of piping them. To tell a display glitch from real corruption, compare bytes:
-`SELECT encode(name::bytea,'hex') FROM categories;` — correct UTF-8 `Ü` is `c39c`, whereas `3f3f` means two literal `?` were stored.
+### Test scriptleri
 
-## Backend architecture
+```bash
+cd backend
+node test-scripts/test-clothing-items.js             # POST + snake_case + GET doğrulaması
+node test-scripts/test-clothing-items.js --cleanup   # oluşturduğu kaydı sonda siler
+```
 
-Strict layering, class-based, constructor dependency injection:
+Script `test-data.json`'ı gövde olarak kullanır ve üç şeyi doğrular: kayıt `201` ile
+oluşuyor mu, yanıt snake_case mi (camelCase sızmış mı), kayıt `GET` listesinde görünüyor mu.
+Sunucu kapalıysa yığın izi yerine anlaşılır bir mesaj basıp `1` ile çıkar.
+
+**Not:** `backend/test-data.json` bir çalışma dosyasıdır; alan adları **camelCase** olmalıdır
+(`userId`, `categoryId`). Bir kez snake_case yazıldığı için istek `400` dönmüştü.
+
+### Windows tuzakları
+
+Git Bash UTF-8'i her iki yönde de bozabilir:
+
+- `curl -d '{"name":"Gömlek"}'` bozuk byte gönderir — kayıt veritabanına hatalı düşer.
+- `.sql` dosyasını `psql`e pipe etmek seed verisini bozar (`Üst` → `??st` böyle oldu).
+- Konsol **çıktısı** da güvenilir değildir; ekranda bozuk görünen `ö` tek başına hata kanıtı değildir.
+
+Kodlama önemliyse kabuğu atlayın: API'yi Node `fetch` script'iyle sürün, migration'ları
+`docker cp` ile kopyalayın. Görüntü hatasını gerçek bozulmadan ayırmak için byte karşılaştırın:
+
+```sql
+SELECT encode(name::bytea,'hex') FROM categories;
+-- doğru UTF-8 'Ü' = c39c ; '3f3f' ise iki literal '?' saklanmış demektir
+```
+
+Ayrıca dosya yazarken PowerShell'e dikkat: `Out-File`/`>` genelde **BOM'lu** UTF-8 üretir,
+`Set-Content` ise sistem ANSI kod sayfasını kullanır. Depoda şu an BOM'lu dosya yoktur;
+öyle kalması için dosyaları düzenleme araçlarıyla veya Node ile yazın. Bir kaynak dosyada
+`EF BF BD` (replacement karakteri) görürseniz bu gerçek bozulmadır — bir kez
+`OutfitSuggestion.jsx` içinde oluşup elle düzeltildi.
+
+### Doğrulama
+
+Otomatik test yoktur. Doğrulama = `npm run lint` + uygulamayı/API'yi elle sürmek
+(tarayıcı, `curl` veya tek kullanımlık Node `fetch` script'i). **Test komutu uydurmayın.**
+
+---
+
+## 8. Mimari Notlar ve Sözleşmeler
+
+### Backend
 
 ```
 routes/ → controllers/ → services/ → repositories/ → config/database.js (pg Pool)
 ```
 
-Every controller extends `BaseController`, which owns the single `handleError` that maps a thrown `AppError` subclass to its `statusCode` and everything else to `500`. Subclass constructors must call `super()` before touching `this`.
-
-**The route file is the DI container.** It is the only place that instantiates anything — see `src/routes/clothingItemRoutes.js`:
+**Route dosyası DI container'ıdır.** Nesneleri yalnızca orası kurar:
 
 ```js
 const repository = new ClothingItemRepository(pool)
@@ -77,62 +531,130 @@ const controller = new ClothingItemController(service)
 router.get('/clothing-items', (req, res) => controller.getAll(req, res))
 ```
 
-Handlers must be wrapped in arrows (or bound) — passing `controller.getAll` directly loses `this`. Follow this same shape for every new resource; `Health*` and `ClothingItem*` are the two reference implementations.
+Handler'lar ok fonksiyonuyla sarılmalıdır — `controller.getAll` doğrudan geçilirse `this` kaybolur.
+Her yeni kaynak bu şekli izler; `Health*` ve `ClothingItem*` referans uygulamalardır.
 
-Responsibilities per layer:
-- **Repository** — SQL only, always parameterized. Logs and rethrows on error. Returns `null` (not a throw) when a row is missing. Multi-table writes (see `OutfitRepository.create`) take a client from the pool and wrap `BEGIN`/`COMMIT`/`ROLLBACK`, releasing in `finally`.
-- **Service** — validation and business rules. Throws `ValidationError` / `NotFoundError` / `ConflictError` from `src/utils/errors.js`. Checks existence before update/delete so the controller gets a real 404. Also where Postgres error codes become meaningful HTTP results: `23505` (unique violation) → 409, `23503` (FK violation) → 400.
-- **Controller** — thin HTTP adapter. Every method is `try/catch` around the service call, delegating to `this.handleError(error, res)`.
+Katman sorumlulukları:
 
-Existing resources: `health`, `categories` (read-only), `users`, `style-preferences`, `clothing-items`, `outfits`.
+- **Repository** — yalnızca SQL, her zaman parametreli. Hatayı loglayıp yeniden fırlatır.
+  Satır yoksa `null` döner (fırlatmaz). Çok tablolu yazımlar (`OutfitRepository.create`)
+  havuzdan client alıp `BEGIN`/`COMMIT`/`ROLLBACK` sarar ve `finally` içinde bırakır.
+- **Service** — doğrulama ve iş kuralları. `ValidationError` / `NotFoundError` / `ConflictError`
+  fırlatır. Update/delete öncesi varlık kontrolü yapar ki controller gerçek `404` alsın.
+  Postgres hata kodları burada anlamlı HTTP sonuçlarına çevrilir: `23505` → 409, `23503` → 400.
+- **Controller** — ince HTTP adaptörü. Her metod servis çağrısını `try/catch`'e alır ve
+  `this.handleError(error, res)`'e devreder.
 
-### Conventions that bite
+Tüm controller'lar `BaseController`'dan türer; `handleError` fırlatılan `AppError` alt sınıfını
+kendi `statusCode`'una, diğer her şeyi `500`'e çevirir. Alt sınıf constructor'ları `this`'e
+dokunmadan önce `super()` çağırmalıdır.
 
-- **Request bodies are camelCase, responses are snake_case.** Services/repositories destructure `userId`, `categoryId`, `imageUrl`, but responses come straight from `RETURNING *`, so clients receive `user_id`, `category_id`, `is_favorite`. There is no serialization layer. (`backend/test-data.json` is a scratch file with snake_case keys — it would fail validation as-is.)
-- **Soft delete for `clothing_items` only.** Those rows are never removed; every read filters `is_deleted = false`. `users` and `outfits` are hard-deleted and rely on `ON DELETE CASCADE`. Outfit reads filter deleted items in the `JOIN` condition, so an outfit whose pieces were all deleted still returns with `items: []` rather than vanishing.
-- **`users` never uses `RETURNING *`.** `UserRepository` selects an explicit column list because `RETURNING *` would leak `password_hash` into API responses. Keep that list intact when adding columns.
-- **`style_preferences` is one row per user**, enforced by a `UNIQUE (user_id)` constraint added in `002`, which is what makes the single-statement `ON CONFLICT` upsert possible. `PUT /api/style-preferences` both creates and updates.
-- **`config/database.js` registers a `pool.on('error')` handler.** Do not remove it — `pg` emits `'error'` on idle clients when Postgres restarts, and with no listener Node treats it as unhandled and kills the process.
-- Backend reads discrete `DB_HOST` / `DB_PORT` / `DB_NAME` / `DB_USER` / `DB_PASSWORD`. The `DATABASE_URL` line in the **root** `.env.example` is unused by the current code.
+**Silinmemesi gerekenler:** `config/database.js` içindeki `pool.on('error')` dinleyicisi
+(bkz. Aşama 5) ve `UserRepository` içindeki açık kolon listesi (bkz. Aşama 6b).
 
-## Frontend architecture
+Backend ayrı `DB_HOST` / `DB_PORT` / `DB_NAME` / `DB_USER` / `DB_PASSWORD` değişkenleri okur.
+**Kökteki** `.env.example` içindeki `DATABASE_URL` satırı mevcut kod tarafından kullanılmaz.
 
-### The frontend does not talk to the backend yet
+### Frontend
 
-Every screen renders mock data from `src/data/clothing.js` (`CLOTHES`, `CATEGORIES`, `OUTFITS`). The CRUD API exists but nothing fetches it. Wiring a screen to the API means replacing those imports and reconciling the camelCase/snake_case split above.
+**API katmanı:** `src/lib/api.js` tek fetch noktasıdır; `CURRENT_USER_ID` sabiti burada
+tanımlıdır. `request` yanıt `ok` değilse gövdedeki `{ error }` mesajını okuyup fırlatır,
+böylece backend'in Türkçe hataları kullanıcıya gösterilebilir. `204` için `null` döner.
 
-### Persistence is localStorage, centralized
+**Dönüştürücü:** `src/lib/transformers.js` snake_case → camelCase çevirisini ve
+`category_id` → kategori **adı** eşlemesini yapar (ikon eşlemesi ada göre çalışır).
+Masonry yüksekliği id'den deterministik türetilir.
 
-`src/lib/onboarding.js` is the single owner of all persisted state (`dg_`-prefixed keys): the onboarding-completed flag, user profile (name/email/age), and style-quiz answers. Read and write through its exported functions rather than touching `localStorage` directly — `Dashboard`, `Profile`, `AccountInfo`, and `StylePreferences` all depend on that shape.
+**Veri çekme deseni:** Sayfalar `useEffect` içinde `Promise.all` ile paralel çeker;
+`isStale` bayrağı geç gelen yanıtın state'i ezmesini önler; `isLoading` / `hasError`
+durumları iskelet ve boş/hata ekranlarını sürer.
 
-### Onboarding gate
+**Kalıcı durum:** `src/lib/onboarding.js` `dg_` önekli tüm localStorage anahtarlarının
+tek sahibidir (onboarding bayrağı, kullanıcı profili, anket cevapları). `localStorage`'a
+doğrudan dokunmayın — `Dashboard`, `Profile`, `AccountInfo`, `StylePreferences` bu şekle bağlıdır.
 
-`App.jsx` holds `showOnboarding` state seeded from `isOnboardingCompleted()`. When true it returns `<Onboarding>` **instead of** the router/nav tree, so onboarding is chrome-free. A deliberately low-contrast `RotateCcw` button in `Navbar` re-triggers it for testing — it is temporary and meant to be removed.
+**Onboarding kapısı:** `App.jsx` `showOnboarding` durumunu `isOnboardingCompleted()` ile
+başlatır; true iken router/nav ağacı yerine `<Onboarding>` döner.
 
-The quiz questions live in `src/data/styleQuestions.js` and the option rendering in `components/onboarding/QuestionOptions.jsx`; both are shared by the first-run wizard (`pages/Onboarding.jsx`) and the editable `pages/StylePreferences.jsx`. Change a question in one place and both stay in sync.
+**İki navigasyon senkron tutulmalı:** `Navbar` (masaüstü, liste `sm:` altında gizli) ve
+`BottomNav` (mobil, `sm:hidden`) ayrı bileşenlerdir, ayrı sekme dizileri vardır.
+**Yeni üst seviye rota eklemek ikisini de düzenlemek demektir.** İçerik sarmalayıcısı
+`pb-24 sm:pb-0` taşır; `ScrollToTopButton` aynı sebeple `bottom-24 sm:bottom-6` konumundadır.
 
-### Two navs must be kept in sync
+### Tasarım sistemi
 
-`Navbar` (desktop, list hidden under `sm:`) and `BottomNav` (mobile, `sm:hidden`) are separate components with separate tab arrays. **Adding a top-level route means editing both.** The content wrapper in `App.jsx` carries `pb-24 sm:pb-0` so the fixed mobile bar doesn't cover content, and `ScrollToTopButton` is offset to `bottom-24 sm:bottom-6` for the same reason.
+Token'lar `src/index.css` içinde Tailwind v4'ün `@theme` bloğunda tanımlıdır —
+**`tailwind.config.js` yoktur.**
 
-### Design system
+- Renkler: `ivory` (sayfa zemini), `ink` (metin), `warm-gray` (yer tutucu yüzeyler),
+  `dusty-rose` (vurgu), `burgundy` (birincil/aktif)
+- Fontlar: `font-display` (Playfair Display — başlıklar, **daima italik**),
+  `font-body` (Lora), `font-sans` (Inter — arayüz metni)
+- Animasyonlar: `animate-fade-in`, `animate-page-fade`
 
-Tokens are defined in `src/index.css` with Tailwind v4's CSS-first `@theme` block — **there is no `tailwind.config.js`.** Add or change design tokens there.
+Yeniden icat etmek yerine eşleşilmesi gereken kalıplar: `components/ui/Button.jsx` ile
+tam genişlikte hap butonlar (`rounded-full`), `rounded-2xl border border-ink/10` kartlar,
+sayfa başlıkları altında `h-px w-16 bg-dusty-rose` çizgi, büyük harf `tracking-[0.15em]`
+mikro etiketler, seçili durum için `border-burgundy bg-burgundy/5 text-burgundy`.
+Paylaşılan primitifler `components/ui/` altındadır.
 
-- Colors: `ivory` (page bg), `ink` (text), `warm-gray` (placeholder surfaces), `dusty-rose` (accent), `burgundy` (primary/active)
-- Fonts: `font-display` (Playfair Display — headings, always `italic`), `font-body` (Lora), `font-sans` (Inter — UI/body text)
-- Animations: `animate-fade-in`, `animate-page-fade`
+Kategori → lucide ikon eşlemesi `src/lib/categoryIcons.js` içinde merkezidir ve
+`001_initial_schema.sql` seed verisindeki kebab-case ikon adlarıyla hizalı tutulmalıdır.
 
-Recurring idioms worth matching rather than reinventing: full-width pill buttons via `components/ui/Button.jsx` (`rounded-full`), `rounded-2xl border border-ink/10` cards, a `h-px w-16 bg-dusty-rose` rule under page titles, uppercase `tracking-[0.15em]` micro-labels, and burgundy selection state as `border-burgundy bg-burgundy/5 text-burgundy`. `components/ui/` holds the shared primitives (`Button`, `Modal`, `PageHeader`, `EmptyState`, `FilterPills`, `StatCard`, `QuickActionCard`).
+### Geliştirici kaçış kapıları
 
-Category → lucide icon mapping is centralized in `src/lib/categoryIcons.js`, and the seed data in `001_initial_schema.sql` stores the matching kebab-case icon names (`shirt`, `panel-bottom`, …). Keep the two aligned.
+`pages/Wardrobe.jsx` içinde boş durumları önizlemek için `DEV_FORCE_EMPTY` ve
+`DEV_FORCE_EMPTY_CATEGORY` sabitleri bulunuyordu; API'ye geçişte kaldırıldılar
+(boş durum artık gerçek veriyle veya ağ mock'uyla test edilir).
+`Navbar`'daki `RotateCcw` butonu onboarding'i yeniden tetikler — **geçicidir**.
 
-### Dev-only escape hatches
+---
 
-`pages/Wardrobe.jsx` has `DEV_FORCE_EMPTY` and `DEV_FORCE_EMPTY_CATEGORY` module constants for previewing empty states, and several pages fake latency with a `setTimeout` (`LOADING_DURATION`) to exercise skeleton/spinner UI.
+## 9. Değişiklik Günlüğü
 
-## Database
+> Bundan sonraki her çalışma buraya tarihiyle işlenir: eklenen özellikler, düzeltilen
+> hatalar, alınan mimari kararlar. En yeni kayıt en üstte.
 
-Schema: `users`, `style_preferences`, `categories`, `clothing_items`, `outfits`, `outfit_items` — defined in `backend/src/db/migrations/001_initial_schema.sql` (UUID PKs via `pgcrypto`/`gen_random_uuid()`, `categories.id` is `SERIAL`, seeded with the 6 wardrobe categories).
+### 2026-08-18 — Kombin Öner sayfası API'ye bağlandı
+- `OutfitSuggestion.jsx` gerçek gardıroptan kombin üretir; "Bu Kombini Kaydet" gerçek
+  `POST /api/outfits` atar, kaydedilen kombin kalıcıdır.
+- `api.js`'e POST desteği ve backend hata mesajını yakalama eklendi.
+- **Düzeltme:** `Button` bileşenine `disabled:pointer-events-none disabled:opacity-60`
+  eklendi — devre dışı butonda hover kuralı metni okunamaz hâle getiriyordu.
+- **Karar:** Yapay `LOADING_DURATION` gecikmesi kaldırıldı.
+- `occasion` girişi `maxLength={50}` ile sınırlandı (`VARCHAR(50)`).
 
-Schema changes go in a **new** numbered `.sql` file in that directory and are applied manually; do not edit an already-applied migration.
+### 2026-08-18 — Ana Sayfa API'ye bağlandı
+- İstatistikler (Toplam Parça / Kombin / Favori) ve "Son Eklenenler" gerçek veriden.
+- `fetchOutfits` eklendi; sabit `8 Kombin` değeri gerçek sayıyla değiştirildi.
+- **Karar:** Hata durumunda istatistikler `0` yerine `–` gösterir.
+
+### 2026-08-17 — Gardırop ve Kıyafet Detay API'ye bağlandı
+- `src/lib/api.js` ve `src/lib/transformers.js` ortak altyapısı kuruldu.
+- **Düzeltme:** `ClothingDetail` mock `Number(id)` araması yüzünden UUID'lerle kırılıyordu.
+- **Karar:** Masonry yüksekliği id hash'inden türetilir (index'ten değil).
+
+### 2026-08-17 — Kalan CRUD API'leri
+- `categories`, `users`, `style-preferences`, `outfits` uçları eklendi.
+- `BaseController` ve `AppError` / `ConflictError` altyapısı.
+- **Düzeltme:** Kategori adlarındaki UTF-8 bozulması (`??st` → `Üst`) giderildi.
+- **Güvenlik:** `UserRepository` `password_hash` sızdırmamak için açık kolon listesi kullanır.
+- **Şema:** `002` migration — `style_preferences.user_id` UNIQUE + `outfit_items` FK index'leri.
+
+### 2026-08-17 — Backend iskeleti, şema ve clothing-items CRUD
+- Express + `pg` katmanlı mimari, `health` referans uygulaması.
+- `001_initial_schema.sql` — 6 tablo, index'ler, kategori seed verisi.
+- **Düzeltme:** `pool.on('error')` dinleyicisi — Postgres yeniden başladığında süreç çöküyordu.
+
+### 2026-08-17 — Docker ve profil routing düzeltmeleri
+- PostgreSQL 16 `docker-compose.yml`, `.env.example`, kök `.gitignore`.
+- Profil alt sayfaları oluşturulup rotalara bağlandı; anket soruları ortak modüle çıkarıldı.
+
+### 2026-08-15 — Onboarding, profil ve mobil navigasyon
+- İlk açılış akışı (kayıt + 5 soruluk tarz anketi + karşılama), localStorage kalıcılığı.
+- Profil sayfası, hesap yönetimi ekranları ve mobil bottom tab bar.
+
+### 2026-08-11–13 — Frontend tasarım sistemi
+- Tailwind v4 CSS-first token'ları, tipografi, renk paleti.
+- Gardırop, Ana Sayfa, Kombin Öner, Kıyafet Detay sayfaları (mock veriyle).
+- Skeleton loading, empty state, animasyonlar, kategori ikonları, arama, breadcrumb.
