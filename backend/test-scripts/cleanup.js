@@ -15,7 +15,14 @@ require('dotenv').config({ path: path.join(__dirname, '..', '.env') })
 const pool = require('../src/config/database')
 
 // Test scriptlerinin ürettiği kayıtlar bu kalıplarla adlandırılır.
-const TEST_NAME_PATTERNS = ['Test Gomlek', 'Test Parça %', 'Temiz Akış %', 'Regresyon Testi', 'x%']
+const TEST_NAME_PATTERNS = [
+  'Test Gomlek',
+  'Test Parça %',
+  'Temiz Akış %',
+  'Renk Testi %',
+  'Regresyon Testi',
+  'x%',
+]
 const TEST_EMAIL_PATTERN = '%@example.com'
 
 const isDryRun = process.argv.includes('--dry-run')

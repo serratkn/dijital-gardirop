@@ -648,6 +648,30 @@ Kategori → lucide ikon eşlemesi `src/lib/categoryIcons.js` içinde merkezidir
 > Bundan sonraki her çalışma buraya tarihiyle işlenir: eklenen özellikler, düzeltilen
 > hatalar, alınan mimari kararlar. En yeni kayıt en üstte.
 
+### 2026-08-18 — Renk paleti genişletildi ve görsel seçiciye dönüştürüldü
+- Renk listesi 6'dan **22'ye** çıkarıldı ve `src/lib/colors.js` modülüne taşındı
+  (`CLOTHING_COLORS`, `DEFAULT_COLOR`, `getColorSwatch`). Her renk `name` + `hex` tutar;
+  **veritabanına yazılan değer `name`'dir**, `hex` yalnızca arayüzde daireyi boyar.
+  "Çok Renkli" tek renkle temsil edilemediği için `gradient` alanı kullanır.
+- **Karar: dropdown yerine renk daireleri.** Bir moda uygulamasında "Pudra" ile "Pembe"
+  farkı isimden değil renkten anlaşılır. 22 dairenin altına isim yazmak modalı aşırı
+  uzatacağı için isimler `title`/`aria-label`'da tutuldu ve **seçili rengin adı** etiketin
+  yanında gösterildi. Seçili daire burgundy çerçeve + halka ve onay ikonu alır.
+- Yeni bileşen `components/ui/ColorPicker.jsx` — ileride kıyafet düzenleme ekranında
+  da kullanılabilsin diye QuickAddModal'dan bağımsız yazıldı.
+- Kategori alanı tam genişliğe alındı (renk artık kendi bölümünde).
+- **Düzeltme (taşma):** `Modal` bileşeninde yükseklik sınırı yoktu; uzun içerik ekran
+  dışına taşıyordu. `max-h-[90vh] overflow-y-auto` eklendi.
+- **Düzeltme (kritik — modal ekran dışında konumlanıyordu):** Renk seçici sonrası yapılan
+  ölçümde modalın `top` değerinin viewport'un tamamen dışında (640px ekranda `top: 817`)
+  olduğu görüldü. Sebep: `App.jsx`'teki sayfa sarmalayıcısı `animate-page-fade` taşır ve
+  animasyonun son karesi `transform: translateY(0)` bırakır; **transform'lu bir ata,
+  `position: fixed` için yeni bir containing block yaratır**, dolayısıyla modal viewport
+  yerine sayfa div'ine göre konumlanıyordu. Sayfa ne kadar kaydırılmışsa modal o kadar
+  aşağıda kalıyordu. `Modal` artık `createPortal` ile `document.body`'ye render ediliyor.
+  Bu hata renk seçiciyle gelmedi — daha önce de vardı, modal kısa olduğu için fark
+  edilmemişti ve **tüm modalları** (silme onayları dahil) etkiliyordu.
+
 ### 2026-08-18 — Onboarding/profil veritabanına bağlandı, Kombinlerim sayfası eklendi
 - **Onboarding artık veritabanına yazıyor:** "Gardırobuma Git" `POST /api/users` ile kullanıcıyı
   oluşturur, dönen id `dg_user_id` anahtarına yazılır, ardından `PUT /api/style-preferences`

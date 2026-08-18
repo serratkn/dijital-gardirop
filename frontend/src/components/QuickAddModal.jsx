@@ -1,9 +1,9 @@
 import { useEffect, useState } from 'react'
 import Modal from './ui/Modal'
 import Button from './ui/Button'
+import ColorPicker from './ui/ColorPicker'
 import { getCurrentUserId, createClothingItem, fetchCategories } from '../lib/api'
-
-const COLORS = ['Beyaz', 'Siyah', 'Bej', 'Lacivert', 'Kahverengi', 'Pudra']
+import { DEFAULT_COLOR } from '../lib/colors'
 
 const fieldLabel = 'text-xs font-medium uppercase tracking-[0.15em] text-ink/50'
 const fieldInput =
@@ -16,7 +16,7 @@ function QuickAddModal({ isOpen, onClose, onCreated }) {
   const [categories, setCategories] = useState([])
   const [name, setName] = useState('')
   const [categoryId, setCategoryId] = useState('')
-  const [color, setColor] = useState(COLORS[0])
+  const [color, setColor] = useState(DEFAULT_COLOR)
   const [isSaving, setIsSaving] = useState(false)
   const [errorMessage, setErrorMessage] = useState('')
 
@@ -48,7 +48,7 @@ function QuickAddModal({ isOpen, onClose, onCreated }) {
 
   const resetForm = () => {
     setName('')
-    setColor(COLORS[0])
+    setColor(DEFAULT_COLOR)
     setErrorMessage('')
   }
 
@@ -120,35 +120,29 @@ function QuickAddModal({ isOpen, onClose, onCreated }) {
           />
         </div>
 
-        <div className="grid grid-cols-2 gap-4">
-          <div>
-            <label className={fieldLabel}>Kategori</label>
-            <select
-              value={categoryId}
-              onChange={(event) => setCategoryId(event.target.value)}
-              className={fieldInput}
-            >
-              {categories.length === 0 && <option value="">Yükleniyor...</option>}
-              {categories.map((option) => (
-                <option key={option.id} value={option.id}>
-                  {option.name}
-                </option>
-              ))}
-            </select>
-          </div>
-          <div>
+        <div>
+          <label className={fieldLabel}>Kategori</label>
+          <select
+            value={categoryId}
+            onChange={(event) => setCategoryId(event.target.value)}
+            className={fieldInput}
+          >
+            {categories.length === 0 && <option value="">Yükleniyor...</option>}
+            {categories.map((option) => (
+              <option key={option.id} value={option.id}>
+                {option.name}
+              </option>
+            ))}
+          </select>
+        </div>
+
+        <div>
+          <div className="flex items-baseline justify-between">
             <label className={fieldLabel}>Renk</label>
-            <select
-              value={color}
-              onChange={(event) => setColor(event.target.value)}
-              className={fieldInput}
-            >
-              {COLORS.map((option) => (
-                <option key={option} value={option}>
-                  {option}
-                </option>
-              ))}
-            </select>
+            <span className="text-sm text-ink/60">{color}</span>
+          </div>
+          <div className="mt-3">
+            <ColorPicker value={color} onChange={setColor} />
           </div>
         </div>
 
