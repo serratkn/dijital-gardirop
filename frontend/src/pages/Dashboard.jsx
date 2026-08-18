@@ -1,18 +1,81 @@
+import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { GraduationCap, Utensils } from 'lucide-react'
 import PageHeader from '../components/ui/PageHeader'
 import StatCard from '../components/ui/StatCard'
 import QuickActionCard from '../components/ui/QuickActionCard'
 import ClothingCard from '../components/ClothingCard'
-import { CLOTHES } from '../data/clothing'
+import SkeletonCard from '../components/SkeletonCard'
 import { getUserProfile } from '../lib/onboarding'
+import { CURRENT_USER_ID, fetchCategories, fetchClothingItems, fetchOutfits } from '../lib/api'
+import { toCategoryNameMap, toClothingItems } from '../lib/transformers'
 
-const RECENT_IDS = [1, 5, 13, 17]
-const recentItems = CLOTHES.filter((item) => RECENT_IDS.includes(item.id))
+const RECENT_COUNT = 4
+const SKELETON_HEIGHTS = ['h-64', 'h-48', 'h-60', 'h-52']
+
+function StatCardSkeleton() {
+  return (
+    <div className="rounded-2xl border border-ink/10 bg-warm-gray px-6 py-8 text-center">
+      <div className="mx-auto h-9 w-12 animate-pulse rounded-lg bg-ink/10" />
+      <div className="mx-auto mt-3 h-3 w-24 animate-pulse rounded-full bg-ink/10" />
+    </div>
+  )
+}
 
 function Dashboard() {
   const { name: currentUserName } = getUserProfile()
   const greeting = currentUserName ? `Hoş Geldin, ${currentUserName}` : 'Hoş Geldin'
+
+  const [items, setItems] = useState([])
+  const [outfitCount, setOutfitCount] = useState(0)
+  const [isLoading, setIsLoading] = useState(true)
+  const [hasError, setHasError] = useState(false)
+
+  useEffect(() => {
+    let isStale = false
+
+    async function loadDashboard() {
+      setIsLoading(true)
+      setHasError(false)
+
+      try {
+        // Kategoriler kart etiketleri ve ikonları için gerekli:
+        // parçalar yalnızca category_id taşır, ikon eşlemesi ada göre yapılır.
+        const [categoryRows, itemRows, outfitRows] = await Promise.all([
+          fetchCategories(),
+          fetchClothingItems(CURRENT_USER_ID),
+          fetchOutfits(CURRENT_USER_ID),
+        ])
+
+        if (isStale) return
+
+        setItems(toClothingItems(itemRows, toCategoryNameMap(categoryRows)))
+        setOutfitCount(outfitRows.length)
+      } catch (error) {
+        if (isStale) return
+        console.error('Ana sayfa verisi alınamadı:', error)
+        setHasError(true)
+        setItems([])
+        setOutfitCount(0)
+      } finally {
+        if (!isStale) setIsLoading(false)
+      }
+    }
+
+    loadDashboard()
+
+    return () => {
+      isStale = true
+    }
+  }, [])
+
+  // Backend listeyi created_at DESC sıralı döndürür, baştan 4 parça
+  // "son eklenenler" demektir.
+  const recentItems = items.slice(0, RECENT_COUNT)
+  const favoriteCount = items.filter((item) => item.isFavorite).length
+
+  // Hata halinde 0 göstermek yanıltıcı olur: sayı bilinmiyor demek için "–".
+  const statValue = (value) => (hasError ? '–' : value)
 
   return (
     <div className="min-h-screen bg-ivory">
@@ -24,9 +87,19 @@ function Dashboard() {
         />
 
         <div className="mt-12 grid grid-cols-1 gap-4 sm:grid-cols-3">
-          <StatCard value={CLOTHES.length} label="Toplam Parça" />
-          <StatCard value={8} label="Kombin" />
-          <StatCard value={5} label="Favori" />
+          {isLoading ? (
+            <>
+              <StatCardSkeleton />
+              <StatCardSkeleton />
+              <StatCardSkeleton />
+            </>
+          ) : (
+            <>
+              <StatCard value={statValue(items.length)} label="Toplam Parça" />
+              <StatCard value={statValue(outfitCount)} label="Kombin" />
+              <StatCard value={statValue(favoriteCount)} label="Favori" />
+            </>
+          )}
         </div>
 
         <section className="mt-16">
@@ -59,11 +132,34 @@ function Dashboard() {
               Tümünü Gör
             </Link>
           </div>
-          <div className="mt-6 grid grid-cols-2 gap-6 sm:grid-cols-4">
-            {recentItems.map((item) => (
-              <ClothingCard key={item.id} item={item} />
-            ))}
-          </div>
+
+          {isLoading ? (
+            <div className="mt-6 grid grid-cols-2 gap-6 sm:grid-cols-4">
+              {SKELETON_HEIGHTS.map((height, index) => (
+                <SkeletonCard key={index} imgHeight={height} />
+              ))}
+            </div>
+          ) : hasError ? (
+            <p className="mt-6 text-sm text-ink/50">
+              Gardırobuna şu an ulaşılamıyor. Bağlantını kontrol edip sayfayı yenilemeyi dene.
+            </p>
+          ) : recentItems.length === 0 ? (
+            <div className="mt-6 flex flex-col items-start gap-3">
+              <p className="text-sm text-ink/50">Gardırobunda henüz parça yok.</p>
+              <Link
+                to="/gardirop"
+                className="text-sm text-burgundy transition-colors hover:text-dusty-rose"
+              >
+                İlk parçanı ekle
+              </Link>
+            </div>
+          ) : (
+            <div className="mt-6 grid grid-cols-2 gap-6 sm:grid-cols-4 animate-fade-in">
+              {recentItems.map((item) => (
+                <ClothingCard key={item.id} item={item} />
+              ))}
+            </div>
+          )}
         </section>
       </div>
     </div>

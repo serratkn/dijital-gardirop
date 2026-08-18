@@ -25,3 +25,7 @@ export function fetchClothingItems(userId) {
 export function fetchClothingItem(id) {
   return request(`/clothing-items/${encodeURIComponent(id)}`)
 }
+
+export function fetchOutfits(userId) {
+  return request(`/outfits?userId=${encodeURIComponent(userId)}`)
+}
