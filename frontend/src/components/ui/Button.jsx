@@ -13,7 +13,7 @@ function Button({ variant = 'primary', size = 'md', className = '', children, ..
   return (
     <button
       type="button"
-      className={`rounded-full font-medium transition-colors duration-200 ${VARIANTS[variant]} ${SIZES[size]} ${className}`}
+      className={`rounded-full font-medium transition-colors duration-200 disabled:pointer-events-none disabled:opacity-60 ${VARIANTS[variant]} ${SIZES[size]} ${className}`}
       {...props}
     >
       {children}
