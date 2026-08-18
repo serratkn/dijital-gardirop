@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { GraduationCap, Utensils } from 'lucide-react'
 import PageHeader from '../components/ui/PageHeader'
@@ -67,6 +67,13 @@ function Dashboard() {
     return () => {
       isStale = true
     }
+  }, [])
+
+  // Favori değişimi "Favori" istatistiğine anında yansımalı.
+  const handleFavoriteChange = useCallback((itemId, isFavorite) => {
+    setItems((previous) =>
+      previous.map((item) => (item.id === itemId ? { ...item, isFavorite } : item)),
+    )
   }, [])
 
   // Backend listeyi created_at DESC sıralı döndürür, baştan 4 parça
@@ -156,7 +163,7 @@ function Dashboard() {
           ) : (
             <div className="mt-6 grid grid-cols-2 gap-6 sm:grid-cols-4 animate-fade-in">
               {recentItems.map((item) => (
-                <ClothingCard key={item.id} item={item} />
+                <ClothingCard key={item.id} item={item} onFavoriteChange={handleFavoriteChange} />
               ))}
             </div>
           )}

@@ -1,4 +1,5 @@
 const { NotFoundError, ValidationError } = require('../utils/errors')
+const { FIELD_LIMITS, assertFieldLengths } = require('../utils/validators')
 
 class ClothingItemService {
   constructor(clothingItemRepository) {
@@ -72,6 +73,7 @@ class ClothingItemService {
     if (!data.name || !data.name.trim()) {
       throw new ValidationError('name zorunludur')
     }
+    assertFieldLengths(data, FIELD_LIMITS.clothingItems)
   }
 
   #validateUpdateData(data) {
@@ -81,6 +83,7 @@ class ClothingItemService {
     if (!data.name || !data.name.trim()) {
       throw new ValidationError('name zorunludur')
     }
+    assertFieldLengths(data, FIELD_LIMITS.clothingItems)
   }
 }
 

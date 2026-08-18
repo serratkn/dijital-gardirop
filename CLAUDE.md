@@ -238,13 +238,12 @@ olduğu için iskelet oraya taşındı, kombin üretimi istemci tarafında anlı
 | Konu | Durum |
 |---|---|
 | **Kimlik doğrulama yok** | `api.js` içinde sabit `CURRENT_USER_ID` kullanılır. Oturum sistemi geldiğinde kaldırılacak. |
-| **QuickAddModal kaydetmiyor** | "Yeni Parça Ekle" formu `POST /api/clothing-items`'a bağlı değil; `handleSave` yalnızca modalı kapatır. Kategori dropdown'u hâlâ mock `CATEGORIES` kullanır — bu yüzden `src/data/clothing.js` silinemiyor. |
-| **ClothingCard favori butonu** | `useState(false)` ile başlar; `item.isFavorite` **hiç okunmaz**. Yani favori bir parçanın kartında kalp dolu görünmez ve tıklama `PATCH .../favorite`'e gitmez. (Detay sayfası doğru başlatır ama o da kaydetmez.) |
-| **Kıyafet silme** | Detay sayfasındaki "Sil" butonu bağlı değil (`DELETE` ucu hazır). |
 | **Onboarding verisi backend'e gitmiyor** | Kayıt ekranı ve tarz anketi yalnızca localStorage'a yazar; `POST /api/users` ve `PUT /api/style-preferences` uçları hazır ama kullanılmıyor. |
 | **Profil ekranları localStorage'da** | `AccountInfo`, `StylePreferences` localStorage okur/yazar; `Bildirimler` ve `Yardım & Destek` "yakında" sayfasıdır. |
-| **Fotoğraf yükleme yok** | `image_url` kolonu var ama dosya yükleme akışı yok; tüm kartlar `warm-gray` placeholder gösterir. |
+| **Fotoğraf yükleme yok** | `image_url` kolonu var ama dosya yükleme akışı yok; tüm kartlar `warm-gray` placeholder gösterir. QuickAddModal'daki "Fotoğraf Yükle" butonu bilinçli olarak devre dışıdır. |
 | **Kombin listeleme ekranı yok** | Kombinler kaydedilebiliyor ama kayıtlı kombinleri gösteren bir sayfa yok (Ana Sayfa'daki "Hızlı Kombin Öner" kartları hâlâ statik metin). |
+| **Kıyafet düzenleme yok** | `PUT /api/clothing-items/:id` ucu hazır ama arayüzde düzenleme akışı yok. |
+| **Kombin favori/giyildi** | `PATCH /outfits/:id/favorite` ve `.../worn` uçları hazır ama arayüzde kullanılmıyor. |
 | **Test altyapısı yok** | Test framework'ü yoktur. Doğrulama: `npm run lint` + elle deneme + `backend/test-scripts/`. |
 | **Onboarding sıfırlama butonu** | `Navbar`'daki düşük kontrastlı `RotateCcw` butonu geçicidir, yayına çıkmadan kaldırılmalıdır. |
 

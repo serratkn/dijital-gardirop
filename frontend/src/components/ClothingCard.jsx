@@ -1,15 +1,44 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { CATEGORY_ICONS } from '../lib/categoryIcons'
+import { toggleClothingItemFavorite } from '../lib/api'
 
-function ClothingCard({ item }) {
-  const [isFavorite, setIsFavorite] = useState(false)
+function ClothingCard({ item, onFavoriteChange }) {
+  const [isFavorite, setIsFavorite] = useState(item.isFavorite ?? false)
+  const [isPending, setIsPending] = useState(false)
   const CategoryIcon = CATEGORY_ICONS[item.category]
 
-  const toggleFavorite = (event) => {
+  // Liste yeniden yüklendiğinde (örn. yeni parça eklendikten sonra)
+  // karttaki durum tazelenen veriyle hizalanır.
+  useEffect(() => {
+    setIsFavorite(item.isFavorite ?? false)
+  }, [item.isFavorite])
+
+  const toggleFavorite = async (event) => {
+    // Kart bir Link olduğu için tıklama yönlendirmeyi tetiklememeli.
     event.preventDefault()
     event.stopPropagation()
-    setIsFavorite((prev) => !prev)
+
+    if (isPending) return
+
+    const previous = isFavorite
+    const next = !previous
+
+    // İyimser güncelleme: arayüz anında tepki verir, istek arkada gider.
+    setIsFavorite(next)
+    setIsPending(true)
+
+    try {
+      const updated = await toggleClothingItemFavorite(item.id)
+      // Sunucunun döndürdüğü değer nihai kaynaktır.
+      setIsFavorite(updated.is_favorite)
+      onFavoriteChange?.(item.id, updated.is_favorite)
+    } catch (error) {
+      console.error('Favori durumu güncellenemedi:', error)
+      setIsFavorite(previous)
+    } finally {
+      setIsPending(false)
+    }
   }
 
   return (
@@ -21,7 +50,7 @@ function ClothingCard({ item }) {
         <button
           type="button"
           onClick={toggleFavorite}
-          aria-label="Favorilere ekle"
+          aria-label={isFavorite ? 'Favorilerden çıkar' : 'Favorilere ekle'}
           aria-pressed={isFavorite}
           className={`absolute right-3 top-3 flex h-8 w-8 items-center justify-center rounded-full bg-ivory/70 backdrop-blur-sm transition-opacity duration-200 ${
             isFavorite ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'

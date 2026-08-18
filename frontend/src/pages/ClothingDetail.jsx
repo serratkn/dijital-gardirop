@@ -1,14 +1,25 @@
 import { useEffect, useState } from 'react'
-import { Link, useParams } from 'react-router-dom'
+import { Link, useNavigate, useParams } from 'react-router-dom'
 import Button from '../components/ui/Button'
-import { fetchCategories, fetchClothingItem } from '../lib/api'
+import Modal from '../components/ui/Modal'
+import {
+  deleteClothingItem,
+  fetchCategories,
+  fetchClothingItem,
+  toggleClothingItemFavorite,
+} from '../lib/api'
 import { toCategoryNameMap, toClothingItem } from '../lib/transformers'
 
 function ClothingDetail() {
   const { id } = useParams()
+  const navigate = useNavigate()
   const [item, setItem] = useState(null)
   const [isLoading, setIsLoading] = useState(true)
   const [isFavorite, setIsFavorite] = useState(false)
+  const [isFavoritePending, setIsFavoritePending] = useState(false)
+  const [isConfirmOpen, setIsConfirmOpen] = useState(false)
+  const [isDeleting, setIsDeleting] = useState(false)
+  const [actionError, setActionError] = useState('')
 
   useEffect(() => {
     let isStale = false
@@ -42,6 +53,43 @@ function ClothingDetail() {
       isStale = true
     }
   }, [id])
+
+  const handleToggleFavorite = async () => {
+    if (isFavoritePending) return
+
+    const previous = isFavorite
+
+    // İyimser güncelleme: arayüz anında tepki verir, hata olursa geri alınır.
+    setIsFavorite(!previous)
+    setIsFavoritePending(true)
+    setActionError('')
+
+    try {
+      const updated = await toggleClothingItemFavorite(id)
+      setIsFavorite(updated.is_favorite)
+    } catch (error) {
+      console.error('Favori durumu güncellenemedi:', error)
+      setIsFavorite(previous)
+      setActionError(error.message)
+    } finally {
+      setIsFavoritePending(false)
+    }
+  }
+
+  const handleDelete = async () => {
+    setIsDeleting(true)
+    setActionError('')
+
+    try {
+      await deleteClothingItem(id)
+      setIsConfirmOpen(false)
+      navigate('/gardirop')
+    } catch (error) {
+      console.error('Kıyafet silinemedi:', error)
+      setActionError(error.message)
+      setIsDeleting(false)
+    }
+  }
 
   if (isLoading) {
     return (
@@ -140,7 +188,8 @@ function ClothingDetail() {
             <div className="mt-10">
               <Button
                 variant="outline"
-                onClick={() => setIsFavorite((prev) => !prev)}
+                onClick={handleToggleFavorite}
+                disabled={isFavoritePending}
                 className="inline-flex items-center gap-2"
               >
                 <svg viewBox="0 0 24 24" strokeWidth="1.5" className="h-4 w-4">
@@ -153,8 +202,11 @@ function ClothingDetail() {
               </Button>
             </div>
 
+            {actionError && <p className="mt-4 text-sm text-burgundy">{actionError}</p>}
+
             <button
               type="button"
+              onClick={() => setIsConfirmOpen(true)}
               className="mt-10 text-xs text-burgundy/60 transition-colors hover:text-burgundy"
             >
               Sil
@@ -162,6 +214,37 @@ function ClothingDetail() {
           </div>
         </div>
       </div>
+
+      <Modal isOpen={isConfirmOpen} onClose={() => !isDeleting && setIsConfirmOpen(false)}>
+        <h2 className="font-display text-2xl italic text-ink">Bu parçayı sil</h2>
+        <p className="mt-3 text-sm text-ink/60">
+          <span className="font-medium text-ink">{item.name}</span> gardırobundan kaldırılacak.
+          Bu parçayı içeren kombinler kalır ama parça artık görünmez.
+        </p>
+
+        {actionError && <p className="mt-4 text-sm text-burgundy">{actionError}</p>}
+
+        <div className="mt-8 flex gap-3">
+          <Button
+            type="button"
+            variant="outline"
+            onClick={() => setIsConfirmOpen(false)}
+            disabled={isDeleting}
+            className="flex-1"
+          >
+            Vazgeç
+          </Button>
+          <Button
+            type="button"
+            variant="primary"
+            onClick={handleDelete}
+            disabled={isDeleting}
+            className="flex-1"
+          >
+            {isDeleting ? 'Siliniyor...' : 'Sil'}
+          </Button>
+        </div>
+      </Modal>
     </div>
   )
 }

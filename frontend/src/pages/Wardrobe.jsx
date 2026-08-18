@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { Plus, Search } from 'lucide-react'
 import { CATEGORY_ICONS } from '../lib/categoryIcons'
@@ -26,44 +26,42 @@ function Wardrobe() {
   const [isAddModalOpen, setIsAddModalOpen] = useState(false)
   const [searchQuery, setSearchQuery] = useState('')
 
+  // Yeni parça eklendikten sonra da çağrılabilmesi için efekt dışında tanımlı.
+  // showSkeleton=false ile tazeleme sırasında liste yerinde kalır, iskelete dönmez.
+  const loadWardrobe = useCallback(async ({ showSkeleton = true } = {}) => {
+    if (showSkeleton) setIsLoading(true)
+    setHasError(false)
+
+    try {
+      // Kategoriler paralel çekilir: parçalar yalnızca category_id taşıdığı
+      // için ad eşlemesi olmadan filtre ve ikonlar çalışmaz.
+      const [categoryRows, itemRows] = await Promise.all([
+        fetchCategories(),
+        fetchClothingItems(CURRENT_USER_ID),
+      ])
+
+      const nameMap = toCategoryNameMap(categoryRows)
+      setCategoryNames(categoryRows.map((row) => row.name))
+      setItems(toClothingItems(itemRows, nameMap))
+    } catch (error) {
+      console.error('Gardırop verisi alınamadı:', error)
+      setHasError(true)
+      setItems([])
+      setCategoryNames([])
+    } finally {
+      if (showSkeleton) setIsLoading(false)
+    }
+  }, [])
+
   useEffect(() => {
-    let isStale = false
-
-    async function loadWardrobe() {
-      setIsLoading(true)
-      setHasError(false)
-
-      try {
-        // Kategoriler paralel çekilir: parçalar yalnızca category_id taşıdığı
-        // için ad eşlemesi olmadan filtre ve ikonlar çalışmaz.
-        const [categoryRows, itemRows] = await Promise.all([
-          fetchCategories(),
-          fetchClothingItems(CURRENT_USER_ID),
-        ])
-
-        if (isStale) return
-
-        const nameMap = toCategoryNameMap(categoryRows)
-        setCategoryNames(categoryRows.map((row) => row.name))
-        setItems(toClothingItems(itemRows, nameMap))
-      } catch (error) {
-        if (isStale) return
-        console.error('Gardırop verisi alınamadı:', error)
-        setHasError(true)
-        setItems([])
-        setCategoryNames([])
-      } finally {
-        if (!isStale) setIsLoading(false)
-      }
-    }
-
     loadWardrobe()
+  }, [loadWardrobe])
 
-    // Bileşen erken kapanırsa (veya efekt yeniden çalışırsa) geç gelen
-    // yanıtın state'i ezmesini engeller.
-    return () => {
-      isStale = true
-    }
+  // Favori değişimini listeye yansıtır ki sayaçlar ve kalp ikonu tutarlı kalsın.
+  const handleFavoriteChange = useCallback((itemId, isFavorite) => {
+    setItems((previous) =>
+      previous.map((item) => (item.id === itemId ? { ...item, isFavorite } : item)),
+    )
   }, [])
 
   // URL'deki ?kategori= yalnızca API'den gelen kategoriler bilindikten sonra
@@ -189,7 +187,7 @@ function Wardrobe() {
             ) : (
               <div className="mt-12 columns-2 gap-6 sm:columns-3 lg:columns-4 animate-fade-in">
                 {visibleItems.map((item) => (
-                  <ClothingCard key={item.id} item={item} />
+                  <ClothingCard key={item.id} item={item} onFavoriteChange={handleFavoriteChange} />
                 ))}
               </div>
             )}
@@ -197,7 +195,11 @@ function Wardrobe() {
         )}
       </div>
 
-      <QuickAddModal isOpen={isAddModalOpen} onClose={() => setIsAddModalOpen(false)} />
+      <QuickAddModal
+        isOpen={isAddModalOpen}
+        onClose={() => setIsAddModalOpen(false)}
+        onCreated={() => loadWardrobe({ showSkeleton: false })}
+      />
     </div>
   )
 }

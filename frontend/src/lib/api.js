@@ -41,6 +41,18 @@ export function fetchClothingItem(id) {
   return request(`/clothing-items/${encodeURIComponent(id)}`)
 }
 
+export function createClothingItem(payload) {
+  return request('/clothing-items', { method: 'POST', body: payload })
+}
+
+export function toggleClothingItemFavorite(id) {
+  return request(`/clothing-items/${encodeURIComponent(id)}/favorite`, { method: 'PATCH' })
+}
+
+export function deleteClothingItem(id) {
+  return request(`/clothing-items/${encodeURIComponent(id)}`, { method: 'DELETE' })
+}
+
 export function fetchOutfits(userId) {
   return request(`/outfits?userId=${encodeURIComponent(userId)}`)
 }

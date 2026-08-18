@@ -1,4 +1,5 @@
 const { NotFoundError, ValidationError } = require('../utils/errors')
+const { FIELD_LIMITS, assertFieldLengths } = require('../utils/validators')
 
 const FOREIGN_KEY_VIOLATION = '23503'
 
@@ -24,6 +25,8 @@ class StylePreferenceService {
     if (!data.userId) {
       throw new ValidationError('userId zorunludur')
     }
+
+    assertFieldLengths(data, FIELD_LIMITS.stylePreferences)
 
     try {
       return await this.stylePreferenceRepository.upsert(data.userId, {

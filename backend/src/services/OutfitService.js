@@ -1,4 +1,5 @@
 const { NotFoundError, ValidationError } = require('../utils/errors')
+const { FIELD_LIMITS, assertMaxLength } = require('../utils/validators')
 
 const FOREIGN_KEY_VIOLATION = '23503'
 
@@ -27,6 +28,8 @@ class OutfitService {
       throw new ValidationError('userId zorunludur')
     }
 
+    assertMaxLength(data.occasion, FIELD_LIMITS.outfits.occasion, 'occasion')
+
     const clothingItemIds = this.#validateItemIds(data.clothingItemIds)
     await this.#assertItemsBelongToUser(data.userId, clothingItemIds)
 
@@ -45,6 +48,8 @@ class OutfitService {
   }
 
   async updateOutfit(id, data) {
+    assertMaxLength(data.occasion, FIELD_LIMITS.outfits.occasion, 'occasion')
+
     const existingOutfit = await this.outfitRepository.findById(id)
     if (!existingOutfit) {
       throw new NotFoundError('Kombin bulunamadı')

@@ -1,4 +1,5 @@
 const { NotFoundError, ValidationError, ConflictError } = require('../utils/errors')
+const { FIELD_LIMITS, assertMaxLength } = require('../utils/validators')
 
 const UNIQUE_VIOLATION = '23505'
 const SUBSCRIPTION_TIERS = ['free', 'premium']
@@ -18,6 +19,7 @@ class UserService {
 
   async createUser(data) {
     const email = this.#normalizeEmail(data.email)
+    this.#validateName(data.name)
     this.#validateAge(data.age)
 
     try {
@@ -38,6 +40,7 @@ class UserService {
 
   async updateUser(id, data) {
     const email = this.#normalizeEmail(data.email)
+    this.#validateName(data.name)
     this.#validateAge(data.age)
 
     const tier = data.subscriptionTier ?? 'free'
@@ -85,7 +88,13 @@ class UserService {
       throw new ValidationError('email geçerli bir adres olmalıdır')
     }
 
+    assertMaxLength(normalized, FIELD_LIMITS.users.email, 'email')
+
     return normalized
+  }
+
+  #validateName(name) {
+    assertMaxLength(name?.trim(), FIELD_LIMITS.users.name, 'name')
   }
 
   #validateAge(age) {
