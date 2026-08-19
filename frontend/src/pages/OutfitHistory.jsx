@@ -7,7 +7,6 @@ import Modal from '../components/ui/Modal'
 import Button from '../components/ui/Button'
 import { CATEGORY_ICONS } from '../lib/categoryIcons'
 import {
-  getCurrentUserId,
   deleteOutfit,
   fetchCategories,
   fetchOutfits,
@@ -117,7 +116,7 @@ function OutfitHistory() {
       // Kategoriler parça kartlarındaki ikonlar için gerekli.
       const [categoryRows, outfitRows] = await Promise.all([
         fetchCategories(),
-        fetchOutfits(getCurrentUserId()),
+        fetchOutfits(),
       ])
 
       setCategoryNames(toCategoryNameMap(categoryRows))

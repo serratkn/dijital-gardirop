@@ -1,7 +1,10 @@
-import { Link } from 'react-router-dom'
+import { useEffect, useState } from 'react'
+import { Link, useNavigate } from 'react-router-dom'
 import { UserCog, KeyRound, Crown, Palette, Bell, HelpCircle, ChevronRight, LogOut } from 'lucide-react'
 import Button from '../components/ui/Button'
-import { getUserProfile } from '../lib/onboarding'
+import { fetchMe } from '../lib/api'
+import { clearToken } from '../lib/auth'
+import { getUserProfile, setUserProfile, clearOnboardingState } from '../lib/onboarding'
 
 const listItemClass =
   'flex w-full items-center gap-4 px-5 py-4 text-left transition-colors hover:bg-warm-gray/50'
@@ -30,8 +33,37 @@ function ProfileListItem({ icon: Icon, label, to, onClick }) {
   )
 }
 
-function Profile() {
-  const { name, email } = getUserProfile()
+function Profile({ onLoggedOut }) {
+  const navigate = useNavigate()
+  // Önbellek ilk boyamayı hızlandırır; ardından sunucudaki güncel hâlle tazelenir.
+  const [profile, setProfile] = useState(() => getUserProfile())
+
+  useEffect(() => {
+    let isStale = false
+
+    fetchMe()
+      .then((user) => {
+        if (isStale) return
+        const fresh = { name: user.name ?? '', email: user.email ?? '', age: user.age ?? '' }
+        setProfile(fresh)
+        setUserProfile(fresh)
+      })
+      .catch((error) => console.error('Profil bilgisi alınamadı:', error))
+
+    return () => {
+      isStale = true
+    }
+  }, [])
+
+  const handleLogout = () => {
+    clearToken()
+    // Bir sonraki kullanıcının verisi görünmesin diye önbellek de temizlenir.
+    clearOnboardingState()
+    onLoggedOut?.()
+    navigate('/giris', { replace: true })
+  }
+
+  const { name, email } = profile
   const initial = name ? name.trim().charAt(0).toUpperCase() : '?'
 
   return (
@@ -80,6 +112,7 @@ function Profile() {
         <div className="mt-10 flex justify-center">
           <button
             type="button"
+            onClick={handleLogout}
             className="inline-flex items-center gap-2 text-sm text-burgundy/60 transition-colors hover:text-burgundy"
           >
             <LogOut size={15} strokeWidth={1.75} />

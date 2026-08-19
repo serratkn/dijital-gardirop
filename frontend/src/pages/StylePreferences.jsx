@@ -4,7 +4,7 @@ import { ChevronLeft } from 'lucide-react'
 import Button from '../components/ui/Button'
 import QuestionOptions from '../components/onboarding/QuestionOptions'
 import { STYLE_QUESTIONS } from '../data/styleQuestions'
-import { getCurrentUserId, fetchStylePreferences, saveStylePreferences } from '../lib/api'
+import { fetchStylePreferences, saveStylePreferences } from '../lib/api'
 import { toStyleAnswers, toStylePreferencePayload } from '../lib/transformers'
 import { getStyleAnswers, setStyleAnswers } from '../lib/onboarding'
 
@@ -25,7 +25,7 @@ function StylePreferences() {
       setHasError(false)
 
       try {
-        const row = await fetchStylePreferences(getCurrentUserId())
+        const row = await fetchStylePreferences()
         if (isStale) return
 
         const loaded = toStyleAnswers(row)
@@ -69,7 +69,6 @@ function StylePreferences() {
 
     try {
       await saveStylePreferences({
-        userId: getCurrentUserId(),
         ...toStylePreferencePayload(answers),
       })
 

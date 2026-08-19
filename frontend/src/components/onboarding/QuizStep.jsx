@@ -2,17 +2,33 @@ import { ChevronLeft } from 'lucide-react'
 import ProgressBar from './ProgressBar'
 import QuestionOptions from './QuestionOptions'
 
-function QuizStep({ step, total, question, type, options, selected, onSelect, onNext, onBack }) {
+function QuizStep({
+  step,
+  total,
+  question,
+  type,
+  options,
+  selected,
+  onSelect,
+  onNext,
+  onBack,
+  canGoBack = true,
+}) {
   return (
     <div className="mx-auto w-full max-w-lg animate-fade-in">
-      <button
-        type="button"
-        onClick={onBack}
-        className="inline-flex items-center gap-1 text-sm text-ink/40 transition-colors hover:text-dusty-rose"
-      >
-        <ChevronLeft size={16} strokeWidth={1.75} />
-        Geri
-      </button>
+      {/* İlk soruda geri gidilecek bir adım yok; yer tutucu düzeni korur. */}
+      {canGoBack ? (
+        <button
+          type="button"
+          onClick={onBack}
+          className="inline-flex items-center gap-1 text-sm text-ink/40 transition-colors hover:text-dusty-rose"
+        >
+          <ChevronLeft size={16} strokeWidth={1.75} />
+          Geri
+        </button>
+      ) : (
+        <span className="block h-5" />
+      )}
 
       <div className="mt-6">
         <ProgressBar current={step} total={total} />

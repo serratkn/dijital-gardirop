@@ -1,6 +1,5 @@
 import { useEffect, useState } from 'react'
 import { NavLink } from 'react-router-dom'
-import { RotateCcw } from 'lucide-react'
 
 const links = [
   { to: '/', label: 'Ana Sayfa' },
@@ -10,7 +9,7 @@ const links = [
   { to: '/profil', label: 'Profil' },
 ]
 
-function Navbar({ onReplayOnboarding }) {
+function Navbar() {
   const [isScrolled, setIsScrolled] = useState(false)
 
   useEffect(() => {
@@ -52,16 +51,6 @@ function Navbar({ onReplayOnboarding }) {
             </li>
           ))}
         </ul>
-        {onReplayOnboarding && (
-          <button
-            type="button"
-            onClick={onReplayOnboarding}
-            title="Onboarding'i tekrar göster (test)"
-            className="text-ink/20 transition-colors hover:text-dusty-rose"
-          >
-            <RotateCcw size={15} strokeWidth={1.75} />
-          </button>
-        )}
       </div>
     </nav>
   )

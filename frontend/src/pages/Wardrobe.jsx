@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { Plus, Search } from 'lucide-react'
 import { CATEGORY_ICONS } from '../lib/categoryIcons'
-import { getCurrentUserId, fetchCategories, fetchClothingItems } from '../lib/api'
+import { fetchCategories, fetchClothingItems } from '../lib/api'
 import { toCategoryNameMap, toClothingItems } from '../lib/transformers'
 import ClothingCard from '../components/ClothingCard'
 import SkeletonCard from '../components/SkeletonCard'
@@ -37,7 +37,7 @@ function Wardrobe() {
       // için ad eşlemesi olmadan filtre ve ikonlar çalışmaz.
       const [categoryRows, itemRows] = await Promise.all([
         fetchCategories(),
-        fetchClothingItems(getCurrentUserId()),
+        fetchClothingItems(),
       ])
 
       const nameMap = toCategoryNameMap(categoryRows)

@@ -1,5 +1,5 @@
 import { Capacitor } from '@capacitor/core'
-import { getUserId } from './onboarding'
+import { clearToken, getToken, getUserIdFromToken } from './auth'
 
 const DEFAULT_PORT = 3001
 
@@ -39,7 +39,6 @@ const API_BASE_URL = `${API_ORIGIN}/api`
 
 // Hangi adresin seçildiği emülatör hata ayıklamasında kritik.
 // Logcat'te görmek için: adb logcat | grep "DG_API"
-// (Capacitor konsol çıktısını "Capacitor/Console" etiketiyle iletir.)
 if (typeof window !== 'undefined') {
   let platform = 'bilinmiyor'
   let native = 'bilinmiyor'
@@ -58,26 +57,50 @@ if (typeof window !== 'undefined') {
   )
 }
 
-// Onboarding'i tamamlamamış (veya localStorage'ı temizlenmiş) tarayıcılar için
-// yedek kullanıcı. Gerçek oturum sistemi geldiğinde ikisi de kaldırılacak.
-const FALLBACK_USER_ID = 'e4553e3e-3258-4b69-a1d0-001b5d90a83b'
+// Oturum düştüğünde (401) uygulamanın Login'e yönlenebilmesi için abonelik.
+// App.jsx bunu dinler; api.js'in router'a bağımlı olmaması için olay tabanlı.
+const unauthorizedListeners = new Set()
 
-// Sabit yerine fonksiyon: kullanıcı onboarding'de oluşturulduğunda id değişir,
-// bu yüzden her çağrıda güncel değer okunmalıdır.
-export function getCurrentUserId() {
-  return getUserId() || FALLBACK_USER_ID
+export function onUnauthorized(listener) {
+  unauthorizedListeners.add(listener)
+  return () => unauthorizedListeners.delete(listener)
 }
 
-async function request(endpoint, { method = 'GET', body } = {}) {
+function notifyUnauthorized() {
+  clearToken()
+  unauthorizedListeners.forEach((listener) => listener())
+}
+
+// Tüm isteklerin tek geçtiği nokta: Authorization başlığı burada eklenir,
+// böylece hiçbir çağrı yerinde token yönetmek zorunda kalmaz.
+// keepSessionOn401: bazı uçlarda 401 "oturum düştü" değil "girilen şifre yanlış"
+// demektir (örn. şifre değiştirme). Bu durumda kullanıcı dışarı atılmamalıdır.
+async function request(
+  endpoint,
+  { method = 'GET', body, skipAuth = false, keepSessionOn401 = false } = {},
+) {
+  const headers = {}
+  if (body) headers['Content-Type'] = 'application/json'
+
+  if (!skipAuth) {
+    const token = getToken()
+    if (token) headers.Authorization = `Bearer ${token}`
+  }
+
   const response = await fetch(`${API_BASE_URL}${endpoint}`, {
     method,
-    headers: body ? { 'Content-Type': 'application/json' } : undefined,
+    headers,
     body: body ? JSON.stringify(body) : undefined,
   })
 
   if (!response.ok) {
-    // Backend hataları { error: "..." } biçiminde ve Türkçe döner;
-    // varsa o mesajı kullanıcıya gösterebilmek için okuyoruz.
+    // 401: token yok/süresi dolmuş → oturumu düşür ve dinleyicileri uyar.
+    // Giriş/kayıt isteklerinde (skipAuth) 401 "şifre hatalı" demektir,
+    // oturum düşürülmemelidir.
+    if (response.status === 401 && !skipAuth && !keepSessionOn401) {
+      notifyUnauthorized()
+    }
+
     let message = `İstek başarısız oldu (${response.status})`
     try {
       const data = await response.json()
@@ -93,12 +116,41 @@ async function request(endpoint, { method = 'GET', body } = {}) {
   return response.json()
 }
 
+// Kullanıcı kimliği artık token'dan gelir; localStorage'daki ayrı bir
+// "dg_user_id" değerine güvenilmez.
+export function getCurrentUserId() {
+  return getUserIdFromToken()
+}
+
+// --- Auth ---
+export function register(payload) {
+  return request('/auth/register', { method: 'POST', body: payload, skipAuth: true })
+}
+
+export function login(payload) {
+  return request('/auth/login', { method: 'POST', body: payload, skipAuth: true })
+}
+
+export function fetchMe() {
+  return request('/auth/me')
+}
+
+export function changePassword(payload) {
+  // Buradaki 401 "mevcut şifren yanlış" demektir; oturumu düşürmemeli.
+  return request('/auth/change-password', {
+    method: 'POST',
+    body: payload,
+    keepSessionOn401: true,
+  })
+}
+
+// --- Kaynaklar (userId artık gönderilmez: sunucu token'dan okur) ---
 export function fetchCategories() {
   return request('/categories')
 }
 
-export function fetchClothingItems(userId) {
-  return request(`/clothing-items?userId=${encodeURIComponent(userId)}`)
+export function fetchClothingItems() {
+  return request('/clothing-items')
 }
 
 export function fetchClothingItem(id) {
@@ -117,8 +169,8 @@ export function deleteClothingItem(id) {
   return request(`/clothing-items/${encodeURIComponent(id)}`, { method: 'DELETE' })
 }
 
-export function fetchOutfits(userId) {
-  return request(`/outfits?userId=${encodeURIComponent(userId)}`)
+export function fetchOutfits() {
+  return request('/outfits')
 }
 
 export function createOutfit(payload) {
@@ -137,16 +189,12 @@ export function fetchUser(id) {
   return request(`/users/${encodeURIComponent(id)}`)
 }
 
-export function createUser(payload) {
-  return request('/users', { method: 'POST', body: payload })
-}
-
 export function updateUser(id, payload) {
   return request(`/users/${encodeURIComponent(id)}`, { method: 'PUT', body: payload })
 }
 
-export function fetchStylePreferences(userId) {
-  return request(`/style-preferences?userId=${encodeURIComponent(userId)}`)
+export function fetchStylePreferences() {
+  return request('/style-preferences')
 }
 
 export function saveStylePreferences(payload) {

@@ -52,3 +52,17 @@ export function getStyleAnswers() {
 export function setStyleAnswers(answers) {
   localStorage.setItem(STYLE_ANSWERS_STORAGE_KEY, JSON.stringify(answers))
 }
+
+// Çıkışta çağrılır: bir sonraki kullanıcı önceki hesabın önbelleğini görmemeli.
+export function clearOnboardingState() {
+  for (const key of [
+    STORAGE_KEY,
+    USER_ID_STORAGE_KEY,
+    NAME_STORAGE_KEY,
+    EMAIL_STORAGE_KEY,
+    AGE_STORAGE_KEY,
+    STYLE_ANSWERS_STORAGE_KEY,
+  ]) {
+    localStorage.removeItem(key)
+  }
+}

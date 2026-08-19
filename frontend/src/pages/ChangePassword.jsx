@@ -2,28 +2,62 @@ import { useState } from 'react'
 import { Link } from 'react-router-dom'
 import { ChevronLeft } from 'lucide-react'
 import Button from '../components/ui/Button'
+import { changePassword } from '../lib/api'
 
 const fieldLabel = 'text-xs font-medium uppercase tracking-[0.15em] text-ink/50'
 const fieldInput =
   'mt-2 w-full rounded-xl border border-ink/15 bg-white px-4 py-3 text-sm text-ink placeholder:text-ink/40 focus:border-dusty-rose focus:outline-none'
 
+const MIN_PASSWORD_LENGTH = 8
+
 function ChangePassword() {
   const [currentPassword, setCurrentPassword] = useState('')
   const [newPassword, setNewPassword] = useState('')
   const [confirmPassword, setConfirmPassword] = useState('')
+  const [isSaving, setIsSaving] = useState(false)
   const [isSaved, setIsSaved] = useState(false)
+  const [errorMessage, setErrorMessage] = useState('')
 
   const handleChange = (setter) => (event) => {
     setter(event.target.value)
     setIsSaved(false)
+    setErrorMessage('')
   }
 
-  const handleSubmit = (event) => {
+  const handleSubmit = async (event) => {
     event.preventDefault()
-    setIsSaved(true)
-    setCurrentPassword('')
-    setNewPassword('')
-    setConfirmPassword('')
+    if (isSaving) return
+
+    if (!currentPassword) {
+      setErrorMessage('Mevcut şifreni girmelisin.')
+      return
+    }
+    if (newPassword.length < MIN_PASSWORD_LENGTH) {
+      setErrorMessage(`Yeni şifre en az ${MIN_PASSWORD_LENGTH} karakter olmalıdır.`)
+      return
+    }
+    // Bu kontrol yalnızca istemcide var: sunucu iki alanı ayrı ayrı değil,
+    // tek bir yeni şifre olarak alır.
+    if (newPassword !== confirmPassword) {
+      setErrorMessage('Yeni şifreler eşleşmiyor.')
+      return
+    }
+
+    setIsSaving(true)
+    setErrorMessage('')
+
+    try {
+      await changePassword({ currentPassword, newPassword })
+      setIsSaved(true)
+      setCurrentPassword('')
+      setNewPassword('')
+      setConfirmPassword('')
+    } catch (error) {
+      console.error('Şifre değiştirilemedi:', error)
+      setErrorMessage(error.message)
+    } finally {
+      setIsSaving(false)
+    }
   }
 
   return (
@@ -49,6 +83,7 @@ function ChangePassword() {
               type="password"
               value={currentPassword}
               onChange={handleChange(setCurrentPassword)}
+              autoComplete="current-password"
               placeholder="••••••••"
               className={fieldInput}
             />
@@ -59,7 +94,8 @@ function ChangePassword() {
               type="password"
               value={newPassword}
               onChange={handleChange(setNewPassword)}
-              placeholder="••••••••"
+              autoComplete="new-password"
+              placeholder="En az 8 karakter"
               className={fieldInput}
             />
           </div>
@@ -69,13 +105,17 @@ function ChangePassword() {
               type="password"
               value={confirmPassword}
               onChange={handleChange(setConfirmPassword)}
+              autoComplete="new-password"
               placeholder="••••••••"
               className={fieldInput}
             />
           </div>
 
-          <Button type="submit" variant="primary" size="lg" className="w-full">
-            {isSaved ? 'Şifre Güncellendi' : 'Şifreyi Güncelle'}
+          {errorMessage && <p className="text-sm text-burgundy">{errorMessage}</p>}
+          {isSaved && <p className="text-sm text-ink/60">Şifren güncellendi.</p>}
+
+          <Button type="submit" variant="primary" size="lg" disabled={isSaving} className="w-full">
+            {isSaving ? 'Güncelleniyor...' : 'Şifreyi Güncelle'}
           </Button>
         </form>
       </div>

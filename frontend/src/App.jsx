@@ -1,9 +1,12 @@
-import { useState } from 'react'
-import { Routes, Route, useLocation } from 'react-router-dom'
+import { useEffect, useState } from 'react'
+import { Routes, Route, useLocation, useNavigate, Navigate } from 'react-router-dom'
 import Navbar from './components/Navbar'
 import BottomNav from './components/BottomNav'
 import ScrollToTopButton from './components/ScrollToTopButton'
-import Onboarding from './pages/Onboarding'
+import ProtectedRoute from './components/auth/ProtectedRoute'
+import Login from './pages/Login'
+import Register from './pages/Register'
+import StyleQuiz from './pages/StyleQuiz'
 import Dashboard from './pages/Dashboard'
 import Wardrobe from './pages/Wardrobe'
 import OutfitSuggestion from './pages/OutfitSuggestion'
@@ -14,44 +17,96 @@ import AccountInfo from './pages/AccountInfo'
 import ChangePassword from './pages/ChangePassword'
 import StylePreferences from './pages/StylePreferences'
 import ComingSoon from './pages/ComingSoon'
-import { isOnboardingCompleted, setOnboardingCompleted } from './lib/onboarding'
+import { onUnauthorized } from './lib/api'
+import { hasValidSession } from './lib/auth'
 
-function App() {
+// Navigasyon ve alt menü yalnızca oturum açmış ekranlarda görünür;
+// giriş/kayıt/anket akışı bilinçli olarak chrome-free kalır.
+function AppShell({ children }) {
   const location = useLocation()
-  const [showOnboarding, setShowOnboarding] = useState(() => !isOnboardingCompleted())
-
-  if (showOnboarding) {
-    return (
-      <Onboarding
-        onFinish={() => {
-          setOnboardingCompleted()
-          setShowOnboarding(false)
-        }}
-      />
-    )
-  }
 
   return (
     <div className="min-h-screen bg-ivory">
-      <Navbar onReplayOnboarding={() => setShowOnboarding(true)} />
+      <Navbar />
       <div key={location.pathname} className="animate-page-fade pb-24 sm:pb-0">
-        <Routes>
-          <Route path="/" element={<Dashboard />} />
-          <Route path="/gardirop" element={<Wardrobe />} />
-          <Route path="/kombin-oner" element={<OutfitSuggestion />} />
-          <Route path="/kombinlerim" element={<OutfitHistory />} />
-          <Route path="/kiyafet/:id" element={<ClothingDetail />} />
-          <Route path="/profil" element={<Profile />} />
-          <Route path="/profil/hesap-bilgilerim" element={<AccountInfo />} />
-          <Route path="/profil/sifre-degistir" element={<ChangePassword />} />
-          <Route path="/profil/tarz-tercihlerim" element={<StylePreferences />} />
-          <Route path="/profil/bildirimler" element={<ComingSoon title="Bildirimler" />} />
-          <Route path="/profil/yardim-destek" element={<ComingSoon title="Yardım & Destek" />} />
-        </Routes>
+        {children}
       </div>
       <ScrollToTopButton />
       <BottomNav />
     </div>
+  )
+}
+
+function App() {
+  const navigate = useNavigate()
+
+  // Oturum durumu STATE DEĞİL, her render'da token'dan türetilir. State olsaydı
+  // kayıt sonrası şu yarış durumu oluşurdu: setState → /kayit rotası
+  // <Navigate to="/"> render eder → navigate('/tarz-anketi') ezilir.
+  const [authTick, setAuthTick] = useState(0)
+  const isAuthenticated = hasValidSession()
+
+  // Sunucu 401 döndüğünde (token süresi doldu / iptal edildi) oturum düşer
+  // ve kullanıcı giriş ekranına alınır. authTick yalnızca yeniden render tetikler.
+  useEffect(() => {
+    return onUnauthorized(() => {
+      setAuthTick((tick) => tick + 1)
+      navigate('/giris', { replace: true })
+    })
+  }, [navigate])
+
+  // authTick okunmazsa lint kullanılmıyor sayar; oturum düşüşünde
+  // yeniden hesaplamayı garanti eder.
+  void authTick
+
+  const protectedShell = (page) => (
+    <ProtectedRoute>
+      <AppShell>{page}</AppShell>
+    </ProtectedRoute>
+  )
+
+  return (
+    <Routes>
+      {/* Korumasız */}
+      <Route
+        path="/giris"
+        element={
+          isAuthenticated ? <Navigate to="/" replace /> : <Login />
+        }
+      />
+      <Route
+        path="/kayit"
+        element={
+          isAuthenticated ? <Navigate to="/" replace /> : <Register />
+        }
+      />
+
+      {/* Korumalı ama chrome-free: kayıt sonrası tarz anketi */}
+      <Route
+        path="/tarz-anketi"
+        element={
+          <ProtectedRoute>
+            <StyleQuiz />
+          </ProtectedRoute>
+        }
+      />
+
+      {/* Korumalı uygulama */}
+      <Route path="/" element={protectedShell(<Dashboard />)} />
+      <Route path="/gardirop" element={protectedShell(<Wardrobe />)} />
+      <Route path="/kombin-oner" element={protectedShell(<OutfitSuggestion />)} />
+      <Route path="/kombinlerim" element={protectedShell(<OutfitHistory />)} />
+      <Route path="/kiyafet/:id" element={protectedShell(<ClothingDetail />)} />
+      <Route path="/profil" element={protectedShell(<Profile onLoggedOut={() => setAuthTick((t) => t + 1)} />)} />
+      <Route path="/profil/hesap-bilgilerim" element={protectedShell(<AccountInfo />)} />
+      <Route path="/profil/sifre-degistir" element={protectedShell(<ChangePassword />)} />
+      <Route path="/profil/tarz-tercihlerim" element={protectedShell(<StylePreferences />)} />
+      <Route path="/profil/bildirimler" element={protectedShell(<ComingSoon title="Bildirimler" />)} />
+      <Route
+        path="/profil/yardim-destek"
+        element={protectedShell(<ComingSoon title="Yardım & Destek" />)}
+      />
+    </Routes>
   )
 }
 

@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import Modal from './ui/Modal'
 import Button from './ui/Button'
 import ColorPicker from './ui/ColorPicker'
-import { getCurrentUserId, createClothingItem, fetchCategories } from '../lib/api'
+import { createClothingItem, fetchCategories } from '../lib/api'
 import { DEFAULT_COLOR } from '../lib/colors'
 
 const fieldLabel = 'text-xs font-medium uppercase tracking-[0.15em] text-ink/50'
@@ -75,7 +75,6 @@ function QuickAddModal({ isOpen, onClose, onCreated }) {
 
     try {
       await createClothingItem({
-        userId: getCurrentUserId(),
         categoryId: Number(categoryId),
         name: name.trim(),
         color,

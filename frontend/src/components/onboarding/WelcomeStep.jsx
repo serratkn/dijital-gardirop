@@ -1,6 +1,6 @@
 import Button from '../ui/Button'
 
-function WelcomeStep({ name, onFinish, isSaving, errorMessage, onEditDetails }) {
+function WelcomeStep({ name, onFinish, isSaving, errorMessage }) {
   return (
     <div className="mx-auto w-full max-w-md animate-fade-in text-center">
       <span className="mx-auto block h-px w-16 bg-dusty-rose" />
@@ -19,18 +19,7 @@ function WelcomeStep({ name, onFinish, isSaving, errorMessage, onEditDetails }) 
         {isSaving ? 'Kaydediliyor...' : 'Gardırobuma Git'}
       </Button>
 
-      {errorMessage && (
-        <div className="mt-5">
-          <p className="text-sm text-burgundy">{errorMessage}</p>
-          <button
-            type="button"
-            onClick={onEditDetails}
-            className="mt-2 text-sm text-ink/50 underline transition-colors hover:text-dusty-rose"
-          >
-            Bilgilerimi düzenle
-          </button>
-        </div>
-      )}
+      {errorMessage && <p className="mt-5 text-sm text-burgundy">{errorMessage}</p>}
     </div>
   )
 }
