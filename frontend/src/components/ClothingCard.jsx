@@ -1,12 +1,15 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { CATEGORY_ICONS } from '../lib/categoryIcons'
-import { toggleClothingItemFavorite } from '../lib/api'
+import { resolveImageUrl, toggleClothingItemFavorite } from '../lib/api'
 
 function ClothingCard({ item, onFavoriteChange }) {
   const [isFavorite, setIsFavorite] = useState(item.isFavorite ?? false)
   const [isPending, setIsPending] = useState(false)
+  // Bozuk/silinmiş dosyada kırık resim ikonu yerine placeholder'a düşülür.
+  const [imageFailed, setImageFailed] = useState(false)
   const CategoryIcon = CATEGORY_ICONS[item.category]
+  const photoUrl = imageFailed ? null : resolveImageUrl(item.imageUrl)
 
   // Liste yeniden yüklendiğinde (örn. yeni parça eklendikten sonra)
   // karttaki durum tazelenen veriyle hizalanır.
@@ -46,7 +49,17 @@ function ClothingCard({ item, onFavoriteChange }) {
       to={`/kiyafet/${item.id}`}
       className="group mb-6 block break-inside-avoid overflow-hidden rounded-2xl border border-ink/10 bg-white shadow-[0_8px_24px_-14px_rgba(28,26,23,0.18)] transition-all duration-300 ease-out hover:-translate-y-1 hover:shadow-[0_18px_36px_-14px_rgba(28,26,23,0.22)]"
     >
-      <div className={`relative bg-warm-gray ${item.imgHeight}`}>
+      <div className={`relative overflow-hidden bg-warm-gray ${item.imgHeight}`}>
+        {/* object-cover: fotoğraf oranı ne olursa olsun masonry yüksekliği korunur */}
+        {photoUrl && (
+          <img
+            src={photoUrl}
+            alt={item.name}
+            loading="lazy"
+            onError={() => setImageFailed(true)}
+            className="h-full w-full object-cover"
+          />
+        )}
         <button
           type="button"
           onClick={toggleFavorite}

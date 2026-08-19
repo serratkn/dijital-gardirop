@@ -24,4 +24,14 @@ class ConflictError extends AppError {
   }
 }
 
-module.exports = { AppError, ValidationError, NotFoundError, ConflictError }
+// NOT: Kaynak okuma/silme uçlarında sahiplik ihlali için 404 kullanıyoruz
+// (kaydın varlığını gizlemek için). Fotoğraf yükleme ucu bilinçli olarak 403
+// döner — istenen davranış buydu ve dosya yükleme zaten var olan bir kayda
+// yapıldığı için varlık bilgisi ek bir sızıntı sayılmaz.
+class ForbiddenError extends AppError {
+  constructor(message = 'Bu işlem için yetkiniz yok') {
+    super(message, 403)
+  }
+}
+
+module.exports = { AppError, ValidationError, NotFoundError, ConflictError, ForbiddenError }

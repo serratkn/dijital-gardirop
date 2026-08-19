@@ -2,7 +2,8 @@ import { useEffect, useState } from 'react'
 import Modal from './ui/Modal'
 import Button from './ui/Button'
 import ColorPicker from './ui/ColorPicker'
-import { createClothingItem, fetchCategories } from '../lib/api'
+import PhotoPicker from './ui/PhotoPicker'
+import { createClothingItem, fetchCategories, uploadClothingItemImage } from '../lib/api'
 import { DEFAULT_COLOR } from '../lib/colors'
 
 const fieldLabel = 'text-xs font-medium uppercase tracking-[0.15em] text-ink/50'
@@ -17,7 +18,9 @@ function QuickAddModal({ isOpen, onClose, onCreated }) {
   const [name, setName] = useState('')
   const [categoryId, setCategoryId] = useState('')
   const [color, setColor] = useState(DEFAULT_COLOR)
+  const [photoFile, setPhotoFile] = useState(null)
   const [isSaving, setIsSaving] = useState(false)
+  const [savingLabel, setSavingLabel] = useState('')
   const [errorMessage, setErrorMessage] = useState('')
 
   // Kategoriler modal her açıldığında tazelenir; kapalıyken istek atılmaz.
@@ -49,7 +52,9 @@ function QuickAddModal({ isOpen, onClose, onCreated }) {
   const resetForm = () => {
     setName('')
     setColor(DEFAULT_COLOR)
+    setPhotoFile(null)
     setErrorMessage('')
+    setSavingLabel('')
   }
 
   const handleClose = () => {
@@ -72,24 +77,47 @@ function QuickAddModal({ isOpen, onClose, onCreated }) {
 
     setIsSaving(true)
     setErrorMessage('')
+    setSavingLabel('Kaydediliyor...')
 
+    let created
     try {
-      await createClothingItem({
+      created = await createClothingItem({
         categoryId: Number(categoryId),
         name: name.trim(),
         color,
       })
-
-      resetForm()
-      // Listeyi tazeleme sorumluluğu üst bileşene ait.
-      await onCreated?.()
-      onClose()
     } catch (error) {
       console.error('Parça kaydedilemedi:', error)
       setErrorMessage(error.message)
-    } finally {
       setIsSaving(false)
+      setSavingLabel('')
+      return
     }
+
+    // Kıyafet oluşturuldu. Fotoğraf ayrı bir adımdır ve BAŞARISIZ OLSA BİLE
+    // kıyafet kaydı geri alınmaz — kullanıcıya durum açıkça bildirilir.
+    if (photoFile) {
+      setSavingLabel('Fotoğraf yükleniyor...')
+      try {
+        await uploadClothingItemImage(created.id, photoFile)
+      } catch (error) {
+        console.error('Fotoğraf yüklenemedi:', error)
+        await onCreated?.()
+        setIsSaving(false)
+        setSavingLabel('')
+        setPhotoFile(null)
+        setErrorMessage(
+          `Kıyafet eklendi ama fotoğraf yüklenemedi: ${error.message} — fotoğrafı detay sayfasından ekleyebilirsin.`,
+        )
+        return
+      }
+    }
+
+    resetForm()
+    // Listeyi tazeleme sorumluluğu üst bileşene ait.
+    await onCreated?.()
+    onClose()
+    setIsSaving(false)
   }
 
   return (
@@ -97,15 +125,12 @@ function QuickAddModal({ isOpen, onClose, onCreated }) {
       <h2 className="font-display text-3xl italic text-ink">Yeni Parça</h2>
 
       <form onSubmit={handleSave} className="mt-6 space-y-5">
-        <button
-          type="button"
-          disabled
-          title="Fotoğraf yükleme henüz eklenmedi"
-          className="flex h-36 w-full cursor-not-allowed flex-col items-center justify-center gap-2 rounded-2xl border border-dashed border-ink/20 bg-warm-gray text-sm text-ink/40"
-        >
-          <span className="text-2xl">📷</span>
-          Fotoğraf Yükle (yakında)
-        </button>
+        <PhotoPicker
+          file={photoFile}
+          onSelect={setPhotoFile}
+          onClear={() => setPhotoFile(null)}
+          disabled={isSaving}
+        />
 
         <div>
           <label className={fieldLabel}>Parça Adı</label>
@@ -158,7 +183,7 @@ function QuickAddModal({ isOpen, onClose, onCreated }) {
             İptal
           </Button>
           <Button type="submit" variant="primary" disabled={isSaving} className="flex-1">
-            {isSaving ? 'Kaydediliyor...' : 'Kaydet'}
+            {isSaving ? savingLabel || 'Kaydediliyor...' : 'Kaydet'}
           </Button>
         </div>
       </form>

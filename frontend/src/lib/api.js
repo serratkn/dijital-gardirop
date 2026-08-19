@@ -122,6 +122,50 @@ export function getCurrentUserId() {
   return getUserIdFromToken()
 }
 
+// Backend image_url'i GÖRELİ saklar ("/uploads/abc.jpg") çünkü aynı kayda
+// web localhost'tan, Android 10.0.2.2'den erişir. Doğru host'u burada ekliyoruz.
+export function resolveImageUrl(imageUrl) {
+  if (!imageUrl) return null
+  if (/^(https?:|data:|blob:)/.test(imageUrl)) return imageUrl
+  return `${API_ORIGIN}${imageUrl.startsWith('/') ? '' : '/'}${imageUrl}`
+}
+
+// FormData gönderirken Content-Type ELLE ayarlanmaz: tarayıcının multipart
+// sınır (boundary) değerini kendisi eklemesi gerekir.
+export async function uploadClothingItemImage(id, file) {
+  const formData = new FormData()
+  formData.append('image', file)
+
+  const token = getToken()
+  const response = await fetch(
+    `${API_BASE_URL}/clothing-items/${encodeURIComponent(id)}/image`,
+    {
+      method: 'POST',
+      headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+      body: formData,
+    },
+  )
+
+  if (!response.ok) {
+    if (response.status === 401) notifyUnauthorized()
+
+    let message = `Fotoğraf yüklenemedi (${response.status})`
+    try {
+      const data = await response.json()
+      if (data?.error) message = data.error
+    } catch {
+      // Gövde okunamadı; varsayılan mesaj kalır.
+    }
+    throw new Error(message)
+  }
+
+  return response.json()
+}
+
+export function deleteClothingItemImage(id) {
+  return request(`/clothing-items/${encodeURIComponent(id)}/image`, { method: 'DELETE' })
+}
+
 // --- Auth ---
 export function register(payload) {
   return request('/auth/register', { method: 'POST', body: payload, skipAuth: true })

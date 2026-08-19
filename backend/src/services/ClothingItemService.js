@@ -1,5 +1,6 @@
-const { NotFoundError, ValidationError } = require('../utils/errors')
+const { NotFoundError, ValidationError, ForbiddenError } = require('../utils/errors')
 const { FIELD_LIMITS, assertFieldLengths } = require('../utils/validators')
+const { removeUploadedFile, fileNameFromImageUrl } = require('../config/upload')
 
 const FOREIGN_KEY_VIOLATION = '23503'
 
@@ -75,7 +76,55 @@ class ClothingItemService {
       throw new NotFoundError('Kıyafet bulunamadı')
     }
 
-    return this.clothingItemRepository.softDelete(id)
+    const deleted = await this.clothingItemRepository.softDelete(id)
+
+    // Kayıt soft delete edilse de dosya diskte tutulmaz: erişilemeyen
+    // fotoğraflar yer kaplamasın.
+    await removeUploadedFile(fileNameFromImageUrl(existingItem.image_url))
+
+    return deleted
+  }
+
+  // Fotoğraf yükleme. Sahiplik ihlalinde 403 döner (diğer uçlardaki 404'ten
+  // farklı; bkz. utils/errors.js). Çağıran katman, hata durumunda yeni
+  // yüklenen dosyayı silmekten sorumludur.
+  async setImage(id, userId, imageUrl) {
+    if (!imageUrl) {
+      throw new ValidationError('Fotoğraf dosyası zorunludur')
+    }
+
+    const existingItem = await this.clothingItemRepository.findById(id)
+    if (!existingItem) {
+      throw new NotFoundError('Kıyafet bulunamadı')
+    }
+    if (existingItem.user_id !== userId) {
+      throw new ForbiddenError('Bu kıyafete fotoğraf yükleyemezsiniz')
+    }
+
+    const updated = await this.clothingItemRepository.updateImageUrl(id, imageUrl)
+
+    // Yeni fotoğraf kaydedildikten SONRA eskisi silinir; sıra tersine olsaydı
+    // veritabanı güncellemesi patladığında kullanıcı fotoğrafsız kalırdı.
+    if (existingItem.image_url && existingItem.image_url !== imageUrl) {
+      await removeUploadedFile(fileNameFromImageUrl(existingItem.image_url))
+    }
+
+    return updated
+  }
+
+  async removeImage(id, userId) {
+    const existingItem = await this.clothingItemRepository.findById(id)
+    if (!existingItem) {
+      throw new NotFoundError('Kıyafet bulunamadı')
+    }
+    if (existingItem.user_id !== userId) {
+      throw new ForbiddenError('Bu kıyafetin fotoğrafını kaldıramazsınız')
+    }
+
+    const updated = await this.clothingItemRepository.updateImageUrl(id, null)
+    await removeUploadedFile(fileNameFromImageUrl(existingItem.image_url))
+
+    return updated
   }
 
   async toggleFavorite(id, userId) {

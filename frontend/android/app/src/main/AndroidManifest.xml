@@ -39,4 +39,18 @@
     <!-- Permissions -->
 
     <uses-permission android:name="android.permission.INTERNET" />
+
+    <!-- Fotoğraf çekme (Capacitor Camera) -->
+    <uses-permission android:name="android.permission.CAMERA" />
+
+    <!-- Galeri erişimi. Android 13+ (API 33) READ_MEDIA_IMAGES kullanır;
+         eski sürümler için READ_EXTERNAL_STORAGE maxSdkVersion ile sınırlandı. -->
+    <uses-permission android:name="android.permission.READ_MEDIA_IMAGES" />
+    <uses-permission
+        android:name="android.permission.READ_EXTERNAL_STORAGE"
+        android:maxSdkVersion="32" />
+
+    <!-- Kamera donanımı zorunlu değil: cihazda kamera yoksa da uygulama kurulabilsin -->
+    <uses-feature android:name="android.hardware.camera" android:required="false" />
+
 </manifest>

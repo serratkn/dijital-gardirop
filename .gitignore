@@ -1,2 +1,6 @@
 .env
 node_modules
+
+# Yüklenen kıyafet fotoğrafları (klasörün kendisi .gitkeep ile repoda kalır)
+backend/uploads/*
+!backend/uploads/.gitkeep

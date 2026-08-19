@@ -247,7 +247,8 @@ olduğu için iskelet oraya taşındı, kombin üretimi istemci tarafında anlı
 | **Şifre sıfırlama yok** | "Şifremi unuttum" akışı (e-posta ile sıfırlama bağlantısı) yoktur; kullanıcı şifresini yalnızca giriş yapmışken değiştirebilir. |
 | **E-posta doğrulama yok** | `email_verified` kolonu var ama hep `false`; doğrulama akışı kurulmadı. |
 | **Token yenileme yok** | Tek bir access token (varsayılan 7 gün) kullanılır; refresh token yoktur, süre dolunca yeniden giriş gerekir. |
-| **Fotoğraf yükleme yok** | `image_url` kolonu var ama dosya yükleme akışı yok; tüm kartlar `warm-gray` placeholder gösterir. QuickAddModal'daki "Fotoğraf Yükle" butonu bilinçli olarak devre dışıdır. |
+| **Fotoğraflar yerel diskte** | `backend/uploads/` altında tutulur; çok sunuculu bir kurulumda paylaşılan depolamaya (S3 vb.) taşınması gerekir. Dosyalar `/uploads` yolundan **token'sız** servis edilir — ad tahmin edilemez UUID olduğu için kabul edilebilir sayıldı. |
+| **Fotoğraf boyutlandırma yok** | Yüklenen görsel olduğu gibi saklanır; küçük resim (thumbnail) üretilmez. Native tarafta Capacitor `width: 1600` ile ön küçültme yapar, web'de böyle bir sınır yoktur. |
 | **Kıyafet düzenleme yok** | `PUT /api/clothing-items/:id` ucu hazır ama arayüzde düzenleme akışı yok. |
 | **Kombin "giyildi" sayacı** | `PATCH /outfits/:id/worn` ucu hazır; Kombinlerim sayfası `times_worn` değerini gösterir ama artırma butonu yoktur. |
 | **Bildirimler / Yardım & Destek** | "Yakında" sayfalarıdır, işlevleri yoktur. |
@@ -431,6 +432,19 @@ Tüm hatalar `{ "error": "Türkçe mesaj" }` döner.
 | `PUT` | `/clothing-items/:id` | `{ categoryId*, name*, color, brand, season, imageUrl }` |
 | `DELETE` | `/clothing-items/:id` | **Soft delete** → `204` |
 | `PATCH` | `/clothing-items/:id/favorite` | Favori durumunu tersine çevirir (atomik) |
+| `POST` | `/clothing-items/:id/image` | **multipart/form-data**, alan adı `image`. jpg/png/webp, en fazla 5 MB |
+| `DELETE` | `/clothing-items/:id/image` | Fotoğrafı kaldırır (`image_url` → `null`, dosya diskten silinir) |
+
+**Fotoğraf yükleme.** Dosyalar `backend/uploads/` altına **rastgele UUID** adıyla yazılır
+(orijinal ad kullanılmaz: path traversal ve çakışma riski). `image_url` kolonunda **göreli
+yol** saklanır (`/uploads/abc.png`) — web `localhost`, Android `10.0.2.2` üzerinden
+eriştiği için tam URL yazmak birini kırardı; host'u istemcide `resolveImageUrl()` ekler.
+Dosyalar `/uploads` yolundan `express.static` ile **token'sız** servis edilir (`<img>`
+etiketleri `Authorization` başlığı gönderemez; ad tahmin edilemez olduğu için kabul edildi).
+
+Sahiplik ihlalinde bu iki uç **403** döner — diğer uçlardaki 404 kalıbından bilinçli sapma.
+Fotoğraf değiştirilirse eski dosya, kıyafet soft delete edilirse fotoğrafı diskten silinir;
+yükleme sonrası bir hata olursa yeni yazılan dosya geri alınır (öksüz dosya kalmaz).
 
 ```json
 {"id":"58b9f6da-…","user_id":"e4553e3e-…","category_id":5,"name":"Küçük Omuz Çantası",
@@ -761,6 +775,39 @@ Kategori → lucide ikon eşlemesi `src/lib/categoryIcons.js` içinde merkezidir
 
 > Bundan sonraki her çalışma buraya tarihiyle işlenir: eklenen özellikler, düzeltilen
 > hatalar, alınan mimari kararlar. En yeni kayıt en üstte.
+
+### 2026-08-19 — Kıyafet fotoğrafı yükleme (multer + Capacitor Camera)
+- **Backend:** `multer` ile `POST /clothing-items/:id/image` ve
+  `DELETE /clothing-items/:id/image`. Auth middleware'in arkasında; **sahiplik ihlalinde
+  403** döner (diğer uçlardaki 404 kalıbından bilinçli sapma, `utils/errors.js`'te not edildi).
+- Dosyalar `backend/uploads/` altına **rastgele UUID** adıyla yazılır — orijinal ad
+  kullanılmaz (path traversal + çakışma riski). Klasör `.gitignore`'da, `.gitkeep` ile
+  repoda kalır.
+- **Doğrulama:** yalnızca jpg/png/webp, en fazla 5 MB. Multer hataları route katmanında
+  yakalanıp **400**'e çevrilir (varsayılan davranış 500'dü).
+- **`image_url` göreli yol saklar** (`/uploads/abc.png`). Tam URL yazmak web (`localhost`)
+  ile Android (`10.0.2.2`) arasında birini kırardı; host'u istemcide `resolveImageUrl()`
+  ekler. `/uploads` `express.static` ile token'sız servis edilir.
+- **Dosya yaşam döngüsü:** fotoğraf değişince eskisi, kıyafet soft delete edilince
+  fotoğrafı diskten silinir. Yükleme sonrası bir hata olursa yeni yazılan dosya geri
+  alınır — öksüz dosya kalmaz. Silme işlemleri idempotenttir (`ENOENT` yutulur).
+- **Frontend:** `PhotoPicker` bileşeni platforma göre ayrışır — web'de `<input type="file">`,
+  native'de Capacitor Camera ile **Fotoğraf Çek / Galeriden Seç**. Seçilen dosya
+  `URL.createObjectURL` ile anında önizlenir (ve `revokeObjectURL` ile serbest bırakılır).
+- **Kısmi başarısızlık açıkça bildirilir:** QuickAddModal önce kıyafeti oluşturur, sonra
+  fotoğrafı yükler. Fotoğraf yüklenemezse **kıyafet kaydı geri alınmaz**; kullanıcıya
+  "Kıyafet eklendi ama fotoğraf yüklenemedi: … detay sayfasından ekleyebilirsin" denir.
+- `ClothingCard` ve `ClothingDetail` fotoğrafı `object-cover` ile gösterir (masonry
+  yükseklikleri bozulmaz); `onError` ile bozuk/silinmiş dosyada placeholder'a düşülür.
+  Detay sayfasına "Fotoğrafı Değiştir" ve "Fotoğrafı Kaldır" eklendi.
+- **Android:** `@capacitor/camera` kuruldu; manifest'e `CAMERA` ve `READ_MEDIA_IMAGES`
+  (Android 13+) izinleri, eski sürümler için `maxSdkVersion=32` ile `READ_EXTERNAL_STORAGE`
+  eklendi. `uses-feature camera required=false` — kamerasız cihazlarda da kurulabilsin.
+  İzin reddi yakalanır ve anlaşılır Türkçe mesaja çevrilir, uygulama çökmez.
+  Capacitor base64 döndürdüğü için `File` nesnesine çevrilip multipart olarak gönderilir.
+- Kamera modülü **dinamik import** edilir; web derlemesinde ayrı bir chunk'a düşer.
+- Yeni test: `test-scripts/test-image-upload.js` (29 kontrol — tip/boyut, 403, eski dosya
+  silme, kıyafet silinince temizlik, öksüz dosya kalmaması).
 
 ### 2026-08-19 — Kimlik doğrulama sistemi kuruldu (JWT + bcrypt)
 - **Backend:** `bcrypt` (10 tur) ile parola hashleme, `jsonwebtoken` ile JWT.

@@ -4,6 +4,7 @@ const express = require('express')
 const cors = require('cors')
 
 const pool = require('./src/config/database')
+const { UPLOAD_DIR } = require('./src/config/upload')
 const UserRepository = require('./src/repositories/UserRepository')
 const { AuthService } = require('./src/services/AuthService')
 const createAuthenticate = require('./src/middleware/authenticate')
@@ -26,6 +27,10 @@ app.use(express.json())
 // aynı servis olmalıdır.
 const authService = new AuthService(new UserRepository(pool))
 const authenticate = createAuthenticate(authService)
+
+// Yüklenen fotoğraflar. Token gerektirmez: dosya adları rastgele UUID olduğu
+// için tahmin edilemez, ayrıca <img> etiketleri Authorization başlığı gönderemez.
+app.use('/uploads', express.static(UPLOAD_DIR, { maxAge: '1d' }))
 
 // --- Korumasız uçlar ---
 app.use('/api', healthRoutes) // izleme için açık kalmalı

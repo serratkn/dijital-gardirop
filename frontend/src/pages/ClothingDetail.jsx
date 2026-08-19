@@ -2,11 +2,15 @@ import { useEffect, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import Button from '../components/ui/Button'
 import Modal from '../components/ui/Modal'
+import PhotoPicker from '../components/ui/PhotoPicker'
 import {
   deleteClothingItem,
+  deleteClothingItemImage,
   fetchCategories,
   fetchClothingItem,
+  resolveImageUrl,
   toggleClothingItemFavorite,
+  uploadClothingItemImage,
 } from '../lib/api'
 import { toCategoryNameMap, toClothingItem } from '../lib/transformers'
 
@@ -20,6 +24,9 @@ function ClothingDetail() {
   const [isConfirmOpen, setIsConfirmOpen] = useState(false)
   const [isDeleting, setIsDeleting] = useState(false)
   const [actionError, setActionError] = useState('')
+  const [isPhotoEditing, setIsPhotoEditing] = useState(false)
+  const [isPhotoBusy, setIsPhotoBusy] = useState(false)
+  const [imageFailed, setImageFailed] = useState(false)
 
   useEffect(() => {
     let isStale = false
@@ -73,6 +80,39 @@ function ClothingDetail() {
       setActionError(error.message)
     } finally {
       setIsFavoritePending(false)
+    }
+  }
+
+  const handlePhotoSelected = async (file) => {
+    setIsPhotoBusy(true)
+    setActionError('')
+
+    try {
+      const updated = await uploadClothingItemImage(id, file)
+      setItem((previous) => ({ ...previous, imageUrl: updated.image_url }))
+      setImageFailed(false)
+      setIsPhotoEditing(false)
+    } catch (error) {
+      console.error('Fotoğraf yüklenemedi:', error)
+      setActionError(error.message)
+    } finally {
+      setIsPhotoBusy(false)
+    }
+  }
+
+  const handlePhotoRemove = async () => {
+    setIsPhotoBusy(true)
+    setActionError('')
+
+    try {
+      const updated = await deleteClothingItemImage(id)
+      setItem((previous) => ({ ...previous, imageUrl: updated.image_url }))
+      setIsPhotoEditing(false)
+    } catch (error) {
+      console.error('Fotoğraf kaldırılamadı:', error)
+      setActionError(error.message)
+    } finally {
+      setIsPhotoBusy(false)
     }
   }
 
@@ -155,7 +195,63 @@ function ClothingDetail() {
         </div>
 
         <div className="mt-8 grid gap-10 md:grid-cols-2 md:gap-14">
-          <div className="min-h-[24rem] rounded-3xl border border-ink/10 bg-warm-gray shadow-[0_8px_24px_-14px_rgba(28,26,23,0.18)] md:min-h-[32rem]" />
+          <div>
+            <div className="min-h-[24rem] overflow-hidden rounded-3xl border border-ink/10 bg-warm-gray shadow-[0_8px_24px_-14px_rgba(28,26,23,0.18)] md:min-h-[32rem]">
+              {!imageFailed && item.imageUrl && !isPhotoEditing && (
+                <img
+                  src={resolveImageUrl(item.imageUrl)}
+                  alt={item.name}
+                  onError={() => setImageFailed(true)}
+                  className="h-full min-h-[24rem] w-full object-cover md:min-h-[32rem]"
+                />
+              )}
+
+              {isPhotoEditing && (
+                <div className="p-6">
+                  <PhotoPicker
+                    file={null}
+                    onSelect={handlePhotoSelected}
+                    onClear={() => setIsPhotoEditing(false)}
+                    disabled={isPhotoBusy}
+                  />
+                  {isPhotoBusy && (
+                    <p className="mt-3 text-sm text-ink/50">Fotoğraf yükleniyor...</p>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => setIsPhotoEditing(false)}
+                    disabled={isPhotoBusy}
+                    className="mt-3 text-sm text-ink/50 underline transition-colors hover:text-dusty-rose disabled:opacity-50"
+                  >
+                    Vazgeç
+                  </button>
+                </div>
+              )}
+            </div>
+
+            {!isPhotoEditing && (
+              <div className="mt-4 flex flex-wrap gap-3">
+                <button
+                  type="button"
+                  onClick={() => setIsPhotoEditing(true)}
+                  disabled={isPhotoBusy}
+                  className="text-sm text-ink/60 underline transition-colors hover:text-dusty-rose disabled:opacity-50"
+                >
+                  {item.imageUrl ? 'Fotoğrafı Değiştir' : 'Fotoğraf Ekle'}
+                </button>
+                {item.imageUrl && (
+                  <button
+                    type="button"
+                    onClick={handlePhotoRemove}
+                    disabled={isPhotoBusy}
+                    className="text-sm text-burgundy/60 underline transition-colors hover:text-burgundy disabled:opacity-50"
+                  >
+                    {isPhotoBusy ? 'İşleniyor...' : 'Fotoğrafı Kaldır'}
+                  </button>
+                )}
+              </div>
+            )}
+          </div>
 
           <div>
             <p className="text-[12px] font-medium uppercase tracking-[0.15em] text-dusty-rose">

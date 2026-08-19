@@ -75,6 +75,23 @@ class ClothingItemRepository {
     }
   }
 
+  // Yalnızca fotoğraf alanını günceller; null göndermek fotoğrafı kaldırır.
+  async updateImageUrl(id, imageUrl) {
+    try {
+      const result = await this.pool.query(
+        `UPDATE clothing_items
+         SET image_url = $1, updated_at = NOW()
+         WHERE id = $2 AND is_deleted = false
+         RETURNING *`,
+        [imageUrl, id],
+      )
+      return result.rows[0] || null
+    } catch (error) {
+      console.error('ClothingItemRepository.updateImageUrl hatası:', error.message)
+      throw error
+    }
+  }
+
   async softDelete(id) {
     try {
       const result = await this.pool.query(
