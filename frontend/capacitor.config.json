@@ -1,5 +1,8 @@
 {
   "appId": "com.serra.digitalgardirop",
   "appName": "Dijital Gardirop",
-  "webDir": "dist"
+  "webDir": "dist",
+  "android": {
+    "allowMixedContent": true
+  }
 }

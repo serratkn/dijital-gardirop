@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  SADECE GELİŞTİRME İÇİNDİR.
+
+  Android 9 (API 28) ve sonrasında şifrelenmemiş HTTP trafiği varsayılan olarak
+  engellidir. Geliştirme sırasında backend http://10.0.2.2:3001 üzerinden
+  konuşulduğu için bu adreslere istisna tanımlanır.
+
+  Tüm cleartext trafiği açan android:usesCleartextTraffic="true" yerine bilinçli
+  olarak domain bazlı istisna kullanılıyor: diğer tüm HTTP adresleri engelli kalır.
+
+  Production'da backend HTTPS üzerinden sunulacak ve bu dosya kaldırılmalı
+  (ya da cleartextTrafficPermitted="false" yapılmalıdır).
+-->
+<network-security-config>
+    <domain-config cleartextTrafficPermitted="true">
+        <!-- Android emülatörünün host makineye eriştiği özel alias -->
+        <domain includeSubdomains="false">10.0.2.2</domain>
+        <!-- Emülatörün kendi içi / adb reverse ile port yönlendirme senaryosu -->
+        <domain includeSubdomains="false">localhost</domain>
+        <domain includeSubdomains="false">127.0.0.1</domain>
+    </domain-config>
+</network-security-config>

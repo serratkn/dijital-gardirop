@@ -1,6 +1,62 @@
+import { Capacitor } from '@capacitor/core'
 import { getUserId } from './onboarding'
 
-const API_BASE_URL = 'http://localhost:3001/api'
+const DEFAULT_PORT = 3001
+
+// Android native mi? Birincil kaynak Capacitor'dür; ancak Capacitor bir şekilde
+// bootstrap edilemezse (bundling/tree-shaking sorunu) native köprü doğrudan
+// kontrol edilir — Capacitor'ün kendi platform tespiti de bu köprüye bakar.
+function isAndroidNative() {
+  try {
+    if (Capacitor.getPlatform() === 'android') return true
+    if (Capacitor.isNativePlatform?.() && Capacitor.getPlatform() !== 'ios') return true
+  } catch {
+    // Capacitor yüklenemedi; aşağıdaki köprü kontrolüne düşülür.
+  }
+
+  return typeof window !== 'undefined' && Boolean(window.androidBridge)
+}
+
+// API adresinin tek belirlendiği yer. Sıra:
+//   1) VITE_API_BASE_URL tanımlıysa o kullanılır (gerçek cihaz, staging vb.)
+//   2) Android'de 10.0.2.2 — emülatörde "localhost" emülatörün KENDİSİdir,
+//      host makineye bu özel alias ile erişilir
+//   3) Diğer her yerde (web tarayıcı, iOS simülatörü) localhost
+function resolveApiOrigin() {
+  const configured = import.meta.env.VITE_API_BASE_URL?.trim()
+  if (configured) return configured.replace(/\/+$/, '')
+
+  if (isAndroidNative()) {
+    return `http://10.0.2.2:${DEFAULT_PORT}`
+  }
+
+  return `http://localhost:${DEFAULT_PORT}`
+}
+
+export const API_ORIGIN = resolveApiOrigin()
+
+const API_BASE_URL = `${API_ORIGIN}/api`
+
+// Hangi adresin seçildiği emülatör hata ayıklamasında kritik.
+// Logcat'te görmek için: adb logcat | grep "DG_API"
+// (Capacitor konsol çıktısını "Capacitor/Console" etiketiyle iletir.)
+if (typeof window !== 'undefined') {
+  let platform = 'bilinmiyor'
+  let native = 'bilinmiyor'
+  try {
+    platform = Capacitor.getPlatform()
+    native = String(Capacitor.isNativePlatform())
+  } catch (error) {
+    platform = `hata: ${error.message}`
+  }
+
+  console.log(
+    `DG_API base=${API_BASE_URL} | platform=${platform} native=${native} ` +
+      `androidBridge=${Boolean(window.androidBridge)} ` +
+      `origin=${window.location.origin} protocol=${window.location.protocol} ` +
+      `env=${import.meta.env.VITE_API_BASE_URL ?? '(tanımsız)'}`,
+  )
+}
 
 // Onboarding'i tamamlamamış (veya localStorage'ı temizlenmiş) tarayıcılar için
 // yedek kullanıcı. Gerçek oturum sistemi geldiğinde ikisi de kaldırılacak.
