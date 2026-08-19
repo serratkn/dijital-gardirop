@@ -9,7 +9,11 @@ class UserService {
     this.userRepository = userRepository
   }
 
-  async getUserById(id) {
+  // Kullanıcı yalnızca kendi kaydına erişebilir.
+  async getUserById(id, requesterId) {
+    if (requesterId && id !== requesterId) {
+      throw new NotFoundError('Kullanıcı bulunamadı')
+    }
     const user = await this.userRepository.findById(id)
     if (!user) {
       throw new NotFoundError('Kullanıcı bulunamadı')
@@ -38,7 +42,7 @@ class UserService {
     }
   }
 
-  async updateUser(id, data) {
+  async updateUser(id, data, requesterId) {
     const email = this.#normalizeEmail(data.email)
     this.#validateName(data.name)
     this.#validateAge(data.age)
@@ -48,6 +52,10 @@ class UserService {
       throw new ValidationError(
         `subscriptionTier şunlardan biri olmalıdır: ${SUBSCRIPTION_TIERS.join(', ')}`,
       )
+    }
+
+    if (requesterId && id !== requesterId) {
+      throw new NotFoundError('Kullanıcı bulunamadı')
     }
 
     const existingUser = await this.userRepository.findById(id)
@@ -70,7 +78,11 @@ class UserService {
     }
   }
 
-  async deleteUser(id) {
+  async deleteUser(id, requesterId) {
+    if (requesterId && id !== requesterId) {
+      throw new NotFoundError('Kullanıcı bulunamadı')
+    }
+
     const deletedUser = await this.userRepository.delete(id)
     if (!deletedUser) {
       throw new NotFoundError('Kullanıcı bulunamadı')

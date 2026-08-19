@@ -15,9 +15,10 @@ class OutfitService {
     return this.outfitRepository.findAll(userId)
   }
 
-  async getOutfitById(id) {
+  // Sahiplik kontrolü 404 ile yapılır (403 kaydın varlığını ele verirdi).
+  async getOutfitById(id, userId) {
     const outfit = await this.outfitRepository.findById(id)
-    if (!outfit) {
+    if (!outfit || outfit.user_id !== userId) {
       throw new NotFoundError('Kombin bulunamadı')
     }
     return outfit
@@ -47,11 +48,11 @@ class OutfitService {
     }
   }
 
-  async updateOutfit(id, data) {
+  async updateOutfit(id, data, userId) {
     assertMaxLength(data.occasion, FIELD_LIMITS.outfits.occasion, 'occasion')
 
     const existingOutfit = await this.outfitRepository.findById(id)
-    if (!existingOutfit) {
+    if (!existingOutfit || existingOutfit.user_id !== userId) {
       throw new NotFoundError('Kombin bulunamadı')
     }
 
@@ -67,28 +68,29 @@ class OutfitService {
     })
   }
 
-  async deleteOutfit(id) {
-    const deletedOutfit = await this.outfitRepository.delete(id)
-    if (!deletedOutfit) {
+  async deleteOutfit(id, userId) {
+    // Önce sahiplik doğrulanır; doğrudan silmek başkasının kombinini silerdi.
+    const existingOutfit = await this.outfitRepository.findById(id)
+    if (!existingOutfit || existingOutfit.user_id !== userId) {
       throw new NotFoundError('Kombin bulunamadı')
     }
-    return deletedOutfit
+    return this.outfitRepository.delete(id)
   }
 
-  async toggleFavorite(id) {
-    const outfit = await this.outfitRepository.toggleFavorite(id)
-    if (!outfit) {
+  async toggleFavorite(id, userId) {
+    const existing = await this.outfitRepository.findById(id)
+    if (!existing || existing.user_id !== userId) {
       throw new NotFoundError('Kombin bulunamadı')
     }
-    return outfit
+    return this.outfitRepository.toggleFavorite(id)
   }
 
-  async markAsWorn(id) {
-    const outfit = await this.outfitRepository.incrementTimesWorn(id)
-    if (!outfit) {
+  async markAsWorn(id, userId) {
+    const existing = await this.outfitRepository.findById(id)
+    if (!existing || existing.user_id !== userId) {
       throw new NotFoundError('Kombin bulunamadı')
     }
-    return outfit
+    return this.outfitRepository.incrementTimesWorn(id)
   }
 
   #validateItemIds(clothingItemIds) {

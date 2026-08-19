@@ -8,7 +8,7 @@ class OutfitController extends BaseController {
 
   async getAll(req, res) {
     try {
-      const outfits = await this.outfitService.getOutfits(req.query.userId)
+      const outfits = await this.outfitService.getOutfits(req.userId)
       res.status(200).json(outfits)
     } catch (error) {
       this.handleError(error, res)
@@ -17,7 +17,7 @@ class OutfitController extends BaseController {
 
   async getById(req, res) {
     try {
-      const outfit = await this.outfitService.getOutfitById(req.params.id)
+      const outfit = await this.outfitService.getOutfitById(req.params.id, req.userId)
       res.status(200).json(outfit)
     } catch (error) {
       this.handleError(error, res)
@@ -26,7 +26,7 @@ class OutfitController extends BaseController {
 
   async create(req, res) {
     try {
-      const outfit = await this.outfitService.createOutfit(req.body)
+      const outfit = await this.outfitService.createOutfit({ ...req.body, userId: req.userId })
       res.status(201).json(outfit)
     } catch (error) {
       this.handleError(error, res)
@@ -35,7 +35,7 @@ class OutfitController extends BaseController {
 
   async update(req, res) {
     try {
-      const outfit = await this.outfitService.updateOutfit(req.params.id, req.body)
+      const outfit = await this.outfitService.updateOutfit(req.params.id, req.body, req.userId)
       res.status(200).json(outfit)
     } catch (error) {
       this.handleError(error, res)
@@ -44,7 +44,7 @@ class OutfitController extends BaseController {
 
   async delete(req, res) {
     try {
-      await this.outfitService.deleteOutfit(req.params.id)
+      await this.outfitService.deleteOutfit(req.params.id, req.userId)
       res.status(204).send()
     } catch (error) {
       this.handleError(error, res)
@@ -53,7 +53,7 @@ class OutfitController extends BaseController {
 
   async toggleFavorite(req, res) {
     try {
-      const outfit = await this.outfitService.toggleFavorite(req.params.id)
+      const outfit = await this.outfitService.toggleFavorite(req.params.id, req.userId)
       res.status(200).json(outfit)
     } catch (error) {
       this.handleError(error, res)
@@ -62,7 +62,7 @@ class OutfitController extends BaseController {
 
   async markAsWorn(req, res) {
     try {
-      const outfit = await this.outfitService.markAsWorn(req.params.id)
+      const outfit = await this.outfitService.markAsWorn(req.params.id, req.userId)
       res.status(200).json(outfit)
     } catch (error) {
       this.handleError(error, res)

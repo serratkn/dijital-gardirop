@@ -8,7 +8,7 @@ class StylePreferenceController extends BaseController {
 
   async getByUserId(req, res) {
     try {
-      const preferences = await this.stylePreferenceService.getByUserId(req.query.userId)
+      const preferences = await this.stylePreferenceService.getByUserId(req.userId)
       res.status(200).json(preferences)
     } catch (error) {
       this.handleError(error, res)
@@ -17,7 +17,7 @@ class StylePreferenceController extends BaseController {
 
   async save(req, res) {
     try {
-      const preferences = await this.stylePreferenceService.savePreferences(req.body)
+      const preferences = await this.stylePreferenceService.savePreferences({ ...req.body, userId: req.userId })
       res.status(200).json(preferences)
     } catch (error) {
       this.handleError(error, res)

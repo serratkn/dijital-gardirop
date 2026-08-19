@@ -8,7 +8,7 @@ class UserController extends BaseController {
 
   async getById(req, res) {
     try {
-      const user = await this.userService.getUserById(req.params.id)
+      const user = await this.userService.getUserById(req.params.id, req.userId)
       res.status(200).json(user)
     } catch (error) {
       this.handleError(error, res)
@@ -26,7 +26,7 @@ class UserController extends BaseController {
 
   async update(req, res) {
     try {
-      const user = await this.userService.updateUser(req.params.id, req.body)
+      const user = await this.userService.updateUser(req.params.id, req.body, req.userId)
       res.status(200).json(user)
     } catch (error) {
       this.handleError(error, res)
@@ -35,7 +35,7 @@ class UserController extends BaseController {
 
   async delete(req, res) {
     try {
-      await this.userService.deleteUser(req.params.id)
+      await this.userService.deleteUser(req.params.id, req.userId)
       res.status(204).send()
     } catch (error) {
       this.handleError(error, res)

@@ -8,8 +8,8 @@ class ClothingItemController extends BaseController {
 
   async getAll(req, res) {
     try {
-      const { userId, categoryId } = req.query
-      const items = await this.clothingItemService.getItems(userId, categoryId)
+      const { categoryId } = req.query
+      const items = await this.clothingItemService.getItems(req.userId, categoryId)
       res.status(200).json(items)
     } catch (error) {
       this.handleError(error, res)
@@ -18,7 +18,7 @@ class ClothingItemController extends BaseController {
 
   async getById(req, res) {
     try {
-      const item = await this.clothingItemService.getItemById(req.params.id)
+      const item = await this.clothingItemService.getItemById(req.params.id, req.userId)
       res.status(200).json(item)
     } catch (error) {
       this.handleError(error, res)
@@ -27,7 +27,7 @@ class ClothingItemController extends BaseController {
 
   async create(req, res) {
     try {
-      const item = await this.clothingItemService.createItem(req.body)
+      const item = await this.clothingItemService.createItem({ ...req.body, userId: req.userId })
       res.status(201).json(item)
     } catch (error) {
       this.handleError(error, res)
@@ -36,7 +36,7 @@ class ClothingItemController extends BaseController {
 
   async update(req, res) {
     try {
-      const item = await this.clothingItemService.updateItem(req.params.id, req.body)
+      const item = await this.clothingItemService.updateItem(req.params.id, req.body, req.userId)
       res.status(200).json(item)
     } catch (error) {
       this.handleError(error, res)
@@ -45,7 +45,7 @@ class ClothingItemController extends BaseController {
 
   async delete(req, res) {
     try {
-      await this.clothingItemService.deleteItem(req.params.id)
+      await this.clothingItemService.deleteItem(req.params.id, req.userId)
       res.status(204).send()
     } catch (error) {
       this.handleError(error, res)
@@ -54,7 +54,7 @@ class ClothingItemController extends BaseController {
 
   async toggleFavorite(req, res) {
     try {
-      const item = await this.clothingItemService.toggleFavorite(req.params.id)
+      const item = await this.clothingItemService.toggleFavorite(req.params.id, req.userId)
       res.status(200).json(item)
     } catch (error) {
       this.handleError(error, res)

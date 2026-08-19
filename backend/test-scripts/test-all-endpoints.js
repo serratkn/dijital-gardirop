@@ -26,10 +26,18 @@ function check(label, condition, detail = '') {
   }
 }
 
+// Auth eklendikten sonra /health ve /auth/* dışındaki her uç token ister.
+// Test başında bir hesap açılır ve token buraya konur.
+let authToken = null
+
 async function call(method, endpoint, body) {
+  const headers = {}
+  if (body) headers['Content-Type'] = 'application/json'
+  if (authToken) headers.Authorization = `Bearer ${authToken}`
+
   const response = await fetch(BASE_URL + endpoint, {
     method,
-    headers: body ? { 'Content-Type': 'application/json' } : undefined,
+    headers,
     body: body ? JSON.stringify(body) : undefined,
   })
 
@@ -58,8 +66,28 @@ async function main() {
   check('GET /health → 200', health.status === 200, `status: ${health.data?.status}`)
   check('veritabanı bağlı', health.data?.database?.connected === true)
 
+  // ---------------- OTURUM ----------------
+  // Bundan sonraki tüm uçlar token ister; testin geri kalanı bu hesapla çalışır.
+  console.log('\n2) OTURUM AÇ (kalan uçlar için)')
+  const ownerEmail = uniqueEmail()
+  const registered = await call('POST', '/auth/register', {
+    name: 'Test Kullanıcı',
+    email: ownerEmail,
+    age: 27,
+    password: 'GucluSifre123',
+  })
+  check('POST /auth/register → 201', registered.status === 201)
+  check('token döndü', typeof registered.data?.token === 'string')
+  check('password_hash sızmıyor', registered.data?.user && !('password_hash' in registered.data.user))
+
+  authToken = registered.data.token
+  const userId = registered.data.user.id
+  createdUserIds.push(userId)
+
+  check('GET /auth/me → 200', (await call('GET', '/auth/me')).status === 200)
+
   // ---------------- CATEGORIES ----------------
-  console.log('\n2) CATEGORIES (salt okunur)')
+  console.log('\n3) CATEGORIES (salt okunur)')
   const categories = await call('GET', '/categories')
   check('GET /categories → 200', categories.status === 200)
   check('6 kategori seed edilmiş', categories.data?.length === 6, `${categories.data?.length} kategori`)
@@ -74,33 +102,41 @@ async function main() {
   check('GET /categories/abc → 400', (await call('GET', '/categories/abc')).status === 400)
 
   // ---------------- USERS ----------------
-  console.log('\n3) USERS')
-  const email = uniqueEmail()
-  const createdUser = await call('POST', '/users', { name: 'Test Kullanıcı', email, age: 27 })
-  check('POST /users → 201', createdUser.status === 201)
-  const userId = createdUser.data?.id
-  createdUserIds.push(userId)
-  check('password_hash sızmıyor', createdUser.data && !('password_hash' in createdUser.data))
-  check('e-posta küçük harfe çevrildi', createdUser.data?.email === email.toLowerCase())
-
-  check('aynı e-posta → 409', (await call('POST', '/users', { name: 'X', email })).status === 409)
-  check('e-posta yok → 400', (await call('POST', '/users', { name: 'X' })).status === 400)
-  check('geçersiz e-posta → 400', (await call('POST', '/users', { email: 'abc' })).status === 400)
-  check('yaş 999 → 400', (await call('POST', '/users', { email: uniqueEmail(), age: 999 })).status === 400)
+  console.log('\n4) USERS (yalnızca kendi kaydı)')
+  check(
+    'aynı e-posta ile kayıt → 409',
+    (await call('POST', '/auth/register', { email: ownerEmail, password: 'GucluSifre123' })).status === 409,
+  )
+  check(
+    'geçersiz e-posta → 400',
+    (await call('POST', '/auth/register', { email: 'abc', password: 'GucluSifre123' })).status === 400,
+  )
+  check(
+    'yaş 999 → 400',
+    (await call('POST', '/auth/register', {
+      email: uniqueEmail(),
+      age: 999,
+      password: 'GucluSifre123',
+    })).status === 400,
+  )
   check(
     'name 101 karakter → 400',
-    (await call('POST', '/users', { email: uniqueEmail(), name: longText(101) })).status === 400,
+    (await call('POST', '/auth/register', {
+      email: uniqueEmail(),
+      name: longText(101),
+      password: 'GucluSifre123',
+    })).status === 400,
   )
 
-  check('GET /users/:id → 200', (await call('GET', `/users/${userId}`)).status === 200)
+  check('GET /users/:id (kendi) → 200', (await call('GET', `/users/${userId}`)).status === 200)
   check(
-    'GET /users/<olmayan> → 404',
+    'GET /users/<başkası> → 404',
     (await call('GET', '/users/00000000-0000-0000-0000-000000000000')).status === 404,
   )
 
   const updatedUser = await call('PUT', `/users/${userId}`, {
     name: 'Güncellenmiş Ad',
-    email,
+    email: ownerEmail,
     age: 28,
     subscriptionTier: 'premium',
   })
@@ -108,18 +144,17 @@ async function main() {
   check('subscription_tier güncellendi', updatedUser.data?.subscription_tier === 'premium')
   check(
     'geçersiz tier → 400',
-    (await call('PUT', `/users/${userId}`, { email, subscriptionTier: 'gold' })).status === 400,
+    (await call('PUT', `/users/${userId}`, { email: ownerEmail, subscriptionTier: 'gold' })).status === 400,
   )
 
   // ---------------- STYLE PREFERENCES ----------------
-  console.log('\n4) STYLE PREFERENCES (upsert)')
+  console.log('\n5) STYLE PREFERENCES (upsert)')
   check(
     'GET (henüz yok) → 404',
-    (await call('GET', `/style-preferences?userId=${userId}`)).status === 404,
+    (await call('GET', `/style-preferences`)).status === 404,
   )
 
   const prefsBody = {
-    userId,
     dailyStyle: 'Şık & Zarif',
     colorPreference: 'Pastel & Yumuşak Tonlar',
     priority: 'Şıklık',
@@ -133,23 +168,15 @@ async function main() {
   const updatedPrefs = await call('PUT', '/style-preferences', { ...prefsBody, priority: 'Rahatlık' })
   check('PUT (update) aynı satırı günceller', updatedPrefs.data?.id === insertedPrefs.data?.id)
   check('alan güncellendi', updatedPrefs.data?.priority === 'Rahatlık')
-  check('GET → 200', (await call('GET', `/style-preferences?userId=${userId}`)).status === 200)
-  check('userId yok → 400', (await call('PUT', '/style-preferences', { dailyStyle: 'x' })).status === 400)
-  check(
-    'olmayan kullanıcı → 400',
-    (await call('PUT', '/style-preferences', {
-      userId: '00000000-0000-0000-0000-000000000000',
-    })).status === 400,
-  )
+  check('GET → 200', (await call('GET', `/style-preferences`)).status === 200)
   check(
     'dailyStyle 51 karakter → 400',
-    (await call('PUT', '/style-preferences', { userId, dailyStyle: longText(51) })).status === 400,
+    (await call('PUT', '/style-preferences', { dailyStyle: longText(51) })).status === 400,
   )
 
   // ---------------- CLOTHING ITEMS ----------------
-  console.log('\n5) CLOTHING ITEMS')
+  console.log('\n6) CLOTHING ITEMS')
   const item1 = await call('POST', '/clothing-items', {
-    userId,
     categoryId: 1,
     name: 'Test Parça Üst',
     color: 'Beyaz',
@@ -159,29 +186,27 @@ async function main() {
   check('yanıt snake_case', item1.data && 'user_id' in item1.data && 'is_favorite' in item1.data)
   check('camelCase sızmıyor', item1.data && !('userId' in item1.data))
 
-  const item2 = await call('POST', '/clothing-items', { userId, categoryId: 2, name: 'Test Parça Alt' })
-  const item3 = await call('POST', '/clothing-items', { userId, categoryId: 4, name: 'Test Parça Ayakkabı' })
+  const item2 = await call('POST', '/clothing-items', { categoryId: 2, name: 'Test Parça Alt' })
+  const item3 = await call('POST', '/clothing-items', { categoryId: 4, name: 'Test Parça Ayakkabı' })
   check('farklı kategorilerde parçalar eklendi', item2.status === 201 && item3.status === 201)
 
-  check('userId yok → 400', (await call('POST', '/clothing-items', { categoryId: 1, name: 'x' })).status === 400)
-  check('name yok → 400', (await call('POST', '/clothing-items', { userId, categoryId: 1 })).status === 400)
+  check('name yok → 400', (await call('POST', '/clothing-items', { categoryId: 1 })).status === 400)
   check(
     'name 201 karakter → 400',
-    (await call('POST', '/clothing-items', { userId, categoryId: 1, name: longText(201) })).status === 400,
+    (await call('POST', '/clothing-items', { categoryId: 1, name: longText(201) })).status === 400,
   )
   check(
     'olmayan kategori → 400',
-    (await call('POST', '/clothing-items', { userId, categoryId: 9999, name: 'x' })).status === 400,
+    (await call('POST', '/clothing-items', { categoryId: 9999, name: 'x' })).status === 400,
   )
 
-  const list = await call('GET', `/clothing-items?userId=${userId}`)
+  const list = await call('GET', `/clothing-items`)
   check('GET liste → 200', list.status === 200)
   check('3 parça listelendi', list.data?.length === 3, `${list.data?.length} parça`)
   check('created_at DESC sıralı', list.data?.[0]?.id === item3.data.id)
 
-  const filtered = await call('GET', `/clothing-items?userId=${userId}&categoryId=1`)
+  const filtered = await call('GET', `/clothing-items?categoryId=1`)
   check('kategori filtresi çalışıyor', filtered.data?.length === 1, `${filtered.data?.length} parça`)
-  check('userId yok → 400', (await call('GET', '/clothing-items')).status === 400)
   check('GET /:id → 200', (await call('GET', `/clothing-items/${item1.data.id}`)).status === 200)
   check(
     'GET /<olmayan> → 404',
@@ -206,38 +231,34 @@ async function main() {
   )
 
   // ---------------- OUTFITS ----------------
-  console.log('\n6) OUTFITS')
+  console.log('\n7) OUTFITS')
   const outfit = await call('POST', '/outfits', {
-    userId,
     occasion: 'Üniversite',
     clothingItemIds: [item1.data.id, item2.data.id, item3.data.id],
   })
   check('POST → 201', outfit.status === 201)
   check('parçalar gömülü döndü', outfit.data?.items?.length === 3, `${outfit.data?.items?.length} parça`)
 
-  check('boş items → 400', (await call('POST', '/outfits', { userId, clothingItemIds: [] })).status === 400)
+  check('boş items → 400', (await call('POST', '/outfits', { clothingItemIds: [] })).status === 400)
   check(
     'tekrarlı items → 400',
-    (await call('POST', '/outfits', { userId, clothingItemIds: [item1.data.id, item1.data.id] })).status === 400,
+    (await call('POST', '/outfits', { clothingItemIds: [item1.data.id, item1.data.id] })).status === 400,
   )
   check(
     'başkasının parçası → 400',
     (await call('POST', '/outfits', {
-      userId,
       clothingItemIds: ['00000000-0000-0000-0000-000000000000'],
     })).status === 400,
   )
   check(
     'occasion 51 karakter → 400',
     (await call('POST', '/outfits', {
-      userId,
       occasion: longText(51),
       clothingItemIds: [item1.data.id],
     })).status === 400,
   )
 
-  check('GET liste → 200', (await call('GET', `/outfits?userId=${userId}`)).status === 200)
-  check('userId yok → 400', (await call('GET', '/outfits')).status === 400)
+  check('GET liste → 200', (await call('GET', `/outfits`)).status === 200)
   check('GET /:id → 200', (await call('GET', `/outfits/${outfit.data.id}`)).status === 200)
   check(
     'GET /<olmayan> → 404',
@@ -262,7 +283,7 @@ async function main() {
   )
 
   // ---------------- İLİŞKİSEL DAVRANIŞ ----------------
-  console.log('\n7) İLİŞKİSEL DAVRANIŞ')
+  console.log('\n8) İLİŞKİSEL DAVRANIŞ')
   await call('DELETE', `/clothing-items/${item1.data.id}`)
   const afterSoftDelete = await call('GET', `/outfits/${outfit.data.id}`)
   check('soft delete edilen parça kombinden düşer', afterSoftDelete.data?.items?.length === 0)
@@ -273,23 +294,23 @@ async function main() {
   )
   check(
     'soft delete edilen parça listede yok',
-    (await call('GET', `/clothing-items?userId=${userId}`)).data?.length === 2,
+    (await call('GET', `/clothing-items`)).data?.length === 2,
   )
 
   check('DELETE /outfits/:id → 204', (await call('DELETE', `/outfits/${outfit.data.id}`)).status === 204)
   check('silinen kombin 404', (await call('GET', `/outfits/${outfit.data.id}`)).status === 404)
 
   // ---------------- CASCADE ----------------
-  console.log('\n8) CASCADE (kullanıcı silme)')
+  console.log('\n9) CASCADE (kullanıcı silme)')
   check('DELETE /users/:id → 204', (await call('DELETE', `/users/${userId}`)).status === 204)
   check('kullanıcı gitti', (await call('GET', `/users/${userId}`)).status === 404)
   check(
     'tercihleri CASCADE ile gitti',
-    (await call('GET', `/style-preferences?userId=${userId}`)).status === 404,
+    (await call('GET', `/style-preferences`)).status === 404,
   )
-  const itemsAfterCascade = await call('GET', `/clothing-items?userId=${userId}`)
+  const itemsAfterCascade = await call('GET', `/clothing-items`)
   check('parçaları CASCADE ile gitti', itemsAfterCascade.data?.length === 0)
-  const outfitsAfterCascade = await call('GET', `/outfits?userId=${userId}`)
+  const outfitsAfterCascade = await call('GET', `/outfits`)
   check('kombinleri CASCADE ile gitti', outfitsAfterCascade.data?.length === 0)
 
   console.log(`\n${'='.repeat(46)}`)

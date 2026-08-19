@@ -243,14 +243,16 @@ olduğu için iskelet oraya taşındı, kombin üretimi istemci tarafında anlı
 
 | Konu | Durum |
 |---|---|
-| **Kimlik doğrulama yok** | Parola alanı, oturum, token yok. Onboarding'de oluşturulan kullanıcının id'si localStorage'da (`dg_user_id`) tutulur ve `getCurrentUserId()` bunu okur — bu geçici bir çözümdür, `ChangePassword` sayfası da hâlâ mock'tur. |
+| **Token localStorage'da** | XSS durumunda okunabilir. httpOnly cookie daha güvenli olurdu ama Capacitor WebView'de oturum yönetimini karmaşıklaştırır; bilinçli ödünleşme. |
+| **Şifre sıfırlama yok** | "Şifremi unuttum" akışı (e-posta ile sıfırlama bağlantısı) yoktur; kullanıcı şifresini yalnızca giriş yapmışken değiştirebilir. |
+| **E-posta doğrulama yok** | `email_verified` kolonu var ama hep `false`; doğrulama akışı kurulmadı. |
+| **Token yenileme yok** | Tek bir access token (varsayılan 7 gün) kullanılır; refresh token yoktur, süre dolunca yeniden giriş gerekir. |
 | **Fotoğraf yükleme yok** | `image_url` kolonu var ama dosya yükleme akışı yok; tüm kartlar `warm-gray` placeholder gösterir. QuickAddModal'daki "Fotoğraf Yükle" butonu bilinçli olarak devre dışıdır. |
 | **Kıyafet düzenleme yok** | `PUT /api/clothing-items/:id` ucu hazır ama arayüzde düzenleme akışı yok. |
 | **Kombin "giyildi" sayacı** | `PATCH /outfits/:id/worn` ucu hazır; Kombinlerim sayfası `times_worn` değerini gösterir ama artırma butonu yoktur. |
 | **Bildirimler / Yardım & Destek** | "Yakında" sayfalarıdır, işlevleri yoktur. |
 | **Ana Sayfa hızlı kombin kartları** | "Üniversite Kombini" / "Akşam Yemeği Kombini" kartları statik metindir, gerçek kombinlere bağlı değildir (bilinçli tercih). |
 | **Test altyapısı yok** | Test framework'ü yoktur. Doğrulama: `npm run lint` + `backend/test-scripts/` + elle deneme. |
-| **Onboarding sıfırlama butonu** | `Navbar`'daki düşük kontrastlı `RotateCcw` butonu geçicidir, yayına çıkmadan kaldırılmalıdır. |
 
 ---
 
@@ -340,6 +342,29 @@ Taban adres: `http://localhost:3001/api`
 > `is_favorite` döner. Arada serileştirme katmanı yoktur — frontend'de
 > `src/lib/transformers.js` bu çeviriyi yapar.
 
+### Kimlik doğrulama
+
+**`/health`, `/auth/register` ve `/auth/login` dışındaki TÜM uçlar token ister.**
+İstekler `Authorization: Bearer <token>` başlığıyla gelir; `authenticate` middleware
+token'ı doğrulayıp `req.userId`'yi doldurur.
+
+> **Kullanıcı kimliği asla istekten okunmaz.** Controller'lar `req.query.userId` /
+> `req.body.userId` değil **yalnızca `req.userId`** kullanır — aksi hâlde bir kullanıcı
+> başkasının id'sini göndererek onun verisine erişebilirdi. Servisler ayrıca kayıt
+> sahipliğini doğrular ve başkasının kaydı için **404** döner (403 kaydın var olduğunu
+> ele verirdi).
+
+| Metod | Yol | Açıklama |
+|---|---|---|
+| `POST` | `/auth/register` | `{ name, email*, age, password* }` → `201 { user, token }` |
+| `POST` | `/auth/login` | `{ email*, password* }` → `200 { user, token }` |
+| `GET` | `/auth/me` | Token sahibinin kaydı |
+| `POST` | `/auth/change-password` | `{ currentPassword*, newPassword* }` → `204` |
+
+Parola en az 8 karakter, en fazla 72 bayt (bcrypt sınırı) olmalıdır; `bcrypt` ile
+10 tur hash'lenir. Giriş hatalarında "kullanıcı yok" ile "şifre yanlış" **aynı** mesajı
+döner (`E-posta veya şifre hatalı`) — hangi e-postaların kayıtlı olduğu sızmasın diye.
+
 ### Hata biçimi
 
 Tüm hatalar `{ "error": "Türkçe mesaj" }` döner.
@@ -347,7 +372,8 @@ Tüm hatalar `{ "error": "Türkçe mesaj" }` döner.
 | Kod | Anlam |
 |---|---|
 | `400` | `ValidationError` — eksik/geçersiz alan, FK ihlali (`23503`) |
-| `404` | `NotFoundError` |
+| `401` | `UnauthorizedError` — token yok/geçersiz/süresi dolmuş, ya da şifre hatalı |
+| `404` | `NotFoundError` — kayıt yok **veya** başkasına ait |
 | `409` | `ConflictError` — benzersizlik ihlali (`23505`), örn. tekrarlı e-posta |
 | `500` | Beklenmeyen hata → `{ "error": "Sunucu hatası" }` |
 
@@ -474,13 +500,92 @@ docker exec dijitalgardirop-db-1 psql -U postgres -d dijital_gardirop \
   -v ON_ERROR_STOP=1 -f /tmp/m.sql
 ```
 
+### Android emülatöründe test etme
+
+```bash
+# frontend/ klasöründen
+npm run build
+npx cap sync android          # dist/ → android/app/src/main/assets/public
+npx cap open android          # Android Studio'da aç, oradan emülatörde çalıştır
+# veya doğrudan:
+npx cap run android
+```
+
+**Backend'in host makinede çalışıyor olması gerekir** (`backend/` içinde `npm run dev`)
+ve veritabanı ayakta olmalıdır (`docker compose up -d`).
+
+**En sık düşülen tuzak — `localhost` emülatörde çalışmaz.** Android emülatörü kendi sanal
+cihazıdır; `localhost` host makineyi değil **emülatörün kendisini** işaret eder. Host
+makineye `10.0.2.2` özel alias'ı ile erişilir. Bu yüzden `src/lib/api.js` adresi platforma
+göre seçer:
+
+| Ortam | Adres |
+|---|---|
+| Web tarayıcı, iOS simülatörü | `http://localhost:3001` |
+| Android emülatörü | `http://10.0.2.2:3001` |
+| `VITE_API_BASE_URL` tanımlıysa | o değer (her ortamda önceliklidir) |
+
+**Gerçek cihazda** (emülatör değil) `10.0.2.2` de çalışmaz; host makinenin yerel ağ IP'sini
+`frontend/.env` içinde vermek gerekir:
+
+```bash
+# frontend/.env
+VITE_API_BASE_URL=http://192.168.1.20:3001
+```
+
+Vite ortam değişkenlerini **build sırasında** gömer — değeri değiştirdikten sonra
+`npm run build` + `npx cap sync android` tekrar çalıştırılmalıdır.
+
+**HTTP'ye izin vermek için İKİ ayrı katman gerekir — biri eksikse istek sessizce
+"Failed to fetch" döner:**
+
+1. **İşletim sistemi (cleartext).** Android 9+ şifrelenmemiş HTTP'yi engeller (bu projede
+   `targetSdk 36`). `android/app/src/main/res/xml/network_security_config.xml` yalnızca
+   `10.0.2.2`, `localhost` ve `127.0.0.1` için istisna tanımlar; manifest'ten
+   `android:networkSecurityConfig` ile bağlanır. Tüm HTTP'yi açan
+   `usesCleartextTraffic="true"` bilinçli olarak tercih edilmedi.
+
+2. **WebView (mixed content).** Capacitor'ün Android varsayılan şeması **`https`**'tir
+   (`androidScheme`), yani uygulama sayfası `https://localhost` üzerinden servis edilir.
+   HTTPS bir sayfadan HTTP adrese istek atmak *mixed content* sayılır ve WebView bunu
+   varsayılan olarak reddeder. `capacitor.config.json` içindeki
+   `android.allowMixedContent: true` bunu açar (Capacitor bunu
+   `WebSettings.MIXED_CONTENT_ALWAYS_ALLOW`'a çevirir).
+
+> **Chrome'da çalışıp uygulamada çalışmaması normaldir.** Emülatördeki Chrome ayrı bir
+> uygulamadır ve adres çubuğuna `http://…` yazıldığında sayfa zaten HTTP origin'indedir —
+> ne cleartext kısıtı ne de mixed content devreye girer. Yani `10.0.2.2:3001/api/health`
+> adresinin Chrome'da açılması, uygulamanın da erişebileceği anlamına gelmez.
+
+**Production'da** backend HTTPS ile sunulmalı; hem `allowMixedContent` hem de cleartext
+istisnası kaldırılmalıdır.
+
+Hangi adresin kullanıldığı açılışta konsola basılır; emülatörde
+`adb logcat | grep "\[api\]"` veya Chrome'da `chrome://inspect` ile görülebilir:
+
+```
+[api] platform=android native=true base=http://10.0.2.2:3001/api
+```
+
+`npx cap sync` `AndroidManifest.xml` ve `res/xml/` altındaki dosyaları **ezmez**;
+yalnızca `assets/public` içeriğini ve plugin listesini günceller.
+
 ### Test scriptleri
 
 ```bash
 cd backend
 
-# Tüm uçları uçtan uca doğrular (77 kontrol); kendi verisini oluşturup siler.
+# Kimlik doğrulama + yetkilendirme (48 kontrol). En kritik bölüm: bir kullanıcının
+# BAŞKASININ verisine erişememesi.
+node test-scripts/test-auth.js
+
+# Tüm uçları uçtan uca doğrular (72 kontrol); kendi hesabını açıp sonunda siler.
 node test-scripts/test-all-endpoints.js
+
+# Auth öncesinden kalan, şifresi olmayan hesapları yönetir (varsayılan: salt okunur liste)
+node test-scripts/migrate-passwordless-users.js
+node test-scripts/migrate-passwordless-users.js --set-password <email> <sifre>
+node test-scripts/migrate-passwordless-users.js --delete-empty
 
 # Tek uca odaklı: POST + snake_case + GET doğrulaması
 node test-scripts/test-clothing-items.js
@@ -568,8 +673,17 @@ Tüm controller'lar `BaseController`'dan türer; `handleError` fırlatılan `App
 kendi `statusCode`'una, diğer her şeyi `500`'e çevirir. Alt sınıf constructor'ları `this`'e
 dokunmadan önce `super()` çağırmalıdır.
 
+**Auth katmanı.** `server.js` tek bir `AuthService` ve ondan türetilen tek bir
+`authenticate` middleware kurar (token'ı imzalayan ve doğrulayan aynı örnek olmalı).
+`authRoutes` bu yüzden diğerlerinden farklı olarak bir **fabrikadır**
+(`createAuthRoutes(authService, authenticate)`). Yeni korumalı bir kaynak eklerken
+`app.use('/api', authenticate, yeniRoutes)` deyip controller'da `req.userId` kullanın.
+
 **Silinmemesi gerekenler:** `config/database.js` içindeki `pool.on('error')` dinleyicisi
-(bkz. Aşama 5) ve `UserRepository` içindeki açık kolon listesi (bkz. Aşama 6b).
+(bkz. Aşama 5), `UserRepository` içindeki açık kolon listesi (bkz. Aşama 6b) ve
+`UserRepository.findByEmailForAuth` / `findByIdForAuth`'un **yalnızca** AuthService
+tarafından kullanılması — bunlar `password_hash` döndüren tek metodlardır, dönen nesne
+asla doğrudan API yanıtına verilmemelidir.
 
 Backend ayrı `DB_HOST` / `DB_PORT` / `DB_NAME` / `DB_USER` / `DB_PASSWORD` değişkenleri okur.
 **Kökteki** `.env.example` içindeki `DATABASE_URL` satırı mevcut kod tarafından kullanılmaz.
@@ -647,6 +761,87 @@ Kategori → lucide ikon eşlemesi `src/lib/categoryIcons.js` içinde merkezidir
 
 > Bundan sonraki her çalışma buraya tarihiyle işlenir: eklenen özellikler, düzeltilen
 > hatalar, alınan mimari kararlar. En yeni kayıt en üstte.
+
+### 2026-08-19 — Kimlik doğrulama sistemi kuruldu (JWT + bcrypt)
+- **Backend:** `bcrypt` (10 tur) ile parola hashleme, `jsonwebtoken` ile JWT.
+  Yeni uçlar: `POST /auth/register`, `POST /auth/login`, `GET /auth/me`,
+  `POST /auth/change-password`. `JWT_SECRET` ve `JWT_EXPIRES_IN` `.env`'den okunur;
+  secret yoksa sunucu açılışta **bilinçli olarak patlar** (sessizce güvensiz çalışmasın).
+- **`authenticate` middleware:** `Authorization: Bearer <token>` doğrulanır ve
+  `req.userId` doldurulur. `/health` ve `/auth/register|login` dışındaki **tüm** uçlar
+  (`categories`, `users`, `style-preferences`, `clothing-items`, `outfits`) bunun arkasında.
+- **Kritik güvenlik kararı — kimlik artık istekten okunmuyor.** Controller'lar
+  `req.query.userId` / `req.body.userId` yerine yalnızca `req.userId` kullanır. Ayrıca
+  servisler kayıt sahipliğini doğrular; başkasının kaydı için **404** döner (403 kaydın
+  var olduğunu ele verirdi). Bu, 15 ayrı kontrolle test edildi (`test-auth.js`).
+- **Giriş hataları ayırt edilmiyor:** "kullanıcı yok" ve "şifre yanlış" aynı mesajı döner,
+  böylece hangi e-postaların kayıtlı olduğu dışarıdan öğrenilemez.
+- **Frontend:** `Login` (`/giris`) ve `Register` (`/kayit`) sayfaları, `ProtectedRoute`,
+  `AuthLayout`. Akış yeniden düzenlendi: **Kayıt → 5 soruluk tarz anketi (`/tarz-anketi`)
+  → Ana Sayfa**. Eski `Onboarding.jsx` ve `RegistrationStep.jsx` kaldırıldı.
+- Token `dg_token` anahtarında; `api.js` tüm isteklere `Authorization` başlığını **tek
+  yerden** ekler. `getCurrentUserId()` artık localStorage değil **token payload'ından** okur.
+- Çıkış Yap gerçekten çalışıyor (token + profil önbelleği temizlenir → `/giris`),
+  Şifre Değiştir gerçek uca bağlandı, `Navbar`'daki geçici `RotateCcw` butonu **kaldırıldı**.
+- **Düzeltme (yarış durumu):** `isAuthenticated` bir state'ti; `setState` sonrası `/kayit`
+  rotası `<Navigate to="/">` render edip `navigate('/tarz-anketi')`'yi eziyordu — kullanıcı
+  kayıttan sonra ankete değil ana sayfaya düşüyordu. Oturum durumu artık **state değil,
+  her render'da token'dan türetilen** bir değer.
+- **Düzeltme (401 semantiği):** Şifre değiştirmede "mevcut şifre hatalı" 401 döner ve
+  `api.js` bunu oturum düşmesi sanıp kullanıcıyı Login'e atıyordu. `keepSessionOn401`
+  seçeneği eklendi: bu uçta 401 form hatasıdır, oturum sonlandırılmaz.
+- **Migrasyon:** `test-scripts/migrate-passwordless-users.js` — `password_hash`'i NULL olan
+  (auth öncesi) hesapları listeler; `--set-password` ile veriyi koruyarak şifre atar,
+  `--delete-empty` ile yalnızca verisi olmayanları siler, `--delete-all --force` ile hepsini.
+  Varsayılan davranış **salt okunurdur** (bu hesapların gerçek verisi olabilir).
+- `test-all-endpoints.js` auth'a uyarlandı (72 kontrol), yeni `test-auth.js` eklendi
+  (48 kontrol, ağırlıklı olarak veri izolasyonu).
+
+### 2026-08-19 — Android'de "Failed to fetch": mixed content engeli kaldırıldı
+- **Belirti:** Emülatörde Chrome'dan `http://10.0.2.2:3001/api/health` sorunsuz açılıyordu
+  ama uygulama "Gardırobuna şu an ulaşılamıyor" veriyordu. Yani ağ, backend ve adres
+  seçimi doğruydu; engel WebView katmanındaydı.
+- **Kök sebep:** Capacitor'ün Android varsayılan şeması `https`. Uygulama sayfası
+  `https://localhost` üzerinden servis edildiği için `http://10.0.2.2:3001` isteği
+  **mixed content** sayılıyor ve WebView bunu varsayılan olarak reddediyor
+  (`allowMixedContent` varsayılanı `false`; Capacitor bunu
+  `WebSettings.MIXED_CONTENT_ALWAYS_ALLOW`'a çevirir).
+- **Çözüm:** `capacitor.config.json`'a `android.allowMixedContent: true` eklendi.
+  Cleartext izni (`network_security_config.xml`) tek başına yetmiyordu — **iki katman da
+  gerekli**: OS seviyesinde cleartext, WebView seviyesinde mixed content.
+- **Öğrenilen:** Chrome'da çalışması uygulamanın da erişeceği anlamına gelmez; Chrome ayrı
+  bir uygulamadır ve orada sayfa zaten HTTP origin'indedir.
+- Platform tespiti dayanıklılaştırıldı: `Capacitor.getPlatform()` birincil kaynak,
+  çağrı hata verirse `window.androidBridge` köprüsüne düşer (try/catch ile sarılı).
+- Açılış logu `DG_API` etiketiyle güçlendirildi; artık seçilen adresin yanında
+  `platform`, `native`, `androidBridge`, `origin`, `protocol` ve env değeri de basılıyor
+  (`adb logcat | grep DG_API`).
+- **Not:** `capacitor.config.json` değişikliği APK'ya ancak **yeniden derlemeyle** girer;
+  `npx cap sync` tek başına yetmez, Android Studio'da Run/Rebuild gerekir.
+
+### 2026-08-19 — API adresi ortama duyarlı hale getirildi (Android emülatörü düzeltmesi)
+- **Sorun:** `API_BASE_URL` `http://localhost:3001` olarak sabit kodlanmıştı. Android
+  emülatöründe `localhost` emülatörün kendisidir, host makine değil — uygulama backend'e
+  ulaşamayıp "Gardırobuna şu an ulaşılamıyor" gösteriyordu.
+- `src/lib/api.js` içine `resolveApiOrigin()` eklendi; sıra: **`VITE_API_BASE_URL` →
+  Android'de `10.0.2.2` → diğer her yerde `localhost`**. Adres tek yerde belirlenir,
+  `API_ORIGIN` olarak dışa aktarılır. Platform tespiti `Capacitor.getPlatform()` ile yapılır.
+- Açılışta `[api] platform=… native=… base=…` satırı konsola basılır — emülatör hata
+  ayıklamasında hangi adresin kullanıldığını görmek için.
+- **Ortam değişkeni desteği:** `frontend/.env.example` eklendi. Değişken **sunucu köküdür**
+  (`/api` kod tarafından eklenir) ve sondaki `/` temizlenir. Gerçek cihazda test için
+  host makinenin yerel IP'si buraya yazılır.
+- **Android cleartext izni:** `network_security_config.xml` oluşturuldu ve manifest'e
+  `android:networkSecurityConfig` ile bağlandı. Tüm HTTP'yi açan `usesCleartextTraffic`
+  yerine yalnızca `10.0.2.2` / `localhost` / `127.0.0.1` için istisna tanımlandı;
+  production'da HTTPS'e geçilip kaldırılacağı dosya içinde not edildi.
+- **Doğrulama:** `npm run build` + `npx cap sync android` çalıştırıldı; web'de regresyon
+  yok (gardırop gerçek veriyle yükleniyor, konsol temiz), Android yolu `window.androidBridge`
+  enjekte edilerek sürülüp `base=http://10.0.2.2:3001/api` seçtiği doğrulandı.
+  `cap sync`'in manifest ve `res/xml/` dosyalarını ezmediği teyit edildi.
+- **Not:** Capacitor platformu `window.Capacitor` global'inden değil, native köprünün
+  (`window.androidBridge`) varlığından tespit eder — emülatör davranışını taklit eden
+  testler bunu bilmelidir.
 
 ### 2026-08-18 — Renk paleti genişletildi ve görsel seçiciye dönüştürüldü
 - Renk listesi 6'dan **22'ye** çıkarıldı ve `src/lib/colors.js` modülüne taşındı

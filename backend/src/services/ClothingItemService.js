@@ -32,10 +32,12 @@ class ClothingItemService {
     return this.clothingItemRepository.findAll(userId)
   }
 
-  async getItemById(id) {
+  // Başkasının kaydı için 403 yerine 404 dönüyoruz: 403, o id'de bir kaydın
+  // VAR olduğunu ele verir. 404 ile kaynak varlığı da gizlenmiş olur.
+  async getItemById(id, userId) {
     const item = await this.clothingItemRepository.findById(id)
 
-    if (!item) {
+    if (!item || item.user_id !== userId) {
       throw new NotFoundError('Kıyafet bulunamadı')
     }
 
@@ -52,11 +54,11 @@ class ClothingItemService {
     }
   }
 
-  async updateItem(id, data) {
+  async updateItem(id, data, userId) {
     this.#validateUpdateData(data)
 
     const existingItem = await this.clothingItemRepository.findById(id)
-    if (!existingItem) {
+    if (!existingItem || existingItem.user_id !== userId) {
       throw new NotFoundError('Kıyafet bulunamadı')
     }
 
@@ -67,18 +69,18 @@ class ClothingItemService {
     }
   }
 
-  async deleteItem(id) {
+  async deleteItem(id, userId) {
     const existingItem = await this.clothingItemRepository.findById(id)
-    if (!existingItem) {
+    if (!existingItem || existingItem.user_id !== userId) {
       throw new NotFoundError('Kıyafet bulunamadı')
     }
 
     return this.clothingItemRepository.softDelete(id)
   }
 
-  async toggleFavorite(id) {
+  async toggleFavorite(id, userId) {
     const existingItem = await this.clothingItemRepository.findById(id)
-    if (!existingItem) {
+    if (!existingItem || existingItem.user_id !== userId) {
       throw new NotFoundError('Kıyafet bulunamadı')
     }
 
