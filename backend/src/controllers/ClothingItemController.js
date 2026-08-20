@@ -62,6 +62,15 @@ class ClothingItemController extends BaseController {
     }
   }
 
+  async toggleCleanStatus(req, res) {
+    try {
+      const item = await this.clothingItemService.toggleCleanStatus(req.params.id, req.userId)
+      res.status(200).json(item)
+    } catch (error) {
+      this.handleError(error, res)
+    }
+  }
+
   async uploadImage(req, res) {
     if (!req.file) {
       return res.status(400).json({ error: 'Fotoğraf dosyası zorunludur' })

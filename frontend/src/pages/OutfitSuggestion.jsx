@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useLocation } from 'react-router-dom'
 import PageHeader from '../components/ui/PageHeader'
 import FilterPills from '../components/ui/FilterPills'
 import EmptyState from '../components/ui/EmptyState'
@@ -6,8 +7,8 @@ import Button from '../components/ui/Button'
 import ClothingCard from '../components/ClothingCard'
 import { createOutfit, fetchCategories, fetchClothingItems } from '../lib/api'
 import { toCategoryNameMap, toClothingItems } from '../lib/transformers'
+import { OCCASIONS, OCCASION_STATE_KEY } from '../lib/occasions'
 
-const OCCASIONS = ['Üniversite', 'İş', 'Akşam Yemeği', 'Buluşma', 'Spor', 'Özel Davet']
 const OUTFIT_CATEGORIES = ['Üst', 'Alt', 'Ayakkabı', 'Çanta']
 
 // outfits.occasion kolonu VARCHAR(50); daha uzun metin veritabanı
@@ -30,6 +31,10 @@ const isSameOutfit = (a, b) =>
   a.length === b.length && a.every((item, index) => item.id === b[index]?.id)
 
 function OutfitSuggestion() {
+  const location = useLocation()
+  // Ana Sayfa'daki "Hızlı Kombin Öner" kartı bu durumu router state ile taşır.
+  const requestedOccasion = location.state?.[OCCASION_STATE_KEY]
+
   const [items, setItems] = useState([])
   const [isLoading, setIsLoading] = useState(true)
   const [hasError, setHasError] = useState(false)
@@ -106,12 +111,32 @@ function OutfitSuggestion() {
     )
   }, [])
 
-  const startSuggestion = (occasion) => {
-    setSelectedOccasion(occasion)
-    setSuggestionItems(buildRandomOutfit(cleanItems))
-    setIsSaved(false)
-    setSaveError('')
-  }
+  const startSuggestion = useCallback(
+    (occasion) => {
+      setSelectedOccasion(occasion)
+      setSuggestionItems(buildRandomOutfit(cleanItems))
+      setIsSaved(false)
+      setSaveError('')
+    },
+    [cleanItems],
+  )
+
+  // Ana Sayfa kartından gelindiyse kullanıcı tekrar tıklamak zorunda kalmadan
+  // öneri üretilir. Gardırop yüklenmeden çalışamaz: buildRandomOutfit'in seçecek
+  // parçası olmalı.
+  //
+  // Ref ile YALNIZCA BİR KEZ çalışır. cleanItems, karttaki temiz/kirli toggle'ıyla
+  // değişiyor; guard olmasaydı efekt yeniden tetiklenip kullanıcının o sırada seçtiği
+  // durumu ezer ve öneriyi habersizce yeniden üretirdi.
+  const hasAppliedRequest = useRef(false)
+
+  useEffect(() => {
+    if (hasAppliedRequest.current) return
+    if (isLoading || hasError || !requestedOccasion) return
+
+    hasAppliedRequest.current = true
+    startSuggestion(requestedOccasion)
+  }, [isLoading, hasError, requestedOccasion, startSuggestion])
 
   const handleCustomSubmit = (event) => {
     event.preventDefault()

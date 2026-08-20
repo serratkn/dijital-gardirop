@@ -8,7 +8,10 @@ class OutfitController extends BaseController {
 
   async getAll(req, res) {
     try {
-      const outfits = await this.outfitService.getOutfits(req.userId)
+      const outfits = await this.outfitService.getOutfits(
+        req.userId,
+        req.query.clothingItemId,
+      )
       res.status(200).json(outfits)
     } catch (error) {
       this.handleError(error, res)

@@ -32,4 +32,14 @@ function assertFieldLengths(data, limits) {
   }
 }
 
-module.exports = { FIELD_LIMITS, assertMaxLength, assertFieldLengths }
+// Geçersiz biçimli bir UUID doğrudan Postgres'e gitseydi 22P02 (invalid input
+// syntax) ile 500'e düşerdi; sorgu paramı olarak gelen id'ler burada 400'e çevrilir.
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+
+function assertUuid(value, fieldName) {
+  if (!UUID_PATTERN.test(String(value))) {
+    throw new ValidationError(`${fieldName} geçerli bir UUID olmalıdır`)
+  }
+}
+
+module.exports = { FIELD_LIMITS, assertMaxLength, assertFieldLengths, assertUuid }

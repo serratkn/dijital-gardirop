@@ -1,5 +1,5 @@
 const { NotFoundError, ValidationError } = require('../utils/errors')
-const { FIELD_LIMITS, assertMaxLength } = require('../utils/validators')
+const { FIELD_LIMITS, assertMaxLength, assertUuid } = require('../utils/validators')
 
 const FOREIGN_KEY_VIOLATION = '23503'
 
@@ -8,10 +8,18 @@ class OutfitService {
     this.outfitRepository = outfitRepository
   }
 
-  async getOutfits(userId) {
+  // clothingItemId verilirse yalnızca o parçanın geçtiği kombinler döner
+  // (Kıyafet Detay sayfasındaki "Bu Kıyafetle Yapılan Kombinler" bölümü).
+  async getOutfits(userId, clothingItemId) {
     if (!userId) {
       throw new ValidationError('userId zorunludur')
     }
+
+    if (clothingItemId) {
+      assertUuid(clothingItemId, 'clothingItemId')
+      return this.outfitRepository.findAllByClothingItem(userId, clothingItemId)
+    }
+
     return this.outfitRepository.findAll(userId)
   }
 

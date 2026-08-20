@@ -41,6 +41,33 @@ class OutfitRepository {
     }
   }
 
+  // Belirli bir kıyafetin geçtiği kombinler. Filtre EXISTS ile yazılır —
+  // JOIN koşuluna eklenseydi dönen items dizisi yalnızca o parçaya inerdi,
+  // oysa kartın kombinin TAMAMINI gösterebilmesi gerekir.
+  // Silinmiş parça hiçbir kombinde geçmiyor sayılır (uygulamanın geri kalanıyla tutarlı).
+  async findAllByClothingItem(userId, clothingItemId) {
+    try {
+      const result = await this.pool.query(
+        `${SELECT_WITH_ITEMS}
+         WHERE o.user_id = $1
+           AND EXISTS (
+             SELECT 1
+             FROM outfit_items f
+             JOIN clothing_items fci
+               ON fci.id = f.clothing_item_id AND fci.is_deleted = false
+             WHERE f.outfit_id = o.id AND f.clothing_item_id = $2
+           )
+         GROUP BY o.id
+         ORDER BY o.created_at DESC`,
+        [userId, clothingItemId],
+      )
+      return result.rows
+    } catch (error) {
+      console.error('OutfitRepository.findAllByClothingItem hatası:', error.message)
+      throw error
+    }
+  }
+
   async findById(id) {
     try {
       const result = await this.pool.query(

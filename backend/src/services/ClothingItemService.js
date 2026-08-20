@@ -49,7 +49,11 @@ class ClothingItemService {
     this.#validateCreateData(data)
 
     try {
-      return await this.clothingItemRepository.create(data)
+      // Belirtilmezse parça temiz kabul edilir (kolon varsayılanıyla aynı).
+      return await this.clothingItemRepository.create({
+        ...data,
+        isClean: this.#normalizeIsClean(data.isClean, true),
+      })
     } catch (error) {
       throw translateForeignKeyError(error)
     }
@@ -64,7 +68,12 @@ class ClothingItemService {
     }
 
     try {
-      return await this.clothingItemRepository.update(id, data)
+      // isClean gönderilmediyse mevcut değer korunur. true'ya düşmek, herhangi bir
+      // düzenlemenin kirli bir parçayı sessizce temiz yapması anlamına gelirdi.
+      return await this.clothingItemRepository.update(id, {
+        ...data,
+        isClean: this.#normalizeIsClean(data.isClean, existingItem.is_clean),
+      })
     } catch (error) {
       throw translateForeignKeyError(error)
     }
@@ -134,6 +143,25 @@ class ClothingItemService {
     }
 
     return this.clothingItemRepository.toggleFavorite(id)
+  }
+
+  async toggleCleanStatus(id, userId) {
+    const existingItem = await this.clothingItemRepository.findById(id)
+    if (!existingItem || existingItem.user_id !== userId) {
+      throw new NotFoundError('Kıyafet bulunamadı')
+    }
+
+    return this.clothingItemRepository.toggleCleanStatus(id)
+  }
+
+  // Kolon NOT NULL: null/tanımsız değer veritabanına gitmeden burada karara bağlanır.
+  // Gevşek dönüşüm (örn. Boolean("false") === true) bilinçli olarak yapılmaz.
+  #normalizeIsClean(value, fallback) {
+    if (value === undefined || value === null) return fallback
+    if (typeof value !== 'boolean') {
+      throw new ValidationError('isClean true veya false olmalıdır')
+    }
+    return value
   }
 
   #validateCreateData(data) {

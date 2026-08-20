@@ -41,6 +41,9 @@ router.post('/clothing-items', (req, res) => clothingItemController.create(req, 
 router.put('/clothing-items/:id', (req, res) => clothingItemController.update(req, res))
 router.delete('/clothing-items/:id', (req, res) => clothingItemController.delete(req, res))
 router.patch('/clothing-items/:id/favorite', (req, res) => clothingItemController.toggleFavorite(req, res))
+router.patch('/clothing-items/:id/clean-status', (req, res) =>
+  clothingItemController.toggleCleanStatus(req, res),
+)
 router.post('/clothing-items/:id/image', handleUpload, (req, res) =>
   clothingItemController.uploadImage(req, res),
 )

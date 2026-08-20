@@ -8,9 +8,27 @@ import ClothingCard from '../components/ClothingCard'
 import SkeletonCard from '../components/SkeletonCard'
 import { getUserProfile } from '../lib/onboarding'
 import { fetchCategories, fetchClothingItems, fetchOutfits } from '../lib/api'
+import { OCCASIONS, OCCASION_STATE_KEY } from '../lib/occasions'
 import { toCategoryNameMap, toClothingItems } from '../lib/transformers'
 
 const RECENT_COUNT = 4
+
+// Hızlı kombin kartları. `occasion` değerleri OCCASIONS listesinden gelir ki
+// Kombin Öner sayfasında ilgili pill de aktif işaretlensin.
+const QUICK_OUTFITS = [
+  {
+    occasion: OCCASIONS[0], // Üniversite
+    title: 'Üniversite Kombini',
+    subtitle: 'Rahat ve şık, gün boyu kampüste.',
+    icon: GraduationCap,
+  },
+  {
+    occasion: OCCASIONS[2], // Akşam Yemeği
+    title: 'Akşam Yemeği Kombini',
+    subtitle: 'Zarif bir buluşma için özel bir seçim.',
+    icon: Utensils,
+  },
+]
 const SKELETON_HEIGHTS = ['h-64', 'h-48', 'h-60', 'h-52']
 
 function StatCardSkeleton() {
@@ -132,20 +150,17 @@ function Dashboard() {
         <section className="mt-16">
           <h2 className="font-display text-2xl italic text-ink">Hızlı Kombin Öner</h2>
           <div className="mt-6 grid grid-cols-1 gap-6 sm:grid-cols-2">
-            <QuickActionCard
-              to="/kombin-oner"
-              eyebrow="Kombin Önerisi"
-              title="Üniversite Kombini"
-              subtitle="Rahat ve şık, gün boyu kampüste."
-              icon={GraduationCap}
-            />
-            <QuickActionCard
-              to="/kombin-oner"
-              eyebrow="Kombin Önerisi"
-              title="Akşam Yemeği Kombini"
-              subtitle="Zarif bir buluşma için özel bir seçim."
-              icon={Utensils}
-            />
+            {QUICK_OUTFITS.map((quick) => (
+              <QuickActionCard
+                key={quick.occasion}
+                to="/kombin-oner"
+                state={{ [OCCASION_STATE_KEY]: quick.occasion }}
+                eyebrow="Kombin Önerisi"
+                title={quick.title}
+                subtitle={quick.subtitle}
+                icon={quick.icon}
+              />
+            ))}
           </div>
         </section>
 

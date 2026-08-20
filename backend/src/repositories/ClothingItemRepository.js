@@ -44,12 +44,13 @@ class ClothingItemRepository {
 
   async create(data) {
     try {
-      const { userId, categoryId, name, color, brand, season, imageUrl } = data
+      const { userId, categoryId, name, color, brand, season, imageUrl, isClean } = data
       const result = await this.pool.query(
-        `INSERT INTO clothing_items (user_id, category_id, name, color, brand, season, image_url)
-         VALUES ($1, $2, $3, $4, $5, $6, $7)
+        `INSERT INTO clothing_items
+           (user_id, category_id, name, color, brand, season, image_url, is_clean)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
          RETURNING *`,
-        [userId, categoryId, name, color, brand, season, imageUrl],
+        [userId, categoryId, name, color, brand, season, imageUrl, isClean],
       )
       return result.rows[0]
     } catch (error) {
@@ -60,13 +61,14 @@ class ClothingItemRepository {
 
   async update(id, data) {
     try {
-      const { categoryId, name, color, brand, season, imageUrl } = data
+      const { categoryId, name, color, brand, season, imageUrl, isClean } = data
       const result = await this.pool.query(
         `UPDATE clothing_items
-         SET category_id = $1, name = $2, color = $3, brand = $4, season = $5, image_url = $6, updated_at = NOW()
-         WHERE id = $7 AND is_deleted = false
+         SET category_id = $1, name = $2, color = $3, brand = $4, season = $5,
+             image_url = $6, is_clean = $7, updated_at = NOW()
+         WHERE id = $8 AND is_deleted = false
          RETURNING *`,
-        [categoryId, name, color, brand, season, imageUrl, id],
+        [categoryId, name, color, brand, season, imageUrl, isClean, id],
       )
       return result.rows[0] || null
     } catch (error) {
@@ -120,6 +122,24 @@ class ClothingItemRepository {
       return result.rows[0] || null
     } catch (error) {
       console.error('ClothingItemRepository.toggleFavorite hatası:', error.message)
+      throw error
+    }
+  }
+
+  // Favori toggle'ıyla aynı desen: okuma + yazma yerine tek atomik UPDATE,
+  // böylece iki eşzamanlı istek birbirinin değerini ezmez.
+  async toggleCleanStatus(id) {
+    try {
+      const result = await this.pool.query(
+        `UPDATE clothing_items
+         SET is_clean = NOT is_clean, updated_at = NOW()
+         WHERE id = $1 AND is_deleted = false
+         RETURNING *`,
+        [id],
+      )
+      return result.rows[0] || null
+    } catch (error) {
+      console.error('ClothingItemRepository.toggleCleanStatus hatası:', error.message)
       throw error
     }
   }

@@ -228,11 +228,15 @@ olduğu için iskelet oraya taşındı, kombin üretimi istemci tarafında anlı
 
 **Uygulamanın tamamı gerçek API üzerinde çalışır; mock veri kalmamıştır.**
 
-- **Gardırop** — listeleme, kategori filtresi, arama, parça ekleme (QuickAddModal), favori
-- **Ana Sayfa** — gerçek istatistikler (parça/kombin/favori) ve son eklenen 4 parça
-- **Kombin Öner** — gerçek gardıroptan kombin üretimi ve kalıcı kaydetme
+- **Gardırop** — listeleme, kategori filtresi, arama, parça ekleme (QuickAddModal), favori,
+  temiz/kirli işaretleme (kirli parçalar listede kalır, yalnızca kombin önerisi dışında tutulur)
+- **Ana Sayfa** — gerçek istatistikler (parça/kombin/favori) ve son eklenen 4 parça;
+  istatistik kartları tıklanabilir (Gardırop / Kombinlerim)
+- **Kombin Öner** — gerçek gardıroptan (yalnızca temiz parçalardan) kombin üretimi ve
+  kalıcı kaydetme; Ana Sayfa'daki hızlı kombin kartlarından doğrudan öneri üretilmiş halde açılır
 - **Kombinlerim** — kayıtlı kombinler; parçaları, tarihi, favori ve silme işlemleriyle
-- **Kıyafet Detay** — görüntüleme, favori, onaylı silme
+- **Kıyafet Detay** — görüntüleme, favori, onaylı silme, fotoğraf yönetimi ve
+  **o parçanın geçtiği kombinlerin listesi**
 - **Onboarding** — kullanıcıyı `POST /api/users` ile oluşturur, tarz anketini
   `PUT /api/style-preferences` ile kaydeder; e-posta çakışmasında (409) anlamlı mesaj gösterir
 - **Profil > Hesap Bilgilerim / Tarz Tercihlerim** — veritabanından okur ve günceller
@@ -252,7 +256,7 @@ olduğu için iskelet oraya taşındı, kombin üretimi istemci tarafında anlı
 | **Kıyafet düzenleme yok** | `PUT /api/clothing-items/:id` ucu hazır ama arayüzde düzenleme akışı yok. |
 | **Kombin "giyildi" sayacı** | `PATCH /outfits/:id/worn` ucu hazır; Kombinlerim sayfası `times_worn` değerini gösterir ama artırma butonu yoktur. |
 | **Bildirimler / Yardım & Destek** | "Yakında" sayfalarıdır, işlevleri yoktur. |
-| **Ana Sayfa hızlı kombin kartları** | "Üniversite Kombini" / "Akşam Yemeği Kombini" kartları statik metindir, gerçek kombinlere bağlı değildir (bilinçli tercih). |
+| **Gardırop'ta favori filtresi yok** | Sayfada kategori pillerinden ve aramadan başka filtre yoktur; favorileri tek başına listelemenin bir yolu bulunmuyor. Bu yüzden Ana Sayfa'daki "Favori" kartı filtresiz `/gardirop`'a gider. |
 | **Test altyapısı yok** | Test framework'ü yoktur. Doğrulama: `npm run lint` + `backend/test-scripts/` + elle deneme. |
 
 ---
@@ -298,6 +302,7 @@ olduğu için iskelet oraya taşındı, kombin üretimi istemci tarafında anlı
 | `category_id` | INTEGER → `categories(id)` | |
 | `name`, `color`, `brand`, `season`, `image_url` | VARCHAR | |
 | `is_favorite` | BOOLEAN | `false` |
+| `is_clean` | BOOLEAN | **NOT NULL**, `true` — kombin önerisi yalnızca `true` olanlardan seçer |
 | `is_deleted` | BOOLEAN | `false` — **soft delete**, her okuma filtreler |
 | `created_at` / `updated_at` | TIMESTAMP | |
 
@@ -428,12 +433,18 @@ Tüm hatalar `{ "error": "Türkçe mesaj" }` döner.
 |---|---|---|
 | `GET` | `/clothing-items?userId=*&categoryId=` | `categoryId` opsiyonel filtre; `created_at DESC` sıralı |
 | `GET` | `/clothing-items/:id` | Silinmişse `404` |
-| `POST` | `/clothing-items` | `{ userId*, categoryId*, name*, color, brand, season, imageUrl }` → `201` |
-| `PUT` | `/clothing-items/:id` | `{ categoryId*, name*, color, brand, season, imageUrl }` |
+| `POST` | `/clothing-items` | `{ userId*, categoryId*, name*, color, brand, season, imageUrl, isClean }` → `201` |
+| `PUT` | `/clothing-items/:id` | `{ categoryId*, name*, color, brand, season, imageUrl, isClean }` |
 | `DELETE` | `/clothing-items/:id` | **Soft delete** → `204` |
 | `PATCH` | `/clothing-items/:id/favorite` | Favori durumunu tersine çevirir (atomik) |
+| `PATCH` | `/clothing-items/:id/clean-status` | Temiz/kirli durumunu tersine çevirir (atomik) |
 | `POST` | `/clothing-items/:id/image` | **multipart/form-data**, alan adı `image`. jpg/png/webp, en fazla 5 MB |
 | `DELETE` | `/clothing-items/:id/image` | Fotoğrafı kaldırır (`image_url` → `null`, dosya diskten silinir) |
+
+**Temiz/kirli (`isClean`).** Boolean dışında bir değer `400` döner; gevşek dönüşüm
+yapılmaz (`"false"` metni `true` olurdu). `POST`'ta belirtilmezse parça **temiz** sayılır.
+`PUT`'ta belirtilmezse **mevcut değer korunur** — aksi hâlde herhangi bir düzenleme kirli
+bir parçayı sessizce temiz yapardı.
 
 **Fotoğraf yükleme.** Dosyalar `backend/uploads/` altına **rastgele UUID** adıyla yazılır
 (orijinal ad kullanılmaz: path traversal ve çakışma riski). `image_url` kolonunda **göreli
@@ -456,7 +467,7 @@ yükleme sonrası bir hata olursa yeni yazılan dosya geri alınır (öksüz dos
 
 | Metod | Yol | Gövde / Parametre |
 |---|---|---|
-| `GET` | `/outfits?userId=*` | Parçalarıyla birlikte, `created_at DESC` |
+| `GET` | `/outfits?clothingItemId=` | Parçalarıyla birlikte, `created_at DESC`. `clothingItemId` opsiyonel filtre |
 | `GET` | `/outfits/:id` | |
 | `POST` | `/outfits` | `{ userId*, occasion, clothingItemIds*[] }` → `201` |
 | `PUT` | `/outfits/:id` | `{ occasion, clothingItemIds }` — `clothingItemIds` verilmezse parçalara dokunulmaz |
@@ -466,6 +477,13 @@ yükleme sonrası bir hata olursa yeni yazılan dosya geri alınır (öksüz dos
 
 `clothingItemIds` en az bir parça içermeli, tekrar barındıramaz ve **yalnızca o kullanıcıya
 ait, silinmemiş** parçalar olabilir — aksi hâlde `400`.
+
+**`clothingItemId` filtresi.** Verilirse yalnızca o parçanın geçtiği kombinler döner
+(Kıyafet Detay sayfasını besler). Filtre SQL'de `EXISTS` alt sorgusuyla yazılır; `JOIN`
+koşuna eklenseydi dönen `items` dizisi **yalnızca aranan parçaya inerdi**, oysa kartın
+kombinin tamamını gösterebilmesi gerekir. Soft delete edilmiş bir parça hiçbir kombinde
+geçmiyor sayılır. Geçersiz biçimli bir UUID `400` döner — doğrudan Postgres'e gitseydi
+`22P02` ile `500`'e düşerdi (`utils/validators.js` → `assertUuid`).
 
 Yanıt, parçaları gömülü `items` dizisiyle döner. Silinmiş parçalar `JOIN` koşulunda
 filtrelendiği için, tüm parçaları silinmiş bir kombin kaybolmaz — `items: []` ile döner:
@@ -559,12 +577,22 @@ Vite ortam değişkenlerini **build sırasında** gömer — değeri değiştird
    `android:networkSecurityConfig` ile bağlanır. Tüm HTTP'yi açan
    `usesCleartextTraffic="true"` bilinçli olarak tercih edilmedi.
 
-2. **WebView (mixed content).** Capacitor'ün Android varsayılan şeması **`https`**'tir
-   (`androidScheme`), yani uygulama sayfası `https://localhost` üzerinden servis edilir.
-   HTTPS bir sayfadan HTTP adrese istek atmak *mixed content* sayılır ve WebView bunu
-   varsayılan olarak reddeder. `capacitor.config.json` içindeki
-   `android.allowMixedContent: true` bunu açar (Capacitor bunu
-   `WebSettings.MIXED_CONTENT_ALWAYS_ALLOW`'a çevirir).
+2. **WebView şeması (mixed content).** Capacitor'ün Android varsayılan şeması
+   **`https`**'tir, yani uygulama sayfası `https://localhost` üzerinden servis edilir ve
+   `http://10.0.2.2:3001` isteği *mixed content* sayılır. `capacitor.config.json` içindeki
+   `android.allowMixedContent: true` WebView'ün **engelleme** politikasını gevşetir
+   (`WebSettings.MIXED_CONTENT_ALWAYS_ALLOW`) ve `fetch` çağrılarını çalıştırır — ama
+   **`<img>` için yetmez**, çünkü Chromium pasif alt kaynakları ayrıca `https`'e
+   *auto-upgrade* eder (bkz. 2026-08-20 kaydı).
+
+   Bu yüzden proje şemayı tamamen değiştirir: `server.androidScheme: "http"`. Sayfa
+   `http://localhost` üzerinden servis edilir, backend isteği aynı şemaya düşer ve mixed
+   content koşulu **hiç oluşmaz**. `http://localhost` spec gereği "potentially trustworthy"
+   sayıldığı için secure-context API'leri kaybedilmez. `allowMixedContent` bu haliyle
+   etkisizdir; şema `https`'e döndürülürse diye bırakıldı.
+
+   > **Şema değiştirmek origin'i değiştirir** → `localStorage` (token, `dg_` önekli
+   > profil önbelleği) **bir kereliğine silinir**; uygulamada yeniden giriş yapılır.
 
 > **Chrome'da çalışıp uygulamada çalışmaması normaldir.** Emülatördeki Chrome ayrı bir
 > uygulamadır ve adres çubuğuna `http://…` yazıldığında sayfa zaten HTTP origin'indedir —
@@ -600,6 +628,12 @@ node test-scripts/test-all-endpoints.js
 node test-scripts/migrate-passwordless-users.js
 node test-scripts/migrate-passwordless-users.js --set-password <email> <sifre>
 node test-scripts/migrate-passwordless-users.js --delete-empty
+
+# Kıyafet → kombin filtresi: GET /outfits?clothingItemId= (27 kontrol)
+node test-scripts/test-item-outfits.js
+
+# Temiz/kirli davranışı + kirli parçanın önerilmemesi (26 kontrol)
+node test-scripts/test-clean-status.js
 
 # Tek uca odaklı: POST + snake_case + GET doğrulaması
 node test-scripts/test-clothing-items.js
@@ -717,6 +751,29 @@ id'ye düşer. **Sabit değil fonksiyondur** — onboarding sonrası id değişi
 `category_id` → kategori **adı** eşlemesini yapar (ikon eşlemesi ada göre çalışır).
 Masonry yüksekliği id'den deterministik türetilir.
 
+**Ana Sayfa → Kombin Öner router state akışı.** "Hızlı Kombin Öner" kartları
+`<Link state={{ occasion }}>` ile durumu taşır; `OutfitSuggestion` bunu okuyup gardırop
+yüklendikten **sonra** tek seferlik öneri üretir. Anahtar ve durum listesi
+`src/lib/occasions.js` içinde (`OCCASIONS`, `OCCASION_STATE_KEY`) — gönderen ve okuyan
+tarafın ayrışmaması için tek kaynak.
+
+Efekt bir `useRef` ile korunur ve **yalnızca bir kez** çalışır: `cleanItems`, karttaki
+temiz/kirli toggle'ıyla değişir; guard olmasaydı efekt yeniden tetiklenip kullanıcının
+o sırada seçtiği durumu ezer ve öneriyi habersizce yeniden üretirdi.
+State bilinçli olarak **temizlenmez** (Dashboard'daki `justOnboarded` kalıbının aksine):
+sayfa yenilendiğinde öneri açık kalsın diye. Navbar'dan veya temiz bir sekmeden
+girildiğinde state zaten yoktur, sayfa normal (önerisiz) açılır.
+
+**Kombin üretimi ISTEMCI TARAFINDADIR.** Backend'de rastgele kombin üreten hiçbir kod
+yoktur — `OutfitService` yalnızca doğrular ve kaydeder. Rastgele seçim
+`pages/OutfitSuggestion.jsx` içindeki `buildRandomOutfit()` fonksiyonundadır.
+Öneri kuralları (örn. "yalnızca temiz parçalar") **oraya** yazılır, servise değil.
+
+`buildRandomOutfit()` kendisine verilen havuzdan seçer; temiz filtresi çağıranda
+uygulanır. Bunun sebebi sayfanın iki durumu ayırt etmek zorunda olmasıdır:
+**"o kategoride hiç parçan yok"** (gardırobu doldur) ile **"temiz parçan yok"**
+(çamaşır yıka) farklı mesajlar gösterir. Havuz baştan filtreli gelseydi bu ayrım kaybolurdu.
+
 **Veri çekme deseni:** Sayfalar `useEffect` içinde `Promise.all` ile paralel çeker;
 `isStale` bayrağı geç gelen yanıtın state'i ezmesini önler; `isLoading` / `hasError`
 durumları iskelet ve boş/hata ekranlarını sürer.
@@ -759,10 +816,17 @@ sayfa başlıkları altında `h-px w-16 bg-dusty-rose` çizgi, büyük harf `tra
 mikro etiketler, seçili durum için `border-burgundy bg-burgundy/5 text-burgundy`.
 Paylaşılan primitifler `components/ui/` altındadır.
 
+`StatCard` opsiyonel bir `to` prop'u alır: verilirse kart `<Link>`e dönüşür ve hover'da `hover:border-dusty-rose` + etiket koyulaşması uygular; verilmezse düz `<div>` kalır. `QuickActionCard`'daki `hover:-translate-y-1` yükselme efekti **büyük eylem kartlarına ait bir idiomdur**, küçük istatistik kartlarında kullanılmaz.
+
 Kategori → lucide ikon eşlemesi `src/lib/categoryIcons.js` içinde merkezidir ve
 `001_initial_schema.sql` seed verisindeki kebab-case ikon adlarıyla hizalı tutulmalıdır.
 
 ### Geliştirici kaçış kapıları
+
+`api.js` içindeki `logImageOutcome()` **geçicidir**: Android'de hangi `<img src>`
+denendiğini ve yüklenip yüklenmediğini Logcat'ten görmek için eklendi
+(`adb logcat | grep DG_IMG`). `ClothingCard` ve `ClothingDetail` içinden çağrılır;
+fotoğraf sorunu teyit edildikten sonra üç yerden de kaldırılabilir.
 
 `pages/Wardrobe.jsx` içinde boş durumları önizlemek için `DEV_FORCE_EMPTY` ve
 `DEV_FORCE_EMPTY_CATEGORY` sabitleri bulunuyordu; API'ye geçişte kaldırıldılar
@@ -775,6 +839,202 @@ Kategori → lucide ikon eşlemesi `src/lib/categoryIcons.js` içinde merkezidir
 
 > Bundan sonraki her çalışma buraya tarihiyle işlenir: eklenen özellikler, düzeltilen
 > hatalar, alınan mimari kararlar. En yeni kayıt en üstte.
+
+### 2026-08-20 — Ana Sayfa'daki hızlı kombin kartları işlevsel hale getirildi
+- "Üniversite Kombini" ve "Akşam Yemeği Kombini" kartları artık Kombin Öner sayfasını
+  **öneri üretilmiş halde** açıyor; kullanıcının ikinci kez tıklaması gerekmiyor.
+  Kart metinleri, alt başlıkları, ikonları ve tasarımı **aynen korundu** — yalnızca
+  tıklama davranışı gerçek oldu.
+- **Router state ile taşınıyor** (StyleQuiz'in `state: { justOnboarded }` kalıbının
+  bildirimsel karşılığı): `QuickActionCard` opsiyonel bir `state` prop'u aldı ve
+  `<Link state={...}>` olarak geçiriyor. Query param tercih edilmedi — adres çubuğunda
+  Türkçe karakterli, kodlanmış bir `?durum=%C3%9Cniversite` bırakması gereksizdi.
+- **Yeni ortak modül `src/lib/occasions.js`:** `OCCASIONS` listesi (önceden yalnızca
+  `OutfitSuggestion.jsx` içindeydi) ve `OCCASION_STATE_KEY`. Ana Sayfa ile Kombin Öner
+  aynı kelimeleri kullanmak zorunda: karttan gelen `occasion` değeri sayfada **aktif pill**
+  olarak işaretleniyor. Sayfadan sayfaya import etmek yerine `lib/`e çıkarıldı
+  (`colors.js`, `styleQuestions.js` ile aynı desen).
+- **Mevcut mantık yeniden kullanıldı:** ayrı bir üretim yolu yazılmadı; efekt doğrudan
+  `startSuggestion()`’ı çağırıyor, dolayısıyla temiz/kirli filtresi, "başka öneri",
+  kategori notları ve kaydetme akışı aynen geçerli.
+- **Önlenen hata — efektin kullanıcının seçimini ezmesi.** Efekt `cleanItems`'a bağlı ve
+  `cleanItems`, karttaki temiz/kirli toggle'ıyla değişiyor. Guard olmasaydı: kullanıcı
+  karttan gelip "Spor"a geçiyor, sonra bir parçayı kirli işaretliyor → efekt yeniden
+  tetikleniyor ve öneri habersizce "Üniversite"ye dönüyordu. `useRef` ile efekt
+  **yalnızca bir kez** çalışıyor; test bu senaryoyu açıkça doğruluyor.
+- **State bilinçli olarak temizlenmiyor.** Dashboard `justOnboarded`'ı temizler çünkü
+  bayat kalması gerçek bir hataya yol açıyordu; burada tersi geçerli: state kalınca
+  sayfa yenilendiğinde öneri açık kalıyor. Navbar'dan veya temiz sekmeden girildiğinde
+  state zaten oluşmuyor, sayfa normal açılıyor.
+- **Efekt gardırop yüklenmeden çalışmaz** (`isLoading`/`hasError` kontrolü):
+  `buildRandomOutfit`'in seçecek parçası olmalı. Gardırop boşsa mevcut
+  "Önce gardırobunu dolduralım" ekranı, hiç temiz parça yoksa mevcut
+  "Şu an temiz parçan yok" ekranı görünür — ikisi de değiştirilmedi.
+- **Doğrulama — gerçek tarayıcıda 20 kontrol:** kart metin/tasarımının değişmemesi,
+  tıklayınca önerinin otomatik açılması, doğru occasion ve aktif pill, iki kartın farklı
+  durum taşıması, ref guard senaryosu, yenileme sonrası korunma, navbar'dan/temiz sekmeden
+  girildiğinde öneri çıkmaması, temiz parça yok ve boş gardırop durumları, temiz konsol.
+  Regresyon: temiz/kirli web testi 22/22, istatistik kartları 17/17,
+  `test-clean-status` 26/26, `test-all-endpoints` 72/72, `test-auth` 48/48,
+  `test-item-outfits` 27/27, lint + build temiz.
+- **Test tuzağı (ileride lazım olur):** İlk koşuda iki kontrol boşuna kırmızı yandı,
+  ikisi de test kurgusundandı: (1) `innerText` CSS `text-transform: uppercase`'i uygular,
+  ham metin için `textContent` gerekir; (2) Playwright'ta **aynı URL'e `page.goto`**
+  tarayıcı tarafından reload sayılıp `history.state`'i korur — "temiz giriş" senaryosu
+  başka bir sayfadan navbar linkiyle gelerek ya da yeni sekmede test edilmelidir.
+
+### 2026-08-20 — Temiz/kirli durumu eklendi; kombin önerisi yalnızca temiz parçalardan seçiyor
+- **Migration `003_add_is_clean.sql`:** `clothing_items.is_clean BOOLEAN NOT NULL DEFAULT true`.
+  Mevcut 9 kayıt temiz olarak işaretlendi. `DEFAULT false` olsaydı tüm gardırop bir anda
+  öneri dışı kalırdı.
+- **`NOT NULL`, tablodaki diğer boolean'lardan bilinçli sapmadır.** `is_favorite`/`is_deleted`
+  nullable ama null bir `is_clean` JavaScript'te falsy okunur ve parça sessizce hiç önerilmez
+  olurdu — üç durumlu bir alan istemiyoruz.
+- **Kritik bulgu — kombin üretimi backend'de DEĞİL.** Bu iş "OutfitService'teki rastgele
+  üretim mantığını güncelle" diye istendi, ancak `OutfitService` rastgele seçim yapmıyor;
+  yalnızca doğrulayıp kaydediyor. Rastgele üretim `OutfitSuggestion.jsx > buildRandomOutfit()`
+  içinde, **istemci tarafında**. Temiz filtresi bu yüzden oraya yazıldı.
+  (Mimari notlara da işlendi ki bir daha yanlış katmanda aranmasın.)
+- **Filtre `buildRandomOutfit`'in İÇİNE değil ÇAĞIRANINA kondu.** Sayfanın iki durumu
+  ayırt etmesi gerekiyor: "o kategoride hiç parçan yok" (→ gardırobu doldur) ile
+  "temiz parçan yok" (→ çamaşır yıka). Havuz baştan filtreli gelseydi bu ayrım kaybolurdu.
+  Sayfa `cleanItems`, `dirtyOnlyCategories` ve `emptyCategories` türetir; her biri kendi
+  mesajını sürüyor.
+- **Backend:** `is_clean` create/update'te kabul edilir; yeni uç
+  `PATCH /clothing-items/:id/clean-status` favori toggle'ıyla aynı deseni izler
+  (okuma+yazma yerine tek atomik `SET is_clean = NOT is_clean`).
+- **`PUT`'ta `isClean` gönderilmezse mevcut değer korunur** — `true`'ya düşmek, herhangi bir
+  düzenlemenin kirli parçayı sessizce temiz yapması demekti. Servis ayrıca boolean olmayan
+  değeri `400`'e çevirir; `Boolean("false") === true` tuzağına düşmemek için gevşek
+  dönüşüm yapılmaz.
+- **Frontend:** `ClothingCard`'a sol üstte "Kirli" rozeti (yalnızca kirliyken) ve sağ üstte
+  çamaşır makinesi ikonlu toggle. `ClothingDetail`'e aynı rozet + "Temiz Olarak İşaretle"
+  butonu. `QuickAddModal`'a "Şu an temiz mi?" seçimi (varsayılan **Temiz**).
+  Hepsi iyimser güncelleme, hata olursa geri alınıyor.
+- **Tasarım kararı — karttaki toggle yalnızca hover'da çıkar.** Önce favori kalbi gibi
+  "kirliyken kalıcı görünür" yapılmıştı; ekran görüntüsünde butonun sağında (kalbin
+  yerinde) boşluk kalıp yüzer gibi durduğu görüldü. Kalıcı gösterge zaten rozettir;
+  buton aksiyondur ve hover'a alındı. Dokunmatikte durum değiştirmek için detay
+  sayfasındaki buton kullanılır (favori kalbi de aynı sınırlamaya sahip).
+- **Kirli parçalar Gardırop'ta görünür**, yalnızca öneri havuzundan çıkarılır.
+  Hiç temiz parça kalmadıysa öneri bölümü "Şu an temiz parçan yok." boş durumuna düşer
+  ve "Bu Kombini Kaydet" devre dışı kalır (önceden boş kombin kaydedilmeye çalışılırdı).
+- **Kaydedilmiş kombinlerde kirli parça yasaklanmadı.** Bir parça kombin kaydedildikten
+  sonra kirlenebilir; geçmiş kombinleri geçersiz kılmak yanlış olurdu. Kural yalnızca
+  öneri üretimine aittir.
+- **Doğrulama:**
+  - Yeni `test-scripts/test-clean-status.js` — **26 kontrol**: varsayılan değer, boolean
+    doğrulaması, toggle ucu (401/404 dahil), `PUT` koruması, **200 rastgele öneride kirli
+    parçanın hiç seçilmemesi**, kategoride temiz parça yoksa slotun hata vermeden boş
+    kalması, veri izolasyonu.
+  - Gerçek tarayıcıda (Playwright + sistem Chrome) **22 kontrol**: rozet, karttan ve
+    detaydan toggle'ın veritabanına yazılması, 25 öneride kirli parçanın çıkmaması,
+    kategori notu, "temiz parçan yok" boş durumu, QuickAddModal seçimi, temiz konsol.
+  - Regresyon: `test-all-endpoints.js` 72/72, `test-auth.js` 48/48,
+    `test-item-outfits.js` 27/27, `test-image-upload.js` 29/29.
+- **Not — `test-image-upload.js` ortama duyarlıdır.** `uploads/` klasöründeki dosya sayısını
+  MUTLAK olarak sayar (`.gitkeep` + 1 bekler), yani klasörde gerçek bir kullanıcı fotoğrafı
+  varken 3 kontrolü **haksız yere** başarısız olur. Dosya geçici olarak kaldırılıp test
+  tekrar çalıştırıldığında 29/29 geçtiği doğrulandı. Testi mutlak sayım yerine
+  "kendi oluşturduklarını say" mantığına çevirmek ileriye dönük bir iyileştirme olur.
+
+### 2026-08-20 — Ana Sayfa istatistik kartları tıklanabilir yapıldı
+- Üç kart artık birer kısayol: **Toplam Parça → `/gardirop`**, **Kombin → `/kombinlerim`**,
+  **Favori → `/gardirop`**.
+- **`StatCard` opsiyonel `to` prop'u aldı.** Verilmezse bileşen eskisi gibi düz bir `<div>`
+  kalır; verilirse `<Link>`e dönüşür. Böylece kart başka bir yerde salt gösterim
+  amaçlı da kullanılabilir ve mevcut çağrı yerleri kırılmaz.
+- **Hover — bilinçli olarak sade:** `hover:border-dusty-rose` + etiketin `text-ink/50`→`/70`
+  koyulaşması. `QuickActionCard`'daki `hover:-translate-y-1` yükselme efekti **kullanılmadı**:
+  o idiom büyük eylem kartlarına ait, küçük istatistik kartlarında abartı kaçardı.
+  Odak stili depodaki kalıbı izler (ring değil, dusty-rose kenarlık).
+- **"Favori" kartı filtresiz `/gardirop`'a gidiyor.** Gardırop sayfasında kategori pilleri ve
+  aramadan başka filtre yok — favorileri tek başına listeleyen bir toggle bulunmuyor.
+  Kart bu yüzden listenin tamamına götürür; `Dashboard.jsx` içine bunu belirten bir yorum
+  bırakıldı, "Eksikler" tablosuna da işlendi. Favori filtresi eklenirse bağlanacak tek yer orası.
+- Hata durumunda kartlar `–` göstermeye devam eder ama tıklanabilir kalır — kullanıcıyı
+  aynı hatayı göreceği sayfaya götürmek, kartı ölü bırakmaktan iyi.
+- **Doğrulama — gerçek tarayıcıda (17 kontrol).** Playwright, sistemde kurulu Chrome'u
+  sürerek (`channel: 'chrome'`, ayrı tarayıcı indirmesi yok) doğrulandı: üç kartın da `<a>`
+  olması ve `href`leri, istatistik değerlerinin doğruluğu (3 parça / 2 kombin / 1 favori),
+  hover'da kenarlık renginin değişmesi (→ `rgb(201,160,160)` = dusty-rose), `cursor: pointer`,
+  üç kartın tıklanınca gerçekten hedef sayfayı açması, klavyeyle odaklanabilme ve konsolun
+  temiz olması. Ayrıca `npm run lint` + `npm run build`.
+  Test scripti kalıcı değildi (scratchpad); depoda tarayıcı test altyapısı **yok**, Playwright
+  proje bağımlılığı olarak eklenmedi.
+
+### 2026-08-20 — Kıyafet Detay: "Bu Kıyafetle Yapılan Kombinler" gerçek veriye bağlandı
+- **Sorun:** Bölüm hiçbir zaman veri çekmiyordu; kod içinde sabit bir
+  "Henüz bir kombinde kullanılmadı." metni duruyordu — parça 4 kombinde geçse bile.
+- **Yaklaşım — yeni uç yerine mevcut uca opsiyonel filtre.** `GET /api/outfits` artık
+  `?clothingItemId=<uuid>` kabul ediyor. Bu, `GET /clothing-items?categoryId=` ile aynı
+  kalıp; böylece rota/controller/service/repository zinciri `Outfit*` içinde kalıyor ve
+  yeni bir kaynak ağacı açılmıyor. Alternatif olan "tüm kombinleri çekip istemcide
+  filtrele" yolu, birkaç kart göstermek için kullanıcının bütün kombinlerini
+  parçalarıyla indirmek anlamına geldiği için seçilmedi.
+- **Kritik SQL detayı — filtre `EXISTS` ile yazılır, `JOIN` koşuna değil.**
+  `OutfitRepository.findAllByClothingItem` ortak `SELECT_WITH_ITEMS` parçasını yeniden
+  kullanır ve filtreyi ayrı bir `EXISTS` alt sorgusuna koyar. Filtre `LEFT JOIN
+  outfit_items` koşuna eklenseydi `json_agg` yalnızca aranan parçayı toplardı ve her
+  kombin tek parçalı görünürdü. Test bunu açıkça doğrular (2 parçalı kombin
+  `items.length === 2` dönmeli).
+- Silinmiş parça hiçbir kombinde geçmiyor sayılır (`fci.is_deleted = false`) —
+  uygulamanın geri kalanıyla tutarlı. Parçası silinen kombin **kaybolmaz**, yalnızca
+  o parça `items` dizisinden düşer.
+- **`assertUuid` eklendi** (`utils/validators.js`). Sorgu paramı olarak gelen bozuk bir id
+  doğrudan Postgres'e gitseydi `22P02` ile **500** dönerdi; artık **400** ve Türkçe mesaj.
+  Boş string filtresiz sayılır (regresyon: filtresiz `GET /outfits` aynen çalışır).
+- **Frontend:** `fetchOutfits(clothingItemId)` opsiyonel parametre aldı (çağrısız hali
+  Kombinlerim sayfası için değişmedi). `ClothingDetail` kombinleri **ayrı bir
+  `useEffect`'te** çeker: bu istek düşerse sayfanın tamamı değil yalnızca bu bölüm hata
+  durumuna geçer ("Kombin bilgisine şu an ulaşılamıyor."), kıyafet bilgisi durur.
+- Kartlar `occasion` + tarih (`Intl.DateTimeFormat('tr-TR')`) + parça sayısı gösterir ve
+  `/kombinlerim` sayfasına götürür. `occasion` boşsa "Kombin" yazılır. Yükleme sırasında
+  iki iskelet satırı, hiç kombin yoksa eski "Henüz bir kombinde kullanılmadı." mesajı kalır.
+- **Yeni test:** `test-scripts/test-item-outfits.js` (27 kontrol) — filtreleme, tam `items`
+  dizisi, sıralama, boş sonuç, filtresiz regresyon, geçersiz UUID → 400, veri izolasyonu
+  (başkasının parça id'siyle sorgu boş döner), token'sız 401 ve soft delete davranışı.
+- **Doğrulama:** `test-item-outfits.js` 27/27; regresyon olarak `test-all-endpoints.js`
+  72/72 ve `test-auth.js` 48/48. Frontend `npm run lint` temiz, `npm run build` başarılı.
+  Sorgu ayrıca gerçek veritabanı verisiyle elle çalıştırıldı: 4 kombinde geçen bir
+  parça için 4 satır ve her satır kombinin **tam** parça sayısıyla (4/4/2/3) döndü.
+
+### 2026-08-20 — Android'de yüklenen fotoğraflar görünmüyordu (mixed content, ikinci raunt)
+- **Belirti:** Web'de bir kıyafete fotoğraf eklendi; Android'de aynı hesapla girildiğinde
+  kıyafet verisi (isim, kategori, favori) doğru geliyordu ama **görsel hiç görünmüyor**,
+  placeholder kalıyordu. Yani API/JSON yolu sağlam, kırılan yalnızca `<img>` yoluydu.
+- **Elenen ihtimaller (hepsi doğru çalışıyordu):**
+  - `resolveImageUrl()` Android'de doğru host'u ekliyor → `http://10.0.2.2:3001/uploads/….png`
+  - Veritabanındaki `image_url` doğru biçimde **göreli**: `/uploads/<uuid>.png`
+  - `express.static` dosyayı `200` + `Content-Type: image/png` ile veriyor
+  - `/uploads` **CORS başlığı da dönüyor** (`Access-Control-Allow-Origin: *`) — zaten
+    `crossorigin` taşımayan bir `<img>` için CORS denetimi yapılmaz, bu bir neden olamazdı
+  - `allowMixedContent: true` gerçekten uygulanıyor (`Bridge.java` →
+    `MIXED_CONTENT_ALWAYS_ALLOW`) — nitekim `fetch` çağrıları çalışıyordu
+- **Kök sebep:** `allowMixedContent` WebView'ün **engelleme** politikasını gevşetir, ama
+  Chromium bundan bağımsız olarak **pasif (optionally-blockable) alt kaynakları** — yani
+  görselleri — HTTPS bir sayfada `http` → `https` **auto-upgrade** eder ve HTTPS yükleme
+  başarısız olunca görseli düşürür. `fetch` bu yükseltmeye tabi değildir, `<img>` tabidir.
+  Dünkü düzeltmenin API'yi çalıştırıp fotoğrafı çalıştırmamasının sebebi tam olarak budur.
+- **Çözüm:** `capacitor.config.json`'a `server.androidScheme: "http"` eklendi. Uygulama
+  sayfası artık `http://localhost` üzerinden servis edilir; `http://10.0.2.2:3001` isteği
+  **aynı şemadadır**, mixed content koşulu hiç oluşmaz ve auto-upgrade devreye girmez.
+  `http://localhost` spec gereği "potentially trustworthy" origin sayıldığı için
+  secure-context API'leri kaybedilmez; kamera zaten native Capacitor eklentisidir.
+- **Yan etki (bilinçli):** Şema değişikliği **origin'i değiştirir**, dolayısıyla
+  `localStorage` bir kereliğine silinir — token ve `dg_` önekli profil önbelleği gider,
+  kullanıcı bir kez yeniden giriş yapar. Tek seferlik ve beklenen bir maliyettir.
+- `allowMixedContent: true` **kaldırılmadı**: bu şemayla etkisizdir, ancak ileride şema
+  `https`'e döndürülürse `fetch` yolunun kırılmaması için bırakıldı.
+- **Geçici tanı logu eklendi:** `api.js` içindeki `logImageOutcome()`, `ClothingCard` ve
+  `ClothingDetail` içinden `onLoad`/`onError` üzerinde çağrılır. Logcat'ten okuma:
+  `adb logcat | grep DG_IMG`. Basılan satır denenen `src`'i ve sayfa origin'ini içerir:
+  `DG_IMG YUKLENDI | Bershka crop top | src=http://10.0.2.2:3001/uploads/….png | sayfa=http://localhost`
+  `sayfa=` alanı şema düzeltmesinin APK'ya girip girmediğini de doğrular. Sorun teyit
+  edildikten sonra bu fonksiyon ve iki çağrı yeri kaldırılabilir.
+- **Not:** `capacitor.config.json` değişikliği APK'ya ancak **yeniden derlemeyle** girer;
+  `npx cap sync` tek başına yetmez (sync yalnızca dosyayı `assets/` altına kopyalar),
+  Android Studio'da Run/Rebuild gerekir.
 
 ### 2026-08-19 — Kıyafet fotoğrafı yükleme (multer + Capacitor Camera)
 - **Backend:** `multer` ile `POST /clothing-items/:id/image` ve
