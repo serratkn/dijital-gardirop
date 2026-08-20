@@ -1,13 +1,16 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useLocation } from 'react-router-dom'
+import { CloudSun } from 'lucide-react'
 import PageHeader from '../components/ui/PageHeader'
 import FilterPills from '../components/ui/FilterPills'
 import EmptyState from '../components/ui/EmptyState'
 import Button from '../components/ui/Button'
 import ClothingCard from '../components/ClothingCard'
-import { createOutfit, fetchCategories, fetchClothingItems } from '../lib/api'
+import { createOutfit, fetchCategories, fetchClothingItems, fetchMe, fetchWeather } from '../lib/api'
 import { toCategoryNameMap, toClothingItems } from '../lib/transformers'
 import { OCCASIONS, OCCASION_STATE_KEY } from '../lib/occasions'
+import { matchesSeason, seasonsForWeather } from '../lib/seasons'
+import { cityLocative } from '../lib/cities'
 
 const OUTFIT_CATEGORIES = ['Üst', 'Alt', 'Ayakkabı', 'Çanta']
 
@@ -21,10 +24,18 @@ const pickRandom = (list) => list[Math.floor(Math.random() * list.length)]
 // yoksa slot atlanır (kombin eksik parçayla da oluşabilir).
 // Kendisine YALNIZCA temiz parçalar verilir — filtreleme çağıranda yapılır ki
 // sayfa "hiç parça yok" ile "temiz parça yok" durumlarını ayırt edebilsin.
-const buildRandomOutfit = (items) =>
+//
+// `seasons` verilirse hava durumuna uyan parçalar ÖNCELİKLİDİR ama ZORUNLU DEĞİL:
+// o kategoride uygun sezonda parça yoksa tüm havuza düşülür. Sert filtre olsaydı
+// hava durumu yüzünden kombin slotları boş kalırdı — istenen davranış
+// "önceliklendir", "ele" değil.
+const buildRandomOutfit = (items, seasons) =>
   OUTFIT_CATEGORIES.map((category) => {
     const pool = items.filter((item) => item.category === category)
-    return pool.length > 0 ? pickRandom(pool) : null
+    if (pool.length === 0) return null
+
+    const preferred = pool.filter((item) => matchesSeason(item, seasons))
+    return pickRandom(preferred.length > 0 ? preferred : pool)
   }).filter(Boolean)
 
 const isSameOutfit = (a, b) =>
@@ -36,6 +47,7 @@ function OutfitSuggestion() {
   const requestedOccasion = location.state?.[OCCASION_STATE_KEY]
 
   const [items, setItems] = useState([])
+  const [weather, setWeather] = useState(null)
   const [isLoading, setIsLoading] = useState(true)
   const [hasError, setHasError] = useState(false)
 
@@ -57,14 +69,36 @@ function OutfitSuggestion() {
       try {
         // Kategoriler kombin kurulumu için şart: parçalar yalnızca
         // category_id taşır, seçim ise kategori adına göre yapılır.
-        const [categoryRows, itemRows] = await Promise.all([
+        // Kullanıcı kaydı hava durumu için gereken şehri taşır.
+        const [categoryRows, itemRows, me] = await Promise.all([
           fetchCategories(),
           fetchClothingItems(),
+          fetchMe(),
         ])
 
         if (isStale) return
 
         setItems(toClothingItems(itemRows, toCategoryNameMap(categoryRows)))
+
+        // Hava durumu İSTEĞE BAĞLI bir zenginleştirmedir. Başarısız olursa
+        // (anahtar yok, servis düşmüş, şehir tanınmıyor) sayfa hiçbir şey
+        // olmamış gibi çalışır; bu yüzden kendi try/catch'i var ve hatası
+        // hasError'a DÖNÜŞMEZ.
+        if (me?.city) {
+          try {
+            const result = await fetchWeather(me.city)
+            if (isStale) return
+            // Kayıtlı şehir DEĞERİ saklanır (OpenWeatherMap'in döndürdüğü ad değil):
+            // şehir listesindeki etiket ve bulunma hâli bu anahtarla bulunuyor.
+            setWeather(
+              result?.status === 'bilinmiyor' ? null : { ...result, cityValue: me.city },
+            )
+          } catch (error) {
+            if (isStale) return
+            console.error('Hava durumu alınamadı:', error)
+            setWeather(null)
+          }
+        }
       } catch (error) {
         if (isStale) return
         console.error('Gardırop verisi alınamadı:', error)
@@ -111,14 +145,22 @@ function OutfitSuggestion() {
     )
   }, [])
 
+  // Hava bilinmiyorsa null kalır ve buildRandomOutfit sezon önceliği uygulamaz —
+  // yani şehri olmayan ya da hava durumu alınamayan kullanıcı için davranış
+  // önceki hâliyle birebir aynı kalır.
+  const preferredSeasons = useMemo(
+    () => (weather ? seasonsForWeather(weather.status) : null),
+    [weather],
+  )
+
   const startSuggestion = useCallback(
     (occasion) => {
       setSelectedOccasion(occasion)
-      setSuggestionItems(buildRandomOutfit(cleanItems))
+      setSuggestionItems(buildRandomOutfit(cleanItems, preferredSeasons))
       setIsSaved(false)
       setSaveError('')
     },
-    [cleanItems],
+    [cleanItems, preferredSeasons],
   )
 
   // Ana Sayfa kartından gelindiyse kullanıcı tekrar tıklamak zorunda kalmadan
@@ -146,11 +188,11 @@ function OutfitSuggestion() {
 
   const showAnother = () => {
     setSuggestionItems((previous) => {
-      let next = buildRandomOutfit(cleanItems)
+      let next = buildRandomOutfit(cleanItems, preferredSeasons)
       let attempts = 0
       // Aynı kombinin üst üste gelmemesi için birkaç kez yeniden dener.
       while (attempts < 5 && isSameOutfit(next, previous)) {
-        next = buildRandomOutfit(cleanItems)
+        next = buildRandomOutfit(cleanItems, preferredSeasons)
         attempts += 1
       }
       return next
@@ -273,7 +315,17 @@ function OutfitSuggestion() {
                     </div>
                   )}
 
-                  {dirtyOnlyCategories.length > 0 && (
+                    {/* Hava durumu notu yalnızca gerçekten dikkate alındıysa görünür;
+                      şehri olmayan ya da havası alınamayan kullanıcı hiçbir ek metin görmez. */}
+                  {weather && suggestionItems.length > 0 && (
+                    <p className="mt-4 flex items-center gap-1.5 text-sm text-ink/50">
+                      <CloudSun size={15} strokeWidth={1.75} className="text-dusty-rose" />
+                      {cityLocative(weather.cityValue)} {weather.temperature}°C,{' '}
+                      {weather.status} hava için önerildi.
+                    </p>
+                  )}
+
+                {dirtyOnlyCategories.length > 0 && (
                     <ul className="mt-4 space-y-1">
                       {dirtyOnlyCategories.map((category) => (
                         <li key={category} className="text-sm text-ink/50">

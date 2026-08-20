@@ -3,7 +3,7 @@ const { ValidationError } = require('./errors')
 // Veritabanı kolon uzunlukları. Bir alan bu sınırı aşarsa Postgres 22001
 // (value too long) fırlatır ve istek 500'e düşerdi; burada 400'e çeviriyoruz.
 const FIELD_LIMITS = {
-  users: { name: 100, email: 255 },
+  users: { name: 100, email: 255, city: 100 },
   clothingItems: { name: 200, color: 50, brand: 100, season: 20, imageUrl: 500 },
   outfits: { occasion: 50 },
   stylePreferences: {

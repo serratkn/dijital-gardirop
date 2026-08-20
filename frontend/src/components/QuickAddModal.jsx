@@ -5,6 +5,7 @@ import ColorPicker from './ui/ColorPicker'
 import PhotoPicker from './ui/PhotoPicker'
 import { createClothingItem, fetchCategories, uploadClothingItemImage } from '../lib/api'
 import { DEFAULT_COLOR } from '../lib/colors'
+import { DEFAULT_SEASON, SEASONS } from '../lib/seasons'
 
 const fieldLabel = 'text-xs font-medium uppercase tracking-[0.15em] text-ink/50'
 const fieldInput =
@@ -21,6 +22,7 @@ function QuickAddModal({ isOpen, onClose, onCreated }) {
   const [photoFile, setPhotoFile] = useState(null)
   // Varsayılan temiz: yeni eklenen parça kombin önerisine hemen katılabilsin.
   const [isClean, setIsClean] = useState(true)
+  const [season, setSeason] = useState(DEFAULT_SEASON)
   const [isSaving, setIsSaving] = useState(false)
   const [savingLabel, setSavingLabel] = useState('')
   const [errorMessage, setErrorMessage] = useState('')
@@ -56,6 +58,7 @@ function QuickAddModal({ isOpen, onClose, onCreated }) {
     setColor(DEFAULT_COLOR)
     setPhotoFile(null)
     setIsClean(true)
+    setSeason(DEFAULT_SEASON)
     setErrorMessage('')
     setSavingLabel('')
   }
@@ -88,6 +91,7 @@ function QuickAddModal({ isOpen, onClose, onCreated }) {
         categoryId: Number(categoryId),
         name: name.trim(),
         color,
+        season,
         isClean,
       })
     } catch (error) {
@@ -162,6 +166,24 @@ function QuickAddModal({ isOpen, onClose, onCreated }) {
               </option>
             ))}
           </select>
+        </div>
+
+        <div>
+          <label className={fieldLabel}>Sezon</label>
+          <select
+            value={season}
+            onChange={(event) => setSeason(event.target.value)}
+            className={fieldInput}
+          >
+            {SEASONS.map((option) => (
+              <option key={option} value={option}>
+                {option}
+              </option>
+            ))}
+          </select>
+          <p className="mt-2 text-xs text-ink/45">
+            Hava durumuna göre öneri için kullanılır. "Tüm Sezon" her havada uygun sayılır.
+          </p>
         </div>
 
         <div>

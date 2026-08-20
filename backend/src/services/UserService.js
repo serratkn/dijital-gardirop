@@ -25,12 +25,14 @@ class UserService {
     const email = this.#normalizeEmail(data.email)
     this.#validateName(data.name)
     this.#validateAge(data.age)
+    const city = this.#normalizeCity(data.city)
 
     try {
       return await this.userRepository.create({
         name: data.name?.trim() || null,
         email,
         age: data.age ?? null,
+        city,
       })
     } catch (error) {
       // Ön kontrol yerine veritabanının UNIQUE kısıtını kaynak kabul ediyoruz:
@@ -46,6 +48,7 @@ class UserService {
     const email = this.#normalizeEmail(data.email)
     this.#validateName(data.name)
     this.#validateAge(data.age)
+    const city = this.#normalizeCity(data.city)
 
     const tier = data.subscriptionTier ?? 'free'
     if (!SUBSCRIPTION_TIERS.includes(tier)) {
@@ -68,6 +71,7 @@ class UserService {
         name: data.name?.trim() || null,
         email,
         age: data.age ?? null,
+        city,
         subscriptionTier: tier,
       })
     } catch (error) {
@@ -103,6 +107,18 @@ class UserService {
     assertMaxLength(normalized, FIELD_LIMITS.users.email, 'email')
 
     return normalized
+  }
+
+  // Şehir opsiyoneldir: boş/tanımsız değer NULL'a düşer ve hava durumu
+  // özelliği devre dışı kalır — bu geçerli bir durumdur, hata değildir.
+  #normalizeCity(city) {
+    if (city === undefined || city === null) return null
+
+    const trimmed = String(city).trim()
+    if (!trimmed) return null
+
+    assertMaxLength(trimmed, FIELD_LIMITS.users.city, 'city')
+    return trimmed
   }
 
   #validateName(name) {

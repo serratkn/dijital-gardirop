@@ -82,6 +82,7 @@ export function toUserProfile(row) {
     name: row.name ?? '',
     email: row.email ?? '',
     age: row.age === null || row.age === undefined ? '' : String(row.age),
+    city: row.city ?? '',
     subscriptionTier: row.subscription_tier ?? 'free',
   }
 }

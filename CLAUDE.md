@@ -232,7 +232,8 @@ olduğu için iskelet oraya taşındı, kombin üretimi istemci tarafında anlı
   temiz/kirli işaretleme (kirli parçalar listede kalır, yalnızca kombin önerisi dışında tutulur)
 - **Ana Sayfa** — gerçek istatistikler (parça/kombin/favori) ve son eklenen 4 parça;
   istatistik kartları tıklanabilir (Gardırop / Kombinlerim)
-- **Kombin Öner** — gerçek gardıroptan (yalnızca temiz parçalardan) kombin üretimi ve
+- **Kombin Öner** — gerçek gardıroptan (yalnızca temiz parçalardan, şehir tanımlıysa
+  hava durumuna uygun sezon öncelikli) kombin üretimi ve
   kalıcı kaydetme; Ana Sayfa'daki hızlı kombin kartlarından doğrudan öneri üretilmiş halde açılır
 - **Kombinlerim** — kayıtlı kombinler; parçaları, tarihi, favori ve silme işlemleriyle
 - **Kıyafet Detay** — görüntüleme, favori, onaylı silme, fotoğraf yönetimi ve
@@ -274,6 +275,7 @@ olduğu için iskelet oraya taşındı, kombin üretimi istemci tarafında anlı
 | `email` | VARCHAR(255) | **UNIQUE, NOT NULL** |
 | `email_verified` | BOOLEAN | `false` |
 | `age` | INTEGER | |
+| `city` | VARCHAR(100) | Hava durumu için; **opsiyonel**, boşsa hava durumu hiç sorgulanmaz |
 | `password_hash` | VARCHAR(255) | **API yanıtlarında asla dönmez** |
 | `subscription_tier` | VARCHAR(20) | `'free'` — `free` \| `premium` |
 | `created_at` / `updated_at` | TIMESTAMP | `NOW()` |
@@ -300,7 +302,8 @@ olduğu için iskelet oraya taşındı, kombin üretimi istemci tarafında anlı
 | `id` | UUID PK | |
 | `user_id` | UUID → `users(id)` | ON DELETE CASCADE, **index'li** |
 | `category_id` | INTEGER → `categories(id)` | |
-| `name`, `color`, `brand`, `season`, `image_url` | VARCHAR | |
+| `name`, `color`, `brand`, `image_url` | VARCHAR | |
+| `season` | VARCHAR(20) | `Yaz` \| `Kış` \| `İlkbahar-Sonbahar` \| `Tüm Sezon`. **NULL = her mevsim uygun** |
 | `is_favorite` | BOOLEAN | `false` |
 | `is_clean` | BOOLEAN | **NOT NULL**, `true` — kombin önerisi yalnızca `true` olanlardan seçer |
 | `is_deleted` | BOOLEAN | `false` — **soft delete**, her okuma filtreler |
@@ -394,6 +397,40 @@ Tüm hatalar `{ "error": "Türkçe mesaj" }` döner.
  "database":{"connected":true,"time":"2026-08-18T07:29:16.210Z"}}
 ```
 
+### Weather
+
+| Metod | Yol | Açıklama |
+|---|---|---|
+| `GET` | `/weather?city=Istanbul` | Şehrin güncel sıcaklığı ve kategorisi |
+
+```json
+{"city":"Istanbul","temperature":22,"status":"sıcak","reason":null}
+```
+
+**Bu uç HER ZAMAN `200` döner** — depodaki `{ error: "..." }` kalıbından **bilinçli
+sapma**. Başarısızlık (anahtar yok, servis düşmüş, şehir bulunamadı, zaman aşımı,
+bozuk gövde) `status: "bilinmiyor"` olarak döner:
+
+```json
+{"city":null,"temperature":null,"status":"bilinmiyor","reason":"api-anahtari-yok"}
+```
+
+Sebep: hava durumu kombin önerisi için **isteğe bağlı bir zenginleştirmedir**.
+Hata olarak dönseydi frontend'de gereksiz bir kırılma noktası olurdu.
+`reason` yalnızca teşhis içindir: `api-anahtari-yok`, `sehir-belirtilmedi`,
+`sehir-bulunamadi`, `sicaklik-okunamadi`, `servis-hatasi`.
+
+| Kategori | Sıcaklık | Uygun sezon |
+|---|---|---|
+| `sıcak` | > 20°C | `Yaz` |
+| `ılık` | 10–20°C | `İlkbahar-Sonbahar` |
+| `soğuk` | < 10°C | `Kış` |
+
+Uç **korumalıdır** (token ister): aksi hâlde API anahtarımız herkese açık bir hava
+durumu vekiline dönüşürdü. `WEATHER_API_KEY` tanımlı değilse dış servise **hiç
+gidilmez**; sunucu `JWT_SECRET`'ten farklı olarak **patlamaz** — hava durumu opsiyonel
+bir özelliktir, uygulamanın geri kalanı anahtarsız da tam çalışır.
+
 ### Categories (salt okunur)
 
 | Metod | Yol | Açıklama |
@@ -410,9 +447,14 @@ Tüm hatalar `{ "error": "Türkçe mesaj" }` döner.
 | Metod | Yol | Gövde / Parametre |
 |---|---|---|
 | `GET` | `/users/:id` | — |
-| `POST` | `/users` | `{ name, email*, age }` |
-| `PUT` | `/users/:id` | `{ name, email*, age, subscriptionTier }` |
+| `POST` | `/users` | `{ name, email*, age, city }` |
+| `PUT` | `/users/:id` | `{ name, email*, age, city, subscriptionTier }` |
 | `DELETE` | `/users/:id` | → `204`; tercih/kıyafet/kombinleri CASCADE ile siler |
+
+`city` opsiyoneldir; boş/boşluk değer `NULL`'a düşer. **`PUT` tam değiştirmedir** —
+gönderilmeyen `city` (`name`, `age` gibi) `NULL` olur. Bu, `clothing-items`'taki
+`isClean` davranışından farklıdır ve kasıtlıdır: `isClean`'in ayrı bir toggle ucu var,
+`city` ise yalnızca Hesap Bilgilerim formundan düzenlenir.
 
 `email` zorunlu, küçük harfe çevrilir ve biçimi doğrulanır; tekrarı `409` döner.
 `age` verilirse 0–120 arası tam sayı olmalıdır. `subscriptionTier` yalnızca
@@ -635,6 +677,10 @@ node test-scripts/test-item-outfits.js
 # Temiz/kirli davranışı + kirli parçanın önerilmemesi (26 kontrol)
 node test-scripts/test-clean-status.js
 
+# Hava durumu + sezon önceliklendirme (62 kontrol). Başındaki birim testleri
+# sahte repository ile çalışır — WEATHER_API_KEY OLMADAN da tam çalışır.
+node test-scripts/test-weather.js
+
 # Tek uca odaklı: POST + snake_case + GET doğrulaması
 node test-scripts/test-clothing-items.js
 node test-scripts/test-clothing-items.js --cleanup   # oluşturduğu kaydı sonda siler
@@ -721,6 +767,13 @@ Tüm controller'lar `BaseController`'dan türer; `handleError` fırlatılan `App
 kendi `statusCode`'una, diğer her şeyi `500`'e çevirir. Alt sınıf constructor'ları `this`'e
 dokunmadan önce `super()` çağırmalıdır.
 
+**Dış servis de repository'dir.** `WeatherRepository` veritabanına değil
+OpenWeatherMap'e bakar ama katman rolü aynıdır: yalnızca veri erişimi, iş kuralı yok.
+Sıcaklığın kategoriye çevrilmesi ve **hataların "bilinmiyor"a dönüştürülmesi**
+`WeatherService`'in işidir. Repository fırlatır, servis **asla fırlatmaz**.
+Dış istekte `AbortSignal.timeout(5000)` zorunludur — takılan bir istek Kombin Öner
+sayfasının açılışını bekletirdi.
+
 **Auth katmanı.** `server.js` tek bir `AuthService` ve ondan türetilen tek bir
 `authenticate` middleware kurar (token'ı imzalayan ve doğrulayan aynı örnek olmalı).
 `authRoutes` bu yüzden diğerlerinden farklı olarak bir **fabrikadır**
@@ -763,6 +816,18 @@ o sırada seçtiği durumu ezer ve öneriyi habersizce yeniden üretirdi.
 State bilinçli olarak **temizlenmez** (Dashboard'daki `justOnboarded` kalıbının aksine):
 sayfa yenilendiğinde öneri açık kalsın diye. Navbar'dan veya temiz bir sekmeden
 girildiğinde state zaten yoktur, sayfa normal (önerisiz) açılır.
+
+**Hava durumu akışı.** Kombin Öner açılırken `fetchMe()` ile kullanıcının şehri
+okunur; şehir varsa `GET /weather` çağrılır. Bu çağrının **kendi try/catch'i vardır
+ve hatası `hasError`'a DÖNÜŞMEZ** — hava durumu isteğe bağlı bir zenginleştirmedir,
+sayfayı asla boş duruma düşürmemelidir. Şehir yoksa istek **hiç atılmaz**.
+
+Sezon sözlüğü ve hava→sezon eşlemesi `src/lib/seasons.js` içindedir; eşikler
+backend'deki `WeatherService.#toStatus` ile **birebir aynı tutulmalıdır**.
+Şehir listesi `src/lib/cities.js`: `value` (ASCII, veritabanına ve API'ye giden),
+`label` (Türkçe gösterim) ve `locative` (bulunma hâli) ayrı tutulur — bulunma eki
+Türkçe ünlü uyumuna tabi olduğu için kural değil **veri**dir
+("İstanbul'da" ama "İzmir'de", "Gaziantep'te").
 
 **Kombin üretimi ISTEMCI TARAFINDADIR.** Backend'de rastgele kombin üreten hiçbir kod
 yoktur — `OutfitService` yalnızca doğrular ve kaydeder. Rastgele seçim
@@ -839,6 +904,61 @@ fotoğraf sorunu teyit edildikten sonra üç yerden de kaldırılabilir.
 
 > Bundan sonraki her çalışma buraya tarihiyle işlenir: eklenen özellikler, düzeltilen
 > hatalar, alınan mimari kararlar. En yeni kayıt en üstte.
+
+### 2026-08-20 — Hava durumuna göre kombin önerisi (OpenWeatherMap + sezon)
+- **`season` zaten vardı, migration yazılmadı.** `clothing_items.season VARCHAR(20)`
+  `001_initial_schema.sql` ile geliyordu; yalnızca hiç kullanılmıyordu (tüm kayıtlarda
+  NULL'dı). Bu yüzden **NULL sezon "her mevsim uygun" sayılır** — aksi hâlde özellik
+  açılır açılmaz mevcut 9 parçalık gardırobun tamamı öneri dışı kalırdı.
+- **Migration `004_add_user_city.sql`:** `users.city VARCHAR(100)`, nullable.
+  Şehir zorunlu değildir; boşsa hava durumu **hiç sorgulanmaz**.
+- **Yeni katman: `Weather*`** (repository → service → controller → route).
+  Repository dış servise bakar ama rolü değişmez: yalnızca veri erişimi, fırlatır.
+  Servis sıcaklığı kategoriye çevirir ve **asla fırlatmaz**.
+- **Uç her zaman 200 döner** (`{ status: "bilinmiyor" }`). Depodaki `{ error }` kalıbından
+  bilinçli sapma: hava durumu isteğe bağlı bir zenginleştirme, hata olarak dönmesi
+  frontend'de gereksiz bir kırılma noktası yaratırdı. `reason` alanı teşhis için.
+- **`WEATHER_API_KEY` yoksa sunucu PATLAMAZ** — `JWT_SECRET`'in aksine. Gerekçe: JWT'siz
+  sunucu güvensiz çalışır, hava durumsuz sunucu yalnızca bir özelliği kaybeder.
+  Anahtar yoksa dış servise **hiç gidilmez**.
+- **Zaman aşımı zorunlu:** `AbortSignal.timeout(5000)`. Olmasaydı takılan bir
+  OpenWeatherMap isteği Kombin Öner sayfasının açılışını süresiz bekletirdi.
+- **`UserRepository.SAFE_COLUMNS`'a `city` eklendi.** Bu liste `password_hash`'i dışarıda
+  tutmak için var; yeni kolon eklerken **buraya da yazılmalı**, yoksa alan API yanıtına
+  hiç düşmez. Testte `password_hash` sızmadığı ayrıca doğrulandı.
+- **Önceliklendirme, filtreleme DEĞİL.** `buildRandomOutfit(items, seasons)` uygun
+  sezondaki parçaları tercih eder ama o kategoride uygun parça yoksa **tüm havuza
+  düşer**. Sert filtre olsaydı hava durumu yüzünden kombin slotları boş kalırdı.
+  `Tüm Sezon` ve sezonsuz parçalar her havada uygundur.
+- **Şehir listesi sabit** (`src/lib/cities.js`, 20 büyük şehir). Serbest metin girilseydi
+  OpenWeatherMap'in tanımadığı adlarla dolar ve hava durumu sessizce hep "bilinmiyor"
+  dönerdi. `value` ASCII ("Istanbul") — veritabanına ve API'ye giden; `label` Türkçe
+  gösterim ("İstanbul"); sorgu Türkçe karakterlerle güvenilir eşleşmiyor.
+- **Dil hatası önlendi — bulunma eki veri olarak tutuluyor.** Not önce sabit `'da`
+  ekiyle yazılmıştı; Türkçe ünlü uyumu gereği listenin yarısında yanlış olurdu
+  ("İzmir'**de**", "Gaziantep'**te**"). Her şehre `locative` alanı eklendi ve not
+  kullanıcının KAYITLI ŞEHİR DEĞERİne bağlandı — OpenWeatherMap'in döndürdüğü ada
+  değil, çünkü liste anahtarı odur.
+- **Frontend:** `QuickAddModal`'a Sezon seçimi (varsayılan **Tüm Sezon**),
+  Hesap Bilgilerim'e Şehir dropdown'u (varsayılan **Seçilmedi**), öneri altında
+  "İstanbul'da 27°C, sıcak hava için önerildi." notu (yalnızca hava gerçekten
+  dikkate alındıysa görünür).
+- **Doğrulama:**
+  - `test-scripts/test-weather.js` — **62 kontrol**. Başındaki bölüm `WeatherService`'i
+    **sahte repository** ile sürer: eşik sınırları (20/20.1/10/9.9), yuvarlama ve
+    **API BOZULDUĞUNDA fırlatmaması** (ağ hatası, zaman aşımı, 404, 401, boş gövde,
+    metin/NaN sıcaklık). Bu, gerçek anahtar olmadan test edilemeyecek yolları kapsar.
+  - Gerçek tarayıcıda **32 kontrol**: şehir kaydı, hava notu, sıcak/soğuk havada doğru
+    sezon seçimi (25'er öneri), **4 ayrı çökme senaryosunda** (500, ağ hatası, bozuk JSON,
+    "bilinmiyor") önerinin yine de üretilmesi, şehri olmayan kullanıcıda hava durumunun
+    **hiç çağrılmaması**, QuickAddModal sezon seçimi.
+  - Regresyon: `test-clean-status` 26/26, `test-all-endpoints` 72/72, `test-auth` 48/48,
+    `test-item-outfits` 27/27, tarayıcı testleri 22/22 + 17/17 + 20/20, lint + build temiz.
+  - `test-image-upload` yine 26/3 verdi — **bilinen ortam sorunu**, bkz. 2026-08-20
+    temiz/kirli kaydı (uploads/ klasöründeki gerçek kullanıcı fotoğrafı mutlak dosya
+    sayımını bozuyor). Bu çalışmayla ilgisi yok.
+- **Açık iş:** `WEATHER_API_KEY` henüz boş. Anahtar girilene kadar hava durumu her
+  zaman "bilinmiyor" döner ve öneri eskisi gibi (temiz/kirli filtresiyle) çalışır.
 
 ### 2026-08-20 — Ana Sayfa'daki hızlı kombin kartları işlevsel hale getirildi
 - "Üniversite Kombini" ve "Akşam Yemeği Kombini" kartları artık Kombin Öner sayfasını

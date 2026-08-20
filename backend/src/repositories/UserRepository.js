@@ -1,7 +1,7 @@
 // password_hash BİLİNÇLİ olarak dışarıda: RETURNING * kullanmak
 // parola özetini API yanıtına sızdırır.
 const SAFE_COLUMNS = `
-  id, name, email, email_verified, age, subscription_tier, created_at, updated_at
+  id, name, email, email_verified, age, city, subscription_tier, created_at, updated_at
 `
 
 class UserRepository {
@@ -37,12 +37,12 @@ class UserRepository {
 
   async create(data) {
     try {
-      const { name, email, age, passwordHash } = data
+      const { name, email, age, city, passwordHash } = data
       const result = await this.pool.query(
-        `INSERT INTO users (name, email, age, password_hash)
-         VALUES ($1, $2, $3, $4)
+        `INSERT INTO users (name, email, age, city, password_hash)
+         VALUES ($1, $2, $3, $4, $5)
          RETURNING ${SAFE_COLUMNS}`,
-        [name, email, age, passwordHash ?? null],
+        [name, email, age, city ?? null, passwordHash ?? null],
       )
       return result.rows[0]
     } catch (error) {
@@ -96,13 +96,14 @@ class UserRepository {
 
   async update(id, data) {
     try {
-      const { name, email, age, subscriptionTier } = data
+      const { name, email, age, city, subscriptionTier } = data
       const result = await this.pool.query(
         `UPDATE users
-         SET name = $1, email = $2, age = $3, subscription_tier = $4, updated_at = NOW()
-         WHERE id = $5
+         SET name = $1, email = $2, age = $3, city = $4,
+             subscription_tier = $5, updated_at = NOW()
+         WHERE id = $6
          RETURNING ${SAFE_COLUMNS}`,
-        [name, email, age, subscriptionTier, id],
+        [name, email, age, city, subscriptionTier, id],
       )
       return result.rows[0] || null
     } catch (error) {

@@ -16,6 +16,7 @@ const userRoutes = require('./src/routes/userRoutes')
 const stylePreferenceRoutes = require('./src/routes/stylePreferenceRoutes')
 const clothingItemRoutes = require('./src/routes/clothingItemRoutes')
 const outfitRoutes = require('./src/routes/outfitRoutes')
+const weatherRoutes = require('./src/routes/weatherRoutes')
 
 const app = express()
 const PORT = process.env.PORT || 3001
@@ -44,6 +45,9 @@ app.use('/api', authenticate, userRoutes)
 app.use('/api', authenticate, stylePreferenceRoutes)
 app.use('/api', authenticate, clothingItemRoutes)
 app.use('/api', authenticate, outfitRoutes)
+// Hava durumu da korumalı: aksi hâlde API anahtarımız herkese açık bir
+// hava durumu vekiline dönüşürdü.
+app.use('/api', authenticate, weatherRoutes)
 
 app.listen(PORT, () => {
   console.log(`Sunucu ${PORT} portunda çalışıyor`)

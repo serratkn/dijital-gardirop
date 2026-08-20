@@ -5,6 +5,7 @@ import Button from '../components/ui/Button'
 import { getCurrentUserId, fetchUser, updateUser } from '../lib/api'
 import { toUserProfile } from '../lib/transformers'
 import { setUserProfile } from '../lib/onboarding'
+import { TURKISH_CITIES } from '../lib/cities'
 
 const fieldLabel = 'text-xs font-medium uppercase tracking-[0.15em] text-ink/50'
 const fieldInput =
@@ -14,6 +15,7 @@ function AccountInfo() {
   const [name, setName] = useState('')
   const [email, setEmail] = useState('')
   const [age, setAge] = useState('')
+  const [city, setCity] = useState('')
   const [subscriptionTier, setSubscriptionTier] = useState('free')
 
   const [isLoading, setIsLoading] = useState(true)
@@ -38,6 +40,7 @@ function AccountInfo() {
         setName(profile.name)
         setEmail(profile.email)
         setAge(profile.age)
+        setCity(profile.city)
         setSubscriptionTier(profile.subscriptionTier)
       } catch (error) {
         if (isStale) return
@@ -73,6 +76,7 @@ function AccountInfo() {
         name: name.trim(),
         email: email.trim(),
         age: age === '' ? null : Number(age),
+        city: city || null,
         subscriptionTier,
       })
 
@@ -150,6 +154,21 @@ function AccountInfo() {
                 placeholder="25"
                 className={fieldInput}
               />
+            </div>
+
+            <div>
+              <label className={fieldLabel}>Şehir</label>
+              <select value={city} onChange={handleChange(setCity)} className={fieldInput}>
+                <option value="">Seçilmedi</option>
+                {TURKISH_CITIES.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+              <p className="mt-2 text-xs text-ink/45">
+                Kombin önerisi hava durumunu bu şehre göre dikkate alır. Boş bırakabilirsin.
+              </p>
             </div>
 
             {errorMessage && <p className="text-sm text-burgundy">{errorMessage}</p>}

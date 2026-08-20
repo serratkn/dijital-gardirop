@@ -250,6 +250,12 @@ export function deleteOutfit(id) {
   return request(`/outfits/${encodeURIComponent(id)}`, { method: 'DELETE' })
 }
 
+// Hava durumu uç noktası HER ZAMAN 200 döner; başarısızlık
+// { status: 'bilinmiyor' } olarak gelir, exception olarak değil.
+export function fetchWeather(city) {
+  return request(`/weather?city=${encodeURIComponent(city)}`)
+}
+
 export function fetchUser(id) {
   return request(`/users/${encodeURIComponent(id)}`)
 }
