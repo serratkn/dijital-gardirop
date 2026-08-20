@@ -241,6 +241,9 @@ olduğu için iskelet oraya taşındı, kombin üretimi istemci tarafında anlı
 - **Onboarding** — kullanıcıyı `POST /api/users` ile oluşturur, tarz anketini
   `PUT /api/style-preferences` ile kaydeder; e-posta çakışmasında (409) anlamlı mesaj gösterir
 - **Profil > Hesap Bilgilerim / Tarz Tercihlerim** — veritabanından okur ve günceller
+- **Profil > Gardırop İstatistiklerim** — kategori dağılımı, en çok kullanılan renk,
+  en çok oluşturulan kombin durumu, favori sayısı ve temiz/kirli oranı; tamamı
+  `GET /users/:id/stats` ile veritabanında hesaplanır
 - **Backend** — 6 kaynak için tam CRUD, transaction'lı kombin yazımı, tipli hata yönetimi,
   alan uzunluğu ve foreign key doğrulamaları
 
@@ -450,6 +453,7 @@ bir özelliktir, uygulamanın geri kalanı anahtarsız da tam çalışır.
 | `POST` | `/users` | `{ name, email*, age, city }` |
 | `PUT` | `/users/:id` | `{ name, email*, age, city, subscriptionTier }` |
 | `DELETE` | `/users/:id` | → `204`; tercih/kıyafet/kombinleri CASCADE ile siler |
+| `GET` | `/users/:id/stats` | Gardırop istatistik özeti (bkz. aşağısı) |
 
 `city` opsiyoneldir; boş/boşluk değer `NULL`'a düşer. **`PUT` tam değiştirmedir** —
 gönderilmeyen `city` (`name`, `age` gibi) `NULL` olur. Bu, `clothing-items`'taki
@@ -459,6 +463,42 @@ gönderilmeyen `city` (`name`, `age` gibi) `NULL` olur. Bu, `clothing-items`'tak
 `email` zorunlu, küçük harfe çevrilir ve biçimi doğrulanır; tekrarı `409` döner.
 `age` verilirse 0–120 arası tam sayı olmalıdır. `subscriptionTier` yalnızca
 `free` veya `premium`. **Yanıtta `password_hash` bulunmaz.**
+
+### Wardrobe Stats
+
+| Metod | Yol | Açıklama |
+|---|---|---|
+| `GET` | `/users/:id/stats` | Kullanıcının gardırop özeti. Yalnızca kendi verisi; başkasının id'si → `404` |
+
+Profil sayfasındaki "Gardırop İstatistiklerim" kartını besler.
+
+```json
+{"has_data":true,
+ "items":{"total":11,"favorite":3,"clean":9,"dirty":2,
+          "by_category":[{"category_id":1,"name":"Üst","icon":"shirt","count":4}]},
+ "colors":{"top":{"name":"Siyah","count":4}},
+ "outfits":{"total":5,"favorite":0,"total_worn":0,
+            "top_occasion":{"name":"Akşam Yemeği","count":3}},
+ "generated_at":"2026-08-20T17:12:04.118Z"}
+```
+
+**Hesaplama tamamen SQL'dedir** (`GROUP BY` / `COUNT` / `FILTER`); frontend'e ham kayıt
+değil hazır özet gider. Binlerce parçalı bir gardıropta bile yanıt sabit boyutta kalır ve
+istemcide hiçbir toplama yapılmaz.
+
+- **`has_data`** sunucuda hesaplanır (`items.total > 0 || outfits.total > 0`) — frontend'in
+  "yeni kullanıcı" boş durumunu tek alandan sürebilmesi için. Yalnızca kombini olan
+  (parçaları silinmiş) kullanıcı da `true` sayılır.
+- **"En çok ..." alanları veri yoksa `null` döner**, uydurma varsayılan değil:
+  `{"name":"Beyaz","count":0}` göstermek kullanıcıya yanlış bilgi verirdi.
+- **Sayımlar `::int` ile daraltılır.** Postgres `COUNT(*)` bigint döner ve `pg` sürücüsü
+  bunu **string**'e çevirir; daraltılmasaydı yanıtta `"11"` (metin) çıkardı.
+- **Eşitlikte ikincil sıralama** (`ORDER BY count DESC, color ASC`) zorunludur — olmasaydı
+  aynı veri için farklı yanıtlar dönebilir ve test rastgele kırılırdı.
+- Kategori dağılımı `INNER JOIN` kullanır: **parçası olmayan kategori listede hiç
+  görünmez** ("0 Makyaj" satırı özeti gereksiz uzatırdı).
+- Soft delete edilmiş parçalar (`is_deleted = true`) hiçbir sayıma girmez; `occasion`'ı
+  boş olan kombinler "en çok durum" yarışına katılmaz ama `outfits.total`'a dahildir.
 
 ### Style Preferences
 
@@ -681,6 +721,9 @@ node test-scripts/test-clean-status.js
 # sahte repository ile çalışır — WEATHER_API_KEY OLMADAN da tam çalışır.
 node test-scripts/test-weather.js
 
+# Gardırop istatistikleri: boş / az veri / çok veri + yetkilendirme (60 kontrol)
+node test-scripts/test-stats.js
+
 # Tek uca odaklı: POST + snake_case + GET doğrulaması
 node test-scripts/test-clothing-items.js
 node test-scripts/test-clothing-items.js --cleanup   # oluşturduğu kaydı sonda siler
@@ -773,6 +816,14 @@ Sıcaklığın kategoriye çevrilmesi ve **hataların "bilinmiyor"a dönüştür
 `WeatherService`'in işidir. Repository fırlatır, servis **asla fırlatmaz**.
 Dış istekte `AbortSignal.timeout(5000)` zorunludur — takılan bir istek Kombin Öner
 sayfasının açılışını bekletirdi.
+
+**İstatistik katmanı genişletilebilir kurgulandı.** `StatsRepository` metodları küçük ve
+tek konuludur (`getItemSummary`, `getCategoryDistribution`, `getTopColor`, …);
+`StatsService` özeti bu bölümleri birleştirerek üretir. İleride "premium analiz raporu"
+eklenirken izlenecek yol: yeni bir repository sorgusu + yeni bir `#buildX` bölümü.
+Mevcut sorgulara ve uç noktanın sözleşmesine dokunmak gerekmez — yanıt yalnızca yeni bir
+anahtarla büyür. **Sayımlar her zaman `::int` ile daraltılmalıdır** (`pg` bigint'i string
+döndürür) ve "en çok" sorguları eşitlik için ikincil sıralama taşımalıdır.
 
 **Auth katmanı.** `server.js` tek bir `AuthService` ve ondan türetilen tek bir
 `authenticate` middleware kurar (token'ı imzalayan ve doğrulayan aynı örnek olmalı).
@@ -904,6 +955,69 @@ fotoğraf sorunu teyit edildikten sonra üç yerden de kaldırılabilir.
 
 > Bundan sonraki her çalışma buraya tarihiyle işlenir: eklenen özellikler, düzeltilen
 > hatalar, alınan mimari kararlar. En yeni kayıt en üstte.
+
+### 2026-08-20 — Profil: "Gardırop İstatistiklerim" kartı (yeni `Stats*` katmanı)
+- **Yeni uç `GET /api/users/:id/stats`** — kullanıcının kendi verisinden türetilen özet:
+  toplam parça, kategori dağılımı, en çok kullanılan renk, kombin sayısı, en çok
+  oluşturulan durum, favori sayısı, temiz/kirli oranı.
+- **Hesaplama SQL'de, istemcide değil.** Tüm sayımlar `GROUP BY` / `COUNT` / `FILTER` ile
+  veritabanında yapılır; frontend'e ham kayıt değil hazır özet gider. "Tüm parçaları çekip
+  istemcide say" yolu seçilmedi: gardırop büyüdükçe yanıt da büyürdü.
+- **Yeni katman zinciri `Stats*`** (repository → service → controller → route), depodaki
+  katmanlı mimariye birebir uyar. Rota `userRoutes`'a değil **kendi dosyasına** kondu
+  (`statsRoutes.js`) — bu ağaç ileride "premium analiz raporu" uçlarını da taşıyacak.
+- **Genişletilebilirlik bilinçli olarak kuruldu.** `StatsService` özeti bölümlerden
+  (`#buildItemStats`, `#buildOutfitStats`) birleştirir; repository metodları küçük ve tek
+  konuludur. Yeni bir analiz eklemek = yeni sorgu + yeni bölüm; **mevcut sorgulara ve uç
+  noktanın sözleşmesine dokunmak gerekmez**, yanıt yalnızca yeni bir anahtarla büyür.
+- **Yetkilendirme:** kimlik `req.userId`'den okunur, `:id` ile karşılaştırılır ve ihlalde
+  **404** döner (403 kaydın varlığını ele verirdi) — `UserService` ile aynı kalıp.
+  Sahiplik kontrolü sorgudan ÖNCE yapıldığı için bozuk biçimli bir UUID Postgres'e hiç
+  gitmez; `22P02` ile 500'e düşmek yerine 404 döner (ayrı bir `assertUuid` gerekmedi).
+- **Tuzak — `COUNT(*)` string döner.** Postgres `COUNT` bigint üretir, `pg` sürücüsü
+  bigint'i **string**'e çevirir. Her sayım `::int` ile daraltıldı; olmasaydı yanıtta
+  `"11"` (metin) çıkar ve frontend'de `11 + 2 = "112"` gibi sessiz hatalar doğardı.
+  Test bunu tip kontrolüyle ayrıca doğrular.
+- **Tuzak — eşitlikte sıralama belirsizliği.** "En çok renk/durum" sorgularına ikincil
+  sıralama (`ORDER BY count DESC, color ASC`) eklendi; olmasaydı eşit sayıdaki iki renk
+  için Postgres rastgele birini döndürür ve test aralıklı kırılırdı.
+- **Veri yoksa `null`, uydurma varsayılan değil.** `colors.top` / `top_occasion` boş
+  gardıropta `null` döner; `{"name":"Beyaz","count":0}` göstermek yanlış bilgi olurdu.
+- **`has_data` sunucuda hesaplanır** — istemcinin boş durumu yeniden türetmesi gerekmesin
+  diye. Parçaları silinmiş ama kombini duran kullanıcı da "veri var" sayılır.
+- Kategori dağılımında `INNER JOIN` kullanıldı: parçası olmayan kategori listelenmez
+  ("0 Makyaj" satırı özeti gereksiz uzatırdı).
+- **Frontend:** yeni bileşen `components/WardrobeStats.jsx`, Profil'de hesap bilgileri
+  kartlarının hemen altında. Mevcut `StatCard` **olduğu gibi** yeniden kullanıldı
+  (Parça / Kombin / Favori, tıklanınca Gardırop ve Kombinlerim'e gider); kategori
+  dağılımı `CATEGORY_ICONS`'tan ikon alan haplara, diğer üç istatistik ikon + mikro
+  etiket + editöryal cümle satırlarına döküldü.
+- **En çok kullanılan renk gerçek renk dairesiyle gösteriliyor** (`getColorSwatch`):
+  bir moda uygulamasında "Pudra" adı tek başına soyut kalır. Palette olmayan bir renk
+  (elle girilmiş eski kayıt) sessizce ikona düşer.
+- **Kart kendi yükleme/hata/boş durumunu sürer.** İskelet yüklenirken gösterilir; istek
+  düşerse **yalnızca bu bölüm** hata metnine geçer, profil sayfasının geri kalanı ayakta
+  kalır (`ClothingDetail`'deki ayrı-effect kalıbıyla aynı). Yeni kullanıcıya sıfırlarla
+  dolu kartlar yerine "Henüz yeterli veri yok…" mesajı + "İlk parçanı ekle" bağlantısı çıkar.
+- **Doğrulama:**
+  - Yeni `test-scripts/test-stats.js` — **60 kontrol**, üç veri durumu ayrı ayrı:
+    **BOŞ** (yeni kullanıcı, `has_data:false`, `null` alanlar, sayım tipleri),
+    **AZ VERİ** (tek parça, kombin yok; soft delete sonrası düşmesi),
+    **ÇOK VERİ** (10 parça / 5 kombin; renk-kategori-durum dağılımları, sıralama,
+    `clean + dirty = total`, kategori toplamı = `items.total`, Türkçe karakterler).
+    Yetkilendirme: başkasının id'siyle **404**, 403 DEĞİL, yanıtta veri sızmaması,
+    token'sız/bozuk token **401**, bozuk UUID **404** (500 değil).
+  - Gerçek tarayıcıda (Playwright + sistem Chrome) **37 kontrol**: boş durum mesajı ve
+    bağlantısı, üç `StatCard`'ın `href`/değerleri ve `font-display italic` tipografisi,
+    kategori hapları, renk dairesinin gerçekten Siyah'ın hex'iyle boyanması
+    (`rgb(28, 26, 23)`), "En çok Akşam Yemeği kombini oluşturdun (2 kez)" cümlesi,
+    temiz/kirli satırı, kartın hesap bilgilerinin ALTINDA olması, dusty-rose ayraç,
+    kart tıklanınca `/kombinlerim`'in açılması, başka kullanıcıda verinin sızmaması,
+    **500 senaryosunda** sayfanın geri kalanının ayakta kalması, temiz konsol.
+    Ayrıca 1280px ve 390px'te ekran görüntüsüyle görsel doğrulama yapıldı (mobilde
+    3'lü ızgara ve haplar taşmadan sarıyor).
+  - Regresyon: `test-all-endpoints` 72/72, `test-auth` 48/48, `test-item-outfits` 27/27,
+    `test-clean-status` 26/26, `npm run lint` + `npm run build` temiz.
 
 ### 2026-08-20 — Hava durumuna göre kombin önerisi (OpenWeatherMap + sezon)
 - **`season` zaten vardı, migration yazılmadı.** `clothing_items.season VARCHAR(20)`

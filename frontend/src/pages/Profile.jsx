@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { UserCog, KeyRound, Crown, Palette, Bell, HelpCircle, ChevronRight, LogOut } from 'lucide-react'
 import Button from '../components/ui/Button'
+import WardrobeStats from '../components/WardrobeStats'
 import { fetchMe } from '../lib/api'
 import { clearToken } from '../lib/auth'
 import { getUserProfile, setUserProfile, clearOnboardingState } from '../lib/onboarding'
@@ -86,6 +87,8 @@ function Profile({ onLoggedOut }) {
             <ProfileListItem icon={UserCog} label="Hesap Bilgilerim" to="/profil/hesap-bilgilerim" />
             <ProfileListItem icon={KeyRound} label="Şifre Değiştir" to="/profil/sifre-degistir" />
           </div>
+
+          <WardrobeStats />
 
           <div className="rounded-2xl border border-dusty-rose/40 bg-dusty-rose/10 p-6">
             <div className="flex items-start justify-between gap-4">

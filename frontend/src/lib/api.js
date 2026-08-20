@@ -264,6 +264,12 @@ export function updateUser(id, payload) {
   return request(`/users/${encodeURIComponent(id)}`, { method: 'PUT', body: payload })
 }
 
+// Gardırop istatistikleri. Sunucu hazır ÖZET döner (ham kayıt değil), bu yüzden
+// istemcide ek bir hesaplama/dönüştürme yapılmaz.
+export function fetchWardrobeStats(userId) {
+  return request(`/users/${encodeURIComponent(userId)}/stats`)
+}
+
 export function fetchStylePreferences() {
   return request('/style-preferences')
 }
