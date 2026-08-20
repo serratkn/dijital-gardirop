@@ -1,7 +1,9 @@
 const VARIANTS = {
   primary: 'bg-burgundy text-on-primary hover:opacity-90',
   outline: 'border border-ink/15 text-ink hover:border-dusty-rose hover:text-accent-ink',
-  rose: 'border border-dusty-rose text-accent-ink hover:bg-dusty-rose hover:text-on-primary',
+  // Hover dolgusu `dusty-rose` DEĞİL `accent-ink`: açık rose zemin üzerinde
+  // on-primary metin açık modda 2.11:1 kalıyordu (okunmuyordu). Koyu tonla ~4.97:1.
+  rose: 'border border-dusty-rose text-accent-ink hover:bg-accent-ink hover:text-on-primary',
 }
 
 const SIZES = {

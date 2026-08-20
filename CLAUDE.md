@@ -1019,6 +1019,33 @@ fotoğraf sorunu teyit edildikten sonra üç yerden de kaldırılabilir.
 > Bundan sonraki her çalışma buraya tarihiyle işlenir: eklenen özellikler, düzeltilen
 > hatalar, alınan mimari kararlar. En yeni kayıt en üstte.
 
+### 2026-08-20 — `rose` butonunun hover hâli AA'ya çıkarıldı
+- `Button` `rose` varyantında `hover:bg-dusty-rose` → **`hover:bg-accent-ink`**.
+  Açık modda hover dolgusu açık rose (`#c9a0a0`), üstündeki metin ise `on-primary`
+  (krem) olduğu için **2.11:1** kalıyordu — buton hover'landığında yazısı
+  okunmuyordu. Artık **4.97:1**.
+- Tek kullanım yeri: Kombin Öner'deki **"Bu Kombini Kaydet"**.
+- **Karanlık mod etkilenmez:** orada `accent-ink` ile `dusty-rose` aynı değeri
+  (`#d9b3b3`) alır; hover zaten 9.28:1 idi ve öyle kaldı.
+- **Kenarlık bilinçli olarak `dusty-rose` bırakıldı.** Açık modda hover'da açık rose
+  kenarlık + koyu dolgu oluşuyor (2.36:1 fark); ekran görüntüsüyle bakıldığında bu
+  bir hata gibi değil, hapın kenarını yumuşatan ince bir rim gibi duruyor.
+  Karanlıkta kenarlık ile dolgu zaten birebir aynı (1.00).
+- **Yeni test: hover kontrastı ölçen script.** Depodaki statik denetim yalnızca
+  dinlenme hâlini ölçüyordu — bu satırın gözden kaçmasının sebebi buydu. Yeni script
+  fareyi gerçekten butonun üstüne getirip hesaplanmış rengi okuyor: **10/10**
+  (açık: dinlenme 4.97, hover 4.97; karanlık: 9.28 / 9.28; dolgunun gerçekten
+  `accent-ink` olduğu ve konsolun temiz kaldığı da doğrulanıyor).
+- **Test tuzağı:** "Bu Kombini Kaydet" ancak öneri ÜRETİLDİKTEN sonra DOM'a gelir ve
+  öneri, **durum pill'ine** tıklayınca üretilir — formdaki "Kombin Öner" butonu
+  yalnızca serbest metin girilmişse çalışır, boş girdiyle tıklamak hiçbir şey yapmaz.
+  Ayrıca buton `disabled` iken `disabled:pointer-events-none` yüzünden **hover hiç
+  uygulanmaz**; hover ölçen testin önce geçerli bir öneri üretmesi şarttır.
+- Regresyon: statik kontrast denetimi 40/40 (her iki tema AA), karanlık mod akışları
+  36/36, istatistik kartı 37/37, `test-stats` 60/60, `test-all-endpoints` 72/72,
+  `test-auth` 48/48, `test-item-outfits` 27/27, `test-clean-status` 26/26,
+  lint + build temiz.
+
 ### 2026-08-20 — Açık modda vurgu metinleri WCAG AA'ya çıkarıldı (`accent-ink`)
 - **Sorun:** `text-dusty-rose` (`#c9a0a0`) ile yazılan mikro etiketler açık zeminde
   okunmuyordu: beyaz kartta **2.33:1**, ivory sayfada **2.11:1** — AA eşiği 4.5:1.
@@ -1054,9 +1081,9 @@ fotoğraf sorunu teyit edildikten sonra üç yerden de kaldırılabilir.
 - **Kapsam dışı bırakılan ilgili nokta:** `Button` `rose` varyantının **hover** hâli
   (`hover:bg-dusty-rose` + `text-on-primary`) açık modda **2.11:1**'dir. Bu bir etiket
   değil buton dolgusudur ve düzeltmek butonun görünümünü değiştirir; tek kullanım yeri
-  Kombin Öner'deki "Bu Kombini Kaydet"tir. Düzeltilecekse `hover:bg-accent-ink`
-  yeterlidir (≈4.97:1). Statik denetim hover durumlarını ölçmez, bu yüzden 40/40
-  sonucu bu satırı kapsamaz.
+  Kombin Öner'deki "Bu Kombini Kaydet"tir. Statik denetim hover durumlarını ölçmez,
+  bu yüzden 40/40 sonucu bu satırı kapsamaz.
+  **→ Bir sonraki kayıtta düzeltildi.**
 - **Test tuzağı:** "tekrar açığa dönüyor" kontrolü bir kez haksız yere kırmızı yandı —
   ölçüm 150ms'de yapılıyordu ama tema geçişi **300ms**. Okunan renk animasyonun ara
   karesiydi (`rgb(228,224,218)`), ürün hatası değil. Tema rengi ölçen testler geçiş
