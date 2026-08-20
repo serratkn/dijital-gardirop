@@ -3,6 +3,13 @@ import { CLOTHING_COLORS } from '../../lib/colors'
 
 // Açık renkler ivory zeminde kaybolmasın diye her daire ince bir çerçeve taşır;
 // seçili olan burgundy halka ile vurgulanır.
+//
+// Onay ikonunun rengi TEMAYA BAĞLI DEĞİLDİR ve olmamalıdır: arkasında duran şey
+// kıyafetin GERÇEK rengidir (bir veri değeri), karanlık modda değişmez. Token
+// kullanılsaydı ikon karanlık modda ters dönüp siyah dairede siyah, beyaz
+// dairede beyaz görünürdü — yani tam da kaçınmak istediğimiz okunmazlık.
+const CHECK_ON_DARK = 'text-[#f7f3ed]'
+const CHECK_ON_LIGHT = 'text-[#1c1a17]'
 function ColorPicker({ value, onChange }) {
   return (
     <div className="flex flex-wrap gap-2">
@@ -31,7 +38,7 @@ function ColorPicker({ value, onChange }) {
               <Check
                 size={14}
                 strokeWidth={2.5}
-                className={isDark || color.gradient ? 'text-ivory' : 'text-ink/70'}
+                className={isDark || color.gradient ? CHECK_ON_DARK : CHECK_ON_LIGHT}
               />
             )}
           </button>

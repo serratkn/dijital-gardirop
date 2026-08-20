@@ -238,6 +238,8 @@ olduğu için iskelet oraya taşındı, kombin üretimi istemci tarafında anlı
 - **Kombinlerim** — kayıtlı kombinler; parçaları, tarihi, favori ve silme işlemleriyle
 - **Kıyafet Detay** — görüntüleme, favori, onaylı silme, fotoğraf yönetimi ve
   **o parçanın geçtiği kombinlerin listesi**
+- **Karanlık mod** — Profil > Görünüm'den açılır/kapanır; tercih `dg_theme`'de saklanır,
+  ilk açılışta sistem tercihi (`prefers-color-scheme`) varsayılan olur
 - **Onboarding** — kullanıcıyı `POST /api/users` ile oluşturur, tarz anketini
   `PUT /api/style-preferences` ile kaydeder; e-posta çakışmasında (409) anlamlı mesaj gösterir
 - **Profil > Hesap Bilgilerim / Tarz Tercihlerim** — veritabanından okur ve günceller
@@ -894,8 +896,11 @@ uygulanır. Bunun sebebi sayfanın iki durumu ayırt etmek zorunda olmasıdır:
 `isStale` bayrağı geç gelen yanıtın state'i ezmesini önler; `isLoading` / `hasError`
 durumları iskelet ve boş/hata ekranlarını sürer.
 
-**Kalıcı durum:** `src/lib/onboarding.js` `dg_` önekli tüm localStorage anahtarlarının
+**Kalıcı durum:** `src/lib/onboarding.js` `dg_` önekli localStorage anahtarlarının
 tek sahibidir (onboarding bayrağı, `dg_user_id`, kullanıcı profili, anket cevapları).
+**İki istisna:** `dg_token` `lib/auth.js`'e, `dg_theme` `lib/theme.js`'e aittir.
+Tema bir OTURUM verisi değil CİHAZ tercihidir — bu yüzden çıkışta `clearOnboardingState()`
+ile silinmez, kullanıcı çıkış yapınca teması korunur.
 `localStorage`'a doğrudan dokunmayın. **Tek doğru kaynak veritabanıdır**; localStorage
 yalnızca hızlı erişim önbelleğidir (örn. Ana Sayfa karşılamasının ismi ilk boyamada
 buradan gelir, sonra API yanıtıyla tazelenir).
@@ -920,11 +925,61 @@ Yeni sekme eklerken dar ekranda taşma olup olmadığını kontrol edin.
 Token'lar `src/index.css` içinde Tailwind v4'ün `@theme` bloğunda tanımlıdır —
 **`tailwind.config.js` yoktur.**
 
-- Renkler: `ivory` (sayfa zemini), `ink` (metin), `warm-gray` (yer tutucu yüzeyler),
-  `dusty-rose` (vurgu), `burgundy` (birincil/aktif)
+- Renkler (**rol adı taşırlar, ham renk adı değil**): `ivory` (sayfa zemini),
+  `surface` (yükseltilmiş yüzey — kartlar, form alanları, listeler), `ink` (metin),
+  `warm-gray` (yer tutucu / iskelet), `dusty-rose` (yumuşak vurgu),
+  `burgundy` (birincil/aktif), `on-primary` (**dolu** burgundy/dusty-rose yüzeyin
+  üstündeki metin)
 - Fontlar: `font-display` (Playfair Display — başlıklar, **daima italik**),
   `font-body` (Lora), `font-sans` (Inter — arayüz metni)
 - Animasyonlar: `animate-fade-in`, `animate-page-fade`
+- Gölge ve perde: `shadow-[var(--dg-shadow-card)]`, `--dg-shadow-card-hover`,
+  `--dg-shadow-float`, `--dg-shadow-modal`, `--dg-shadow-nav`, `--dg-scrim`
+
+**`bg-white` KULLANMAYIN** — kart yüzeyi için `bg-surface` vardır. Aynı şekilde dolu bir
+burgundy/dusty-rose zeminin üstündeki metin `text-ivory` değil `text-on-primary` olmalıdır.
+İkisi de karanlık modda ters dönerdi.
+
+### Karanlık mod
+
+Tailwind'in **sınıf stratejisi** kullanılır (`@custom-variant dark`); tema `<html>`
+üzerindeki `.dark` sınıfıyla belirlenir. Tercih `dg_theme` anahtarında saklanır ve
+`src/lib/theme.js` bu anahtarın **tek sahibidir**.
+
+**Sayfalarda `dark:` varyantı serpiştirilmez.** Karanlık modda token'ların *adları* değil
+*değerleri* değişir (`.dark` bloğu `--color-*` değişkenlerini ezer). Bir yüzey ile
+üstündeki metin daima aynı token çiftinden geldiği için "koyu zeminde koyu yazı"
+**yapısal olarak imkânsızdır** — 30+ dosyaya `dark:` eklemekten çok daha güvenlidir.
+Sayılı istisna: `Modal` paneli `dark:bg-surface` taşır (açık modda `ivory` olması
+kasıtlıdır, karanlıkta sayfa zeminiyle aynı renk olurdu).
+
+Palet jenerik siyah-beyaz **değildir**: zemin sıcak antrasit (`#1c1815`), metin krem.
+Vurgu renkleri koyu zeminde **açılır** (`burgundy` → `#cf8e8e`) çünkü `#7a3b3b` bir metin
+rengi olarak okunmazdı (1.7:1); dolayısıyla karanlık modda vurgu ile üstündeki metnin
+ilişkisi **tersine döner** (açık dolgu + koyu `on-primary`).
+
+Ölçülen kontrastlar karanlık modda açık modun **altına düşmez** — her sayfada en düşük
+değer ≥ 6.64:1 (açık modda bazı sayfalarda 2.11:1). Sayı tablosu `index.css` içindedir;
+yeni renk eklerken bu parite korunmalıdır.
+
+Bilmeden bozulabilecek üç nokta:
+
+1. **`@theme inline` kullanılamaz** — değerleri utility'lere gömer ve `.dark`
+   geçersiz kılmaları hiç çalışmazdı.
+2. **Gölgeler Tailwind'in `--shadow-*` ad alanına konulamaz** — o ad alanı da değeri
+   gömer. Bu yüzden düz custom property (`--dg-shadow-*`) olarak tanımlanıp
+   `shadow-[var(...)]` ile çağrılırlar.
+3. **Perde (`scrim`) `bg-ink/40` OLAMAZ** — `ink` karanlıkta kreme döner ve perde,
+   sayfayı karartmak yerine sütlü beyaz bir tüle dönüşürdü. `--dg-scrim` her iki
+   temada da koyudur.
+
+**Veri renkleri temadan bağımsızdır.** `ColorPicker` ve `WardrobeStats` içindeki kıyafet
+renkleri (`colors.js`'teki hex değerleri) gerçek birer veri değeridir; üzerlerindeki onay
+ikonu token değil sabit (`text-[#f7f3ed]` / `text-[#1c1a17]`) kullanır — token olsaydı
+karanlık modda siyah dairede siyah tik görünürdü.
+
+`color-scheme` hem `:root` hem `.dark` üzerinde ayarlıdır; tarayıcının kendi çizdiği
+kaydırma çubuğu ve form denetimleri bu olmadan karanlık sayfada beyaz kalırdı.
 
 Yeniden icat etmek yerine eşleşilmesi gereken kalıplar: `components/ui/Button.jsx` ile
 tam genişlikte hap butonlar (`rounded-full`), `rounded-2xl border border-ink/10` kartlar,
@@ -955,6 +1010,80 @@ fotoğraf sorunu teyit edildikten sonra üç yerden de kaldırılabilir.
 
 > Bundan sonraki her çalışma buraya tarihiyle işlenir: eklenen özellikler, düzeltilen
 > hatalar, alınan mimari kararlar. En yeni kayıt en üstte.
+
+### 2026-08-20 — Karanlık mod (sınıf stratejisi + rol tabanlı token'lar)
+- **Yaklaşım: `dark:` varyantı serpiştirmek YERİNE token değerlerini değiştirmek.**
+  30+ dosyaya `dark:bg-… dark:text-…` eklemek yerine `.dark` bloğu `@theme`'deki
+  `--color-*` değişkenlerini ezer. Sebep dayanıklılık: bir yüzey ile üstündeki metin
+  daima aynı token çiftinden geldiği için **"koyu zeminde koyu yazı" yapısal olarak
+  imkânsız** hâle gelir. `dark:` yolunda tek bir unutulan sınıf okunmaz bir ekran
+  demekti. Sayfa dosyalarında tek bir `dark:` istisnası var (`Modal` paneli).
+- **Bu ancak token'lar ROL adı taşıdığı için mümkün oldu.** Depodaki `ivory`/`ink`/
+  `warm-gray` adları zaten "sayfa zemini / metin / yer tutucu" demekti; iki eksik rol
+  eklendi: **`surface`** (kart yüzeyi, 17 yerdeki `bg-white`'ın yerine) ve
+  **`on-primary`** (dolu burgundy zemin üstündeki metin, `text-ivory`'nin yerine).
+  Bu ikisi olmasaydı karanlık modda kartlar beyaz, buton metinleri görünmez kalırdı.
+- **Palet sezgiyle değil ÖLÇÜMLE seçildi.** Aday renkler için WCAG kontrastı
+  hesaplandı ve ölçüt "karanlık mod açık modun altına düşmesin" olarak konuldu:
+  `ink/zemin` 15.95 (açık 15.71), `ink/40` 3.59 (açık 2.47), `dusty-rose/zemin`
+  9.28 (açık 2.11), buton metni 6.64 (açık 7.55). Tablo `index.css` içinde durur.
+- **Vurgu renkleri koyu zeminde AÇILIR ve ilişki tersine döner.** `#7a3b3b` bir metin
+  rengi olarak `#1c1815` üzerinde okunmaz (1.7:1); karanlıkta `burgundy` `#cf8e8e`
+  olur. Dolayısıyla buton artık "koyu dolgu + açık metin" değil **"açık dolgu + koyu
+  metin"**tir — `on-primary` token'ının varlık sebebi budur.
+- **Zemin sıcak antrasit (`#1c1815`), metin krem (`#f7f3ed`)** — nötr siyah/beyaz
+  değil. Amaç açık moddaki "premium, sıcak" hissin karanlıkta da korunması.
+- **Üç teknik tuzak (hepsi yaşandı, hepsi ölçülerek yakalandı):**
+  1. **`@theme inline` kullanılamaz** — değerleri utility'ye gömer, `.dark` hiç çalışmaz.
+     Depoda düz `@theme` var, korunmalı.
+  2. **Gölgeler Tailwind'in `--shadow-*` ad alanına konulamaz.** Önce oraya konuldu;
+     üretilen CSS `var(--tw-shadow-color,#1c1a172e)` ile değeri GÖMDÜ, yani gölge
+     karanlık modda açık kalıyordu. Düz custom property'ye (`--dg-shadow-*`) taşınıp
+     `shadow-[var(...)]` ile çağrıldı; build çıktısından `--tw-shadow:var(--dg-shadow-card)`
+     olduğu doğrulandı.
+  3. **Modal perdesi `bg-ink/40` idi.** `ink` karanlıkta kreme döndüğü için perde,
+     sayfayı karartmak yerine **sütlü beyaz bir tüle** dönüşüyordu. Perde bir metin
+     rengi değil ÖRTÜCÜDÜR: `--dg-scrim` her iki temada da koyudur
+     (açık `rgba(28,26,23,.4)`, karanlık `rgba(0,0,0,.65)`).
+- **Veri renkleri temadan bağımsız bırakıldı.** `ColorPicker`'daki onay ikonu token
+  kullansaydı karanlık modda ters döner ve **siyah dairede siyah tik** görünürdü;
+  sabit `text-[#f7f3ed]` / `text-[#1c1a17]` kullanır. Arkasındaki şey kıyafetin
+  gerçek rengidir, bir yüzey değil.
+- **FOUC önlendi:** tema `index.html` içindeki satır içi script ile React'tan ÖNCE
+  uygulanır; beklenseydi karanlık modda bir kare beyaz flaş görünürdü. Bu mantık
+  `lib/theme.js` ile bilinçli olarak tekrarlanır — **ikisi birlikte güncellenmelidir.**
+- **Geçiş animasyonu yalnızca değişim anında.** `theme-transition` sınıfı toggle'da
+  eklenip 300ms sonra kaldırılır; kalıcı olsaydı uygulamadaki HER hover da 300ms'e
+  uzar, arayüz ağırlaşmış hissettirirdi.
+- **Sistem tercihi varsayılan, kullanıcı seçimi ezer.** Seçim yapılmadıysa
+  `prefers-color-scheme` canlı takip edilir (`watchSystemTheme`) ama bu bir tercih
+  olarak **kaydedilmez** — kaydedilseydi sistemi takip etmeyi bırakırdı.
+  `color-scheme` de ayarlanır; olmasaydı kaydırma çubuğu ve `<select>` açılır
+  listeleri karanlık sayfada beyaz kalırdı.
+- **Tema çıkışta silinmez:** `dg_theme` `lib/theme.js`'e aittir ve
+  `clearOnboardingState()` kapsamı dışındadır — cihaz tercihi, oturum verisi değil.
+- **Doğrulama — iki tarayıcı scripti, toplam 73 kontrol:**
+  - *Kontrast denetimi (40 kontrol):* 9 sayfa × 2 tema gezildi ve sayfadaki **her görünür
+    metin düğümünün** hesaplanmış rengi ile ARKASINDAKİ gerçek zemin (saydam katmanlar
+    ata zincirinde birleştirilerek) bulunup WCAG oranı hesaplandı — "beyaz zeminde beyaz
+    yazı" ancak böyle yakalanır. **Karanlık modda her sayfada en düşük değer ≥ 6.64:1.**
+  - *Akış ve davranış (36 kontrol):* Giriş/Kayıt/Tarz anketi (chrome-free ekranlar),
+    Kıyafet Detay, silme modalı, QuickAddModal, form alanları ve `<select>`'in koyu
+    yüzeyde olması, siyah dairedeki onay ikonunun açık kalması, anahtarın **sayfa
+    yenilenmeden** çalışması, geçiş sınıfının kaldırılması, `dg_theme`'e yazılması,
+    **yenilemede ve sayfa geçişlerinde korunması**, sistem tercihinin varsayılan olması,
+    kullanıcı seçiminin sistemi ezmesi, FOUC'un oluşmaması, temiz konsol.
+  - 1280px ve 390px ekran görüntüleriyle görsel doğrulama.
+  - Regresyon: `test-stats` 60/60, `test-all-endpoints` 72/72, `test-auth` 48/48,
+    `test-item-outfits` 27/27, `test-clean-status` 26/26, istatistik kartı tarayıcı
+    testi 37/37, lint + build temiz.
+- **Denetimin ortaya çıkardığı MEVCUT sorun (bu çalışmayla ilgisiz, düzeltilmedi):**
+  açık modda `text-dusty-rose` mikro etiketler beyaz kart üzerinde **2.33:1**
+  ("Kombin Önerisi" eyebrow'ları, kart kategori etiketleri, "Premium Abonelik" 2.11:1).
+  Bu, karanlık mod öncesinde de böyleydi — `bg-white` → `bg-surface` açık modda birebir
+  aynı `#ffffff` değeridir. Karanlık modda aynı etiketler 9.28:1'e çıkar. Marka
+  görünümünü tek taraflı değiştirmemek için **dokunulmadı**; düzeltilecekse
+  `dusty-rose` koyulaştırılmalı ya da bu etiketler `burgundy`ye alınmalıdır.
 
 ### 2026-08-20 — Profil: "Gardırop İstatistiklerim" kartı (yeni `Stats*` katmanı)
 - **Yeni uç `GET /api/users/:id/stats`** — kullanıcının kendi verisinden türetilen özet:

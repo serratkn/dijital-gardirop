@@ -46,7 +46,7 @@ function QuizStep({
         type="button"
         onClick={onNext}
         disabled={!selected}
-        className="mt-10 w-full rounded-full bg-burgundy px-8 py-3.5 text-base font-medium text-ivory transition-opacity duration-200 hover:opacity-90 disabled:opacity-40"
+        className="mt-10 w-full rounded-full bg-burgundy px-8 py-3.5 text-base font-medium text-on-primary transition-opacity duration-200 hover:opacity-90 disabled:opacity-40"
       >
         İleri
       </button>

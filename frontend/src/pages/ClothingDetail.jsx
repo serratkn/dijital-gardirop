@@ -263,7 +263,7 @@ function ClothingDetail() {
 
         <div className="mt-8 grid gap-10 md:grid-cols-2 md:gap-14">
           <div>
-            <div className="min-h-[24rem] overflow-hidden rounded-3xl border border-ink/10 bg-warm-gray shadow-[0_8px_24px_-14px_rgba(28,26,23,0.18)] md:min-h-[32rem]">
+            <div className="min-h-[24rem] overflow-hidden rounded-3xl border border-ink/10 bg-warm-gray shadow-[var(--dg-shadow-card)] md:min-h-[32rem]">
               {!imageFailed && item.imageUrl && !isPhotoEditing && (
                 <img
                   src={resolveImageUrl(item.imageUrl)}
@@ -332,7 +332,7 @@ function ClothingDetail() {
                 {item.category}
               </p>
               {!isClean && (
-                <span className="inline-flex items-center gap-1 rounded-full border border-dusty-rose/40 bg-white px-2.5 py-1 text-[10px] font-medium uppercase tracking-[0.1em] text-burgundy/80">
+                <span className="inline-flex items-center gap-1 rounded-full border border-dusty-rose/40 bg-surface px-2.5 py-1 text-[10px] font-medium uppercase tracking-[0.1em] text-burgundy/80">
                   <WashingMachine size={11} strokeWidth={1.75} />
                   Kirli
                 </span>
@@ -380,7 +380,7 @@ function ClothingDetail() {
                     <Link
                       key={outfit.id}
                       to="/kombinlerim"
-                      className="flex items-center justify-between gap-4 rounded-xl border border-ink/10 bg-white px-4 py-3 transition-colors hover:border-dusty-rose"
+                      className="flex items-center justify-between gap-4 rounded-xl border border-ink/10 bg-surface px-4 py-3 transition-colors hover:border-dusty-rose"
                     >
                       <span className="min-w-0">
                         <span className="block truncate font-body text-sm text-ink">

@@ -18,7 +18,7 @@ function ScrollToTopButton() {
       type="button"
       onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })}
       aria-label="Sayfanın başına dön"
-      className="fixed bottom-24 right-6 z-40 flex h-11 w-11 items-center justify-center rounded-full bg-warm-gray text-ink shadow-[0_4px_14px_-4px_rgba(28,26,23,0.25)] transition-colors duration-200 hover:bg-burgundy hover:text-ivory sm:bottom-6"
+      className="fixed bottom-24 right-6 z-40 flex h-11 w-11 items-center justify-center rounded-full bg-warm-gray text-ink shadow-[var(--dg-shadow-float)] transition-colors duration-200 hover:bg-burgundy hover:text-on-primary sm:bottom-6"
     >
       <ArrowUp size={18} strokeWidth={1.75} />
     </button>

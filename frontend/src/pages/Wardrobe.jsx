@@ -140,7 +140,7 @@ function Wardrobe() {
                   value={searchQuery}
                   onChange={(event) => setSearchQuery(event.target.value)}
                   placeholder="Kıyafet ara..."
-                  className="w-full rounded-full border border-ink/15 bg-white py-2.5 pl-10 pr-4 text-sm text-ink placeholder:text-ink/40 focus:border-dusty-rose focus:outline-none"
+                  className="w-full rounded-full border border-ink/15 bg-surface py-2.5 pl-10 pr-4 text-sm text-ink placeholder:text-ink/40 focus:border-dusty-rose focus:outline-none"
                 />
               </div>
             </div>

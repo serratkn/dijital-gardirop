@@ -278,7 +278,7 @@ function OutfitSuggestion() {
                   onChange={(event) => setCustomText(event.target.value)}
                   maxLength={OCCASION_MAX_LENGTH}
                   placeholder="Ya da kendi durumunu yaz..."
-                  className="flex-1 rounded-full border border-ink/15 bg-white px-5 py-3 text-sm text-ink placeholder:text-ink/40 focus:border-dusty-rose focus:outline-none"
+                  className="flex-1 rounded-full border border-ink/15 bg-surface px-5 py-3 text-sm text-ink placeholder:text-ink/40 focus:border-dusty-rose focus:outline-none"
                 />
                 <Button type="submit" variant="primary">
                   Kombin Öner

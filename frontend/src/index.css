@@ -1,19 +1,137 @@
 @import url('https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,300;0,400;0,500;0,600;1,300;1,400;1,500;1,600&family=Inter:wght@400;500;600&family=Lora:wght@400;500;600&display=swap');
 @import "tailwindcss";
 
+/* Karanlık mod SINIF stratejisiyle çalışır (media query ile değil):
+   kullanıcı Profil > Görünüm'den elle seçebilsin diye. Tema <html> üzerine
+   eklenen `.dark` sınıfıyla belirlenir; ilk açılışta sistem tercihi
+   (prefers-color-scheme) varsayılan olur — bkz. src/lib/theme.js */
+@custom-variant dark (&:where(.dark, .dark *));
+
+/* Token'lar ROL adı taşır, ham renk adı değil:
+     ivory      → sayfa zemini
+     surface    → yükseltilmiş yüzey (kartlar, form alanları, listeler)
+     warm-gray  → yer tutucu / iskelet / pasif yüzey
+     ink        → metin
+     dusty-rose → yumuşak vurgu
+     burgundy   → birincil / aktif
+     on-primary → burgundy veya dusty-rose ile DOLDURULMUŞ bir yüzeyin üstündeki metin
+
+   Karanlık modda bu token'ların DEĞERLERİ değişir, adları değil. Bu sayede
+   sayfalarda `dark:` varyantı serpiştirmek gerekmez ve "açık mod rengi sızması"
+   (koyu zeminde koyu yazı) yapısal olarak imkânsız hâle gelir: bir yüzey ile
+   üstündeki metin daima aynı token çiftinden gelir.
+
+   ÖNEMLİ: burada `@theme inline` KULLANILMAZ. `inline` değerleri utility'lere
+   gömer ve aşağıdaki `.dark` geçersiz kılmaları hiçbir işe yaramazdı. */
 @theme {
   --font-display: "Playfair Display", ui-serif, Georgia, serif;
   --font-body: "Lora", ui-serif, Georgia, serif;
   --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
 
   --color-ivory: #f7f3ed;
+  --color-surface: #ffffff;
   --color-ink: #1c1a17;
   --color-warm-gray: #e8e3db;
   --color-dusty-rose: #c9a0a0;
   --color-burgundy: #7a3b3b;
+  --color-on-primary: #f7f3ed;
 
   --animate-fade-in: fade-in 0.5s ease-out both;
   --animate-page-fade: page-fade 0.25s ease-out both;
+}
+
+/* Karanlık palet: jenerik siyah-beyaz DEĞİL, açık moddaki sıcaklığın
+   karşılığı. Zemin nötr siyah yerine sıcak antrasit (kırmızıya çalan gri),
+   metin saf beyaz yerine krem — böylece aynı "premium, sıcak" his korunur.
+
+   Vurgu renkleri koyu zeminde AÇILIR: #7a3b3b bir metin rengi olarak
+   #1c1815 üzerinde okunamazdı (1.7:1). Açılmış burgundy hem metin olarak
+   okunur (6.6:1) hem de dolgu olarak koyu `on-primary` metniyle çalışır —
+   yani karanlık modda vurgu ile üstündeki metnin ilişkisi tersine döner.
+
+   Ölçülen kontrastlar (WCAG), açık mod referansıyla birlikte:
+     ink/zemin        15.95  (açık: 15.71)
+     ink/50 zemin      4.88  (açık:  3.24)
+     ink/40 zemin      3.59  (açık:  2.47)
+     dusty-rose/zemin  9.28  (açık:  2.11)
+     burgundy/zemin    6.64  (açık:  7.55)
+     buton metni       6.64  (açık:  7.55)
+   Hiçbir ölçüm açık modun altına düşmez. Yeni bir renk eklerken bu paritenin
+   korunduğunu doğrulayın. */
+.dark {
+  --color-ivory: #1c1815;
+  --color-surface: #2a241f;
+  --color-ink: #f7f3ed;
+  --color-warm-gray: #37302a;
+  --color-dusty-rose: #d9b3b3;
+  --color-burgundy: #cf8e8e;
+  --color-on-primary: #1c1815;
+}
+
+/* `color-scheme`: tarayıcının KENDİ çizdiği parçalar (form denetimleri,
+   kaydırma çubuğu, otomatik doldurma, tarih seçici) CSS token'larımızı bilmez;
+   bu satır olmadan karanlık sayfada parlak beyaz bir kaydırma çubuğu veya
+   okunmaz bir <select> açılır listesi kalırdı.
+
+   Gölgeler bilinçli olarak Tailwind'in `--shadow-*` AD ALANINA KONMADI:
+   o ad alanı değeri utility'nin içine gömer ve aşağıdaki karanlık mod
+   geçersiz kılması hiçbir işe yaramazdı (gölge açık modda kalırdı).
+   Düz custom property olarak tanımlanıp JSX'te `shadow-[var(--dg-shadow-card)]`
+   biçiminde çağrılırlar; bu hâlde değer çalışma anında okunur.
+
+   Karanlık modda gölgeler daha derin ve opaktır: açık moddaki yumuşak
+   mürekkep gölgesi koyu zeminde tamamen görünmez olurdu. */
+:root {
+  color-scheme: light;
+
+  --dg-shadow-card: 0 8px 24px -14px rgba(28, 26, 23, 0.18);
+  --dg-shadow-card-hover: 0 18px 36px -14px rgba(28, 26, 23, 0.22);
+  --dg-shadow-float: 0 4px 14px -4px rgba(28, 26, 23, 0.25);
+  --dg-shadow-modal: 0 24px 60px -20px rgba(28, 26, 23, 0.35);
+  --dg-shadow-nav: 0 1px 3px rgba(28, 26, 23, 0.06);
+
+  /* Modal perdesi. `bg-ink/40` KULLANILAMAZ: ink karanlık modda kreme döner ve
+     perde, sayfayı karartmak yerine SÜTLÜ BEYAZ bir tül hâline gelirdi.
+     Perde bir "metin rengi" değil bir ÖRTÜCÜDÜR; her iki temada da koyu kalır. */
+  --dg-scrim: rgba(28, 26, 23, 0.4);
+}
+
+.dark {
+  color-scheme: dark;
+
+  --dg-scrim: rgba(0, 0, 0, 0.65);
+
+  --dg-shadow-card: 0 8px 24px -14px rgba(0, 0, 0, 0.6);
+  --dg-shadow-card-hover: 0 18px 36px -14px rgba(0, 0, 0, 0.7);
+  --dg-shadow-float: 0 4px 14px -4px rgba(0, 0, 0, 0.6);
+  --dg-shadow-modal: 0 24px 60px -20px rgba(0, 0, 0, 0.75);
+  --dg-shadow-nav: 0 1px 3px rgba(0, 0, 0, 0.4);
+}
+
+/* Tema geçişi yalnızca DEĞİŞİM ANINDA yumuşatılır. Bu geçiş kalıcı olsaydı
+   arayüzdeki her hover da 300ms'e uzar, uygulama ağırlaşmış hissettirirdi;
+   sınıf theme.js tarafından eklenip geçiş bitince kaldırılır. */
+@media (prefers-reduced-motion: no-preference) {
+  .theme-transition,
+  .theme-transition *,
+  .theme-transition *::before,
+  .theme-transition *::after {
+    transition:
+      background-color 300ms ease,
+      border-color 300ms ease,
+      color 300ms ease,
+      fill 300ms ease,
+      stroke 300ms ease,
+      box-shadow 300ms ease !important;
+    transition-delay: 0ms !important;
+  }
+}
+
+/* Tema henüz uygulanmadan gövde boyanırsa beyaz bir "flaş" görünürdü;
+   zemin token'a bağlanarak ilk boyamada da doğru renk kullanılır. */
+body {
+  background-color: var(--color-ivory);
+  color: var(--color-ink);
 }
 
 @keyframes fade-in {

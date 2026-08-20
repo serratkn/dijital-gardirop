@@ -3,6 +3,7 @@ import { Link, useNavigate } from 'react-router-dom'
 import { UserCog, KeyRound, Crown, Palette, Bell, HelpCircle, ChevronRight, LogOut } from 'lucide-react'
 import Button from '../components/ui/Button'
 import WardrobeStats from '../components/WardrobeStats'
+import ThemeToggle from '../components/ui/ThemeToggle'
 import { fetchMe } from '../lib/api'
 import { clearToken } from '../lib/auth'
 import { getUserProfile, setUserProfile, clearOnboardingState } from '../lib/onboarding'
@@ -71,7 +72,7 @@ function Profile({ onLoggedOut }) {
     <div className="min-h-screen bg-ivory">
       <div className="mx-auto max-w-2xl px-6 py-14 sm:px-8">
         <div className="flex items-center gap-5">
-          <span className="flex h-16 w-16 shrink-0 items-center justify-center rounded-full bg-burgundy font-display text-2xl italic text-ivory">
+          <span className="flex h-16 w-16 shrink-0 items-center justify-center rounded-full bg-burgundy font-display text-2xl italic text-on-primary">
             {initial}
           </span>
           <div>
@@ -83,7 +84,7 @@ function Profile({ onLoggedOut }) {
         </div>
 
         <div className="mt-12 space-y-6">
-          <div className="overflow-hidden rounded-2xl border border-ink/10 bg-white divide-y divide-ink/10">
+          <div className="overflow-hidden rounded-2xl border border-ink/10 bg-surface divide-y divide-ink/10">
             <ProfileListItem icon={UserCog} label="Hesap Bilgilerim" to="/profil/hesap-bilgilerim" />
             <ProfileListItem icon={KeyRound} label="Şifre Değiştir" to="/profil/sifre-degistir" />
           </div>
@@ -105,7 +106,13 @@ function Profile({ onLoggedOut }) {
             </Button>
           </div>
 
-          <div className="overflow-hidden rounded-2xl border border-ink/10 bg-white divide-y divide-ink/10">
+          {/* Görünüm: tema tercihi hesaba değil CİHAZA aittir, bu yüzden
+              sunucuya yazılmaz ve çıkış yapınca da korunur. */}
+          <div className="overflow-hidden rounded-2xl border border-ink/10 bg-surface">
+            <ThemeToggle />
+          </div>
+
+          <div className="overflow-hidden rounded-2xl border border-ink/10 bg-surface divide-y divide-ink/10">
             <ProfileListItem icon={Palette} label="Tarz Tercihlerim" to="/profil/tarz-tercihlerim" />
             <ProfileListItem icon={Bell} label="Bildirimler" to="/profil/bildirimler" />
             <ProfileListItem icon={HelpCircle} label="Yardım & Destek" to="/profil/yardim-destek" />

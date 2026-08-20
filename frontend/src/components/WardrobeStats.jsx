@@ -124,7 +124,7 @@ function WardrobeStats() {
   const topOccasion = stats?.outfits?.top_occasion
 
   return (
-    <section className="rounded-2xl border border-ink/10 bg-white p-6">
+    <section className="rounded-2xl border border-ink/10 bg-surface p-6">
       <h2 className="font-display text-xl italic text-ink">Gardırop İstatistiklerim</h2>
       <div className="mt-3 h-px w-16 bg-dusty-rose" />
 

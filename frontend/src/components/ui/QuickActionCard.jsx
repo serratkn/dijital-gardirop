@@ -7,7 +7,7 @@ function QuickActionCard({ to, state, eyebrow, title, subtitle, icon: Icon }) {
     <Link
       to={to}
       state={state}
-      className="group block overflow-hidden rounded-2xl border border-ink/10 bg-white shadow-[0_8px_24px_-14px_rgba(28,26,23,0.18)] transition-all duration-300 ease-out hover:-translate-y-1 hover:shadow-[0_18px_36px_-14px_rgba(28,26,23,0.22)]"
+      className="group block overflow-hidden rounded-2xl border border-ink/10 bg-surface shadow-[var(--dg-shadow-card)] transition-all duration-300 ease-out hover:-translate-y-1 hover:shadow-[var(--dg-shadow-card-hover)]"
     >
       <div className="flex h-40 items-center justify-center bg-warm-gray">
         {Icon && <Icon size={28} strokeWidth={1.5} className="text-ink/40" />}

@@ -31,7 +31,7 @@ function OutfitCard({ outfit, categoryNames, onToggleFavorite, onRequestDelete }
   }
 
   return (
-    <article className="rounded-2xl border border-ink/10 bg-white p-6 shadow-[0_8px_24px_-14px_rgba(28,26,23,0.18)]">
+    <article className="rounded-2xl border border-ink/10 bg-surface p-6 shadow-[var(--dg-shadow-card)]">
       <div className="flex items-start justify-between gap-4">
         <div>
           <p className="text-[12px] font-medium uppercase tracking-[0.15em] text-dusty-rose">
@@ -194,7 +194,7 @@ function OutfitHistory() {
         {isLoading ? (
           <div className="mt-12 space-y-6">
             {[0, 1, 2].map((index) => (
-              <div key={index} className="rounded-2xl border border-ink/10 bg-white p-6">
+              <div key={index} className="rounded-2xl border border-ink/10 bg-surface p-6">
                 <div className="h-3 w-24 animate-pulse rounded-full bg-warm-gray" />
                 <div className="mt-2 h-3 w-32 animate-pulse rounded-full bg-warm-gray" />
                 <div className="mt-5 grid grid-cols-2 gap-3 sm:grid-cols-4">

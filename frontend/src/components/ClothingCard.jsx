@@ -84,7 +84,7 @@ function ClothingCard({ item, onFavoriteChange, onCleanChange }) {
   return (
     <Link
       to={`/kiyafet/${item.id}`}
-      className="group mb-6 block break-inside-avoid overflow-hidden rounded-2xl border border-ink/10 bg-white shadow-[0_8px_24px_-14px_rgba(28,26,23,0.18)] transition-all duration-300 ease-out hover:-translate-y-1 hover:shadow-[0_18px_36px_-14px_rgba(28,26,23,0.22)]"
+      className="group mb-6 block break-inside-avoid overflow-hidden rounded-2xl border border-ink/10 bg-surface shadow-[var(--dg-shadow-card)] transition-all duration-300 ease-out hover:-translate-y-1 hover:shadow-[var(--dg-shadow-card-hover)]"
     >
       <div className={`relative overflow-hidden bg-warm-gray ${item.imgHeight}`}>
         {/* object-cover: fotoğraf oranı ne olursa olsun masonry yüksekliği korunur */}

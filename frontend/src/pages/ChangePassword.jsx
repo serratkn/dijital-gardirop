@@ -6,7 +6,7 @@ import { changePassword } from '../lib/api'
 
 const fieldLabel = 'text-xs font-medium uppercase tracking-[0.15em] text-ink/50'
 const fieldInput =
-  'mt-2 w-full rounded-xl border border-ink/15 bg-white px-4 py-3 text-sm text-ink placeholder:text-ink/40 focus:border-dusty-rose focus:outline-none'
+  'mt-2 w-full rounded-xl border border-ink/15 bg-surface px-4 py-3 text-sm text-ink placeholder:text-ink/40 focus:border-dusty-rose focus:outline-none'
 
 const MIN_PASSWORD_LENGTH = 8
 

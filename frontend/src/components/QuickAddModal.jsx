@@ -9,7 +9,7 @@ import { DEFAULT_SEASON, SEASONS } from '../lib/seasons'
 
 const fieldLabel = 'text-xs font-medium uppercase tracking-[0.15em] text-ink/50'
 const fieldInput =
-  'mt-2 w-full rounded-xl border border-ink/15 bg-white px-4 py-2.5 text-sm text-ink placeholder:text-ink/40 focus:border-dusty-rose focus:outline-none'
+  'mt-2 w-full rounded-xl border border-ink/15 bg-surface px-4 py-2.5 text-sm text-ink placeholder:text-ink/40 focus:border-dusty-rose focus:outline-none'
 
 // clothing_items.name kolonu VARCHAR(200)
 const NAME_MAX_LENGTH = 200
@@ -210,7 +210,7 @@ function QuickAddModal({ isOpen, onClose, onCreated }) {
                 aria-pressed={isClean === option.value}
                 className={`rounded-full px-5 py-2 text-sm font-medium transition-colors duration-200 ${
                   isClean === option.value
-                    ? 'bg-burgundy text-ivory'
+                    ? 'bg-burgundy text-on-primary'
                     : 'border border-ink/15 text-ink/60 hover:border-dusty-rose hover:text-dusty-rose'
                 }`}
               >

@@ -22,7 +22,7 @@ function Navbar() {
   return (
     <nav
       className={`sticky top-0 z-40 border-b bg-ivory transition-shadow duration-200 ${
-        isScrolled ? 'border-ink/10 shadow-[0_1px_3px_rgba(28,26,23,0.06)]' : 'border-transparent'
+        isScrolled ? 'border-ink/10 shadow-[var(--dg-shadow-nav)]' : 'border-transparent'
       }`}
     >
       <div className="mx-auto flex h-16 max-w-6xl items-center justify-between px-4">

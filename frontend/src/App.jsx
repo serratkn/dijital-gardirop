@@ -19,6 +19,7 @@ import StylePreferences from './pages/StylePreferences'
 import ComingSoon from './pages/ComingSoon'
 import { onUnauthorized } from './lib/api'
 import { hasValidSession } from './lib/auth'
+import { watchSystemTheme } from './lib/theme'
 
 // Navigasyon ve alt menü yalnızca oturum açmış ekranlarda görünür;
 // giriş/kayıt/anket akışı bilinçli olarak chrome-free kalır.
@@ -54,6 +55,11 @@ function App() {
       navigate('/giris', { replace: true })
     })
   }, [navigate])
+
+  // Kullanıcı henüz elle tema seçmediyse sistem tercihi canlı takip edilir
+  // (işletim sistemi gece moduna geçince uygulama da geçer). Seçim yapılmışsa
+  // dinleyici hiçbir şey yapmaz — kullanıcının tercihi sistemi ezer.
+  useEffect(() => watchSystemTheme(), [])
 
   // authTick okunmazsa lint kullanılmıyor sayar; oturum düşüşünde
   // yeniden hesaplamayı garanti eder.

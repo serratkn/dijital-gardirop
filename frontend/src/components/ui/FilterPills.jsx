@@ -12,14 +12,14 @@ function FilterPills({ options, active, onChange, icons, counts }) {
             onClick={() => onChange(option)}
             className={`inline-flex items-center gap-1.5 rounded-full px-5 py-2 text-sm font-medium transition-colors duration-200 ${
               isActive
-                ? 'bg-burgundy text-ivory'
+                ? 'bg-burgundy text-on-primary'
                 : 'border border-ink/15 text-ink/60 hover:border-dusty-rose hover:text-dusty-rose'
             }`}
           >
             {Icon && <Icon size={16} strokeWidth={1.75} />}
             {option}
             {typeof count === 'number' && (
-              <span className={`text-xs font-normal ${isActive ? 'text-ivory/70' : 'text-ink/40'}`}>
+              <span className={`text-xs font-normal ${isActive ? 'text-on-primary/70' : 'text-ink/40'}`}>
                 ({count})
               </span>
             )}
