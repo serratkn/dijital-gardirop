@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { CATEGORY_ICONS } from '../lib/categoryIcons'
-import { resolveImageUrl, toggleClothingItemFavorite } from '../lib/api'
+import { logImageOutcome, resolveImageUrl, toggleClothingItemFavorite } from '../lib/api'
 
 function ClothingCard({ item, onFavoriteChange }) {
   const [isFavorite, setIsFavorite] = useState(item.isFavorite ?? false)
@@ -56,7 +56,11 @@ function ClothingCard({ item, onFavoriteChange }) {
             src={photoUrl}
             alt={item.name}
             loading="lazy"
-            onError={() => setImageFailed(true)}
+            onLoad={() => logImageOutcome(item.name, photoUrl, 'YUKLENDI')}
+            onError={() => {
+              logImageOutcome(item.name, photoUrl, 'HATA')
+              setImageFailed(true)
+            }}
             className="h-full w-full object-cover"
           />
         )}

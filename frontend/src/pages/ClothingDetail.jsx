@@ -8,6 +8,7 @@ import {
   deleteClothingItemImage,
   fetchCategories,
   fetchClothingItem,
+  logImageOutcome,
   resolveImageUrl,
   toggleClothingItemFavorite,
   uploadClothingItemImage,
@@ -201,7 +202,13 @@ function ClothingDetail() {
                 <img
                   src={resolveImageUrl(item.imageUrl)}
                   alt={item.name}
-                  onError={() => setImageFailed(true)}
+                  onLoad={() =>
+                    logImageOutcome(item.name, resolveImageUrl(item.imageUrl), 'YUKLENDI')
+                  }
+                  onError={() => {
+                    logImageOutcome(item.name, resolveImageUrl(item.imageUrl), 'HATA')
+                    setImageFailed(true)
+                  }}
                   className="h-full min-h-[24rem] w-full object-cover md:min-h-[32rem]"
                 />
               )}

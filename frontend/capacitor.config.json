@@ -2,6 +2,9 @@
   "appId": "com.serra.digitalgardirop",
   "appName": "Dijital Gardirop",
   "webDir": "dist",
+  "server": {
+    "androidScheme": "http"
+  },
   "android": {
     "allowMixedContent": true
   }
