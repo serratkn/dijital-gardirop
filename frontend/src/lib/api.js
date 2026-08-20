@@ -221,6 +221,10 @@ export function toggleClothingItemFavorite(id) {
   return request(`/clothing-items/${encodeURIComponent(id)}/favorite`, { method: 'PATCH' })
 }
 
+export function toggleClothingItemCleanStatus(id) {
+  return request(`/clothing-items/${encodeURIComponent(id)}/clean-status`, { method: 'PATCH' })
+}
+
 export function deleteClothingItem(id) {
   return request(`/clothing-items/${encodeURIComponent(id)}`, { method: 'DELETE' })
 }

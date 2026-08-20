@@ -19,6 +19,8 @@ function QuickAddModal({ isOpen, onClose, onCreated }) {
   const [categoryId, setCategoryId] = useState('')
   const [color, setColor] = useState(DEFAULT_COLOR)
   const [photoFile, setPhotoFile] = useState(null)
+  // Varsayılan temiz: yeni eklenen parça kombin önerisine hemen katılabilsin.
+  const [isClean, setIsClean] = useState(true)
   const [isSaving, setIsSaving] = useState(false)
   const [savingLabel, setSavingLabel] = useState('')
   const [errorMessage, setErrorMessage] = useState('')
@@ -53,6 +55,7 @@ function QuickAddModal({ isOpen, onClose, onCreated }) {
     setName('')
     setColor(DEFAULT_COLOR)
     setPhotoFile(null)
+    setIsClean(true)
     setErrorMessage('')
     setSavingLabel('')
   }
@@ -85,6 +88,7 @@ function QuickAddModal({ isOpen, onClose, onCreated }) {
         categoryId: Number(categoryId),
         name: name.trim(),
         color,
+        isClean,
       })
     } catch (error) {
       console.error('Parça kaydedilemedi:', error)
@@ -168,6 +172,35 @@ function QuickAddModal({ isOpen, onClose, onCreated }) {
           <div className="mt-3">
             <ColorPicker value={color} onChange={setColor} />
           </div>
+        </div>
+
+        <div>
+          <label className={fieldLabel}>Şu an temiz mi?</label>
+          <div className="mt-3 flex gap-2.5">
+            {[
+              { value: true, label: 'Temiz' },
+              { value: false, label: 'Kirli' },
+            ].map((option) => (
+              <button
+                key={option.label}
+                type="button"
+                onClick={() => setIsClean(option.value)}
+                aria-pressed={isClean === option.value}
+                className={`rounded-full px-5 py-2 text-sm font-medium transition-colors duration-200 ${
+                  isClean === option.value
+                    ? 'bg-burgundy text-ivory'
+                    : 'border border-ink/15 text-ink/60 hover:border-dusty-rose hover:text-dusty-rose'
+                }`}
+              >
+                {option.label}
+              </button>
+            ))}
+          </div>
+          {!isClean && (
+            <p className="mt-2 text-xs text-ink/45">
+              Kirli parçalar gardırobunda görünür ama kombin önerisine katılmaz.
+            </p>
+          )}
         </div>
 
         {errorMessage && <p className="text-sm text-burgundy">{errorMessage}</p>}

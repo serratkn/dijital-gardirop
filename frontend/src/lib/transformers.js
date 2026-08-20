@@ -35,6 +35,7 @@ export function toClothingItem(row, categoryNames) {
     category: categoryNames.get(row.category_id) ?? 'Diğer',
     imageUrl: row.image_url,
     isFavorite: row.is_favorite,
+    isClean: row.is_clean,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
     imgHeight: pickMasonryHeight(row.id),

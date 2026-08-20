@@ -1,11 +1,20 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
+import { WashingMachine } from 'lucide-react'
 import { CATEGORY_ICONS } from '../lib/categoryIcons'
-import { logImageOutcome, resolveImageUrl, toggleClothingItemFavorite } from '../lib/api'
+import {
+  logImageOutcome,
+  resolveImageUrl,
+  toggleClothingItemCleanStatus,
+  toggleClothingItemFavorite,
+} from '../lib/api'
 
-function ClothingCard({ item, onFavoriteChange }) {
+function ClothingCard({ item, onFavoriteChange, onCleanChange }) {
   const [isFavorite, setIsFavorite] = useState(item.isFavorite ?? false)
+  // Alan gelmemişse (eski önbellek, kısmi yanıt) parça temiz sayılır.
+  const [isClean, setIsClean] = useState(item.isClean ?? true)
   const [isPending, setIsPending] = useState(false)
+  const [isCleanPending, setIsCleanPending] = useState(false)
   // Bozuk/silinmiş dosyada kırık resim ikonu yerine placeholder'a düşülür.
   const [imageFailed, setImageFailed] = useState(false)
   const CategoryIcon = CATEGORY_ICONS[item.category]
@@ -16,6 +25,10 @@ function ClothingCard({ item, onFavoriteChange }) {
   useEffect(() => {
     setIsFavorite(item.isFavorite ?? false)
   }, [item.isFavorite])
+
+  useEffect(() => {
+    setIsClean(item.isClean ?? true)
+  }, [item.isClean])
 
   const toggleFavorite = async (event) => {
     // Kart bir Link olduğu için tıklama yönlendirmeyi tetiklememeli.
@@ -44,6 +57,30 @@ function ClothingCard({ item, onFavoriteChange }) {
     }
   }
 
+  // Favori toggle'ıyla aynı desen: iyimser güncelleme, hata olursa geri alınır.
+  const toggleCleanStatus = async (event) => {
+    event.preventDefault()
+    event.stopPropagation()
+
+    if (isCleanPending) return
+
+    const previous = isClean
+
+    setIsClean(!previous)
+    setIsCleanPending(true)
+
+    try {
+      const updated = await toggleClothingItemCleanStatus(item.id)
+      setIsClean(updated.is_clean)
+      onCleanChange?.(item.id, updated.is_clean)
+    } catch (error) {
+      console.error('Temizlik durumu güncellenemedi:', error)
+      setIsClean(previous)
+    } finally {
+      setIsCleanPending(false)
+    }
+  }
+
   return (
     <Link
       to={`/kiyafet/${item.id}`}
@@ -64,6 +101,32 @@ function ClothingCard({ item, onFavoriteChange }) {
             className="h-full w-full object-cover"
           />
         )}
+        {/* Rozet yalnızca kirliyken görünür; temiz parça için etiket gürültüdür. */}
+        {!isClean && (
+          <span className="pointer-events-none absolute left-3 top-3 flex items-center gap-1 rounded-full border border-dusty-rose/40 bg-ivory/90 px-2.5 py-1 text-[10px] font-medium uppercase tracking-[0.1em] text-burgundy/80 backdrop-blur-sm">
+            <WashingMachine size={11} strokeWidth={1.75} />
+            Kirli
+          </span>
+        )}
+
+        {/* Toggle yalnızca hover'da çıkar: kalıcı gösterge zaten soldaki rozettir,
+            buton da sürekli dursaydı köşe kalabalıklaşırdı. Dokunmatikte durum
+            değiştirmek için detay sayfasındaki buton kullanılır (favori kalbi de
+            aynı sınırlamaya sahip). */}
+        <button
+          type="button"
+          onClick={toggleCleanStatus}
+          aria-label={isClean ? 'Kirli olarak işaretle' : 'Temiz olarak işaretle'}
+          aria-pressed={!isClean}
+          className="absolute right-12 top-3 flex h-8 w-8 items-center justify-center rounded-full bg-ivory/70 opacity-0 backdrop-blur-sm transition-opacity duration-200 group-hover:opacity-100"
+        >
+          <WashingMachine
+            size={15}
+            strokeWidth={1.75}
+            className={isClean ? 'text-dusty-rose' : 'text-burgundy'}
+          />
+        </button>
+
         <button
           type="button"
           onClick={toggleFavorite}

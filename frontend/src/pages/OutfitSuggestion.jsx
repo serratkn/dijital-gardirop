@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import PageHeader from '../components/ui/PageHeader'
 import FilterPills from '../components/ui/FilterPills'
 import EmptyState from '../components/ui/EmptyState'
@@ -16,8 +16,10 @@ const OCCASION_MAX_LENGTH = 50
 
 const pickRandom = (list) => list[Math.floor(Math.random() * list.length)]
 
-// Her kategoriden rastgele bir parça seçer; o kategoride hiç parça
+// Her kategoriden rastgele bir parça seçer; o kategoride seçilebilir parça
 // yoksa slot atlanır (kombin eksik parçayla da oluşabilir).
+// Kendisine YALNIZCA temiz parçalar verilir — filtreleme çağıranda yapılır ki
+// sayfa "hiç parça yok" ile "temiz parça yok" durumlarını ayırt edebilsin.
 const buildRandomOutfit = (items) =>
   OUTFIT_CATEGORIES.map((category) => {
     const pool = items.filter((item) => item.category === category)
@@ -75,9 +77,38 @@ function OutfitSuggestion() {
     }
   }, [])
 
+  // Kombin önerisi yalnızca temiz parçalardan kurulur. Kirli parçalar
+  // gardıropta görünür, sadece bu seçimin dışında kalır.
+  const cleanItems = useMemo(() => items.filter((item) => item.isClean !== false), [items])
+
+  // "Hiç parçan yok" ile "temiz parçan yok" ayrı mesajları hak eder:
+  // ilki gardırobu doldurmayı, ikincisi çamaşır yıkamayı gerektirir.
+  const dirtyOnlyCategories = useMemo(
+    () =>
+      OUTFIT_CATEGORIES.filter(
+        (category) =>
+          items.some((item) => item.category === category) &&
+          !cleanItems.some((item) => item.category === category),
+      ),
+    [items, cleanItems],
+  )
+
+  const emptyCategories = useMemo(
+    () => OUTFIT_CATEGORIES.filter((category) => !items.some((item) => item.category === category)),
+    [items],
+  )
+
+  // Karttan temizlik durumu değiştirilirse havuz da güncellenmeli ki
+  // "Başka Öneri Göster" artık kirli olan parçayı seçmesin.
+  const handleCleanChange = useCallback((itemId, isClean) => {
+    setItems((previous) =>
+      previous.map((item) => (item.id === itemId ? { ...item, isClean } : item)),
+    )
+  }, [])
+
   const startSuggestion = (occasion) => {
     setSelectedOccasion(occasion)
-    setSuggestionItems(buildRandomOutfit(items))
+    setSuggestionItems(buildRandomOutfit(cleanItems))
     setIsSaved(false)
     setSaveError('')
   }
@@ -90,11 +121,11 @@ function OutfitSuggestion() {
 
   const showAnother = () => {
     setSuggestionItems((previous) => {
-      let next = buildRandomOutfit(items)
+      let next = buildRandomOutfit(cleanItems)
       let attempts = 0
       // Aynı kombinin üst üste gelmemesi için birkaç kez yeniden dener.
       while (attempts < 5 && isSameOutfit(next, previous)) {
-        next = buildRandomOutfit(items)
+        next = buildRandomOutfit(cleanItems)
         attempts += 1
       }
       return next
@@ -199,13 +230,35 @@ function OutfitSuggestion() {
                 </p>
 
                 <div className="animate-fade-in">
-                  <div className="mt-6 grid grid-cols-2 gap-6 sm:grid-cols-4">
-                    {suggestionItems.map((item) => (
-                      <ClothingCard key={item.id} item={item} />
-                    ))}
-                  </div>
+                  {suggestionItems.length === 0 ? (
+                    <div className="mt-6 rounded-2xl border border-ink/10 bg-warm-gray px-6 py-10 text-center">
+                      <p className="font-display text-xl italic text-ink">
+                        Şu an temiz parçan yok.
+                      </p>
+                      <p className="mt-2 text-sm text-ink/50">
+                        Gardırobundaki parçaları yıkadıkça "Temiz" olarak işaretle,
+                        kombin önerisi onları hemen kullansın.
+                      </p>
+                    </div>
+                  ) : (
+                    <div className="mt-6 grid grid-cols-2 gap-6 sm:grid-cols-4">
+                      {suggestionItems.map((item) => (
+                        <ClothingCard key={item.id} item={item} onCleanChange={handleCleanChange} />
+                      ))}
+                    </div>
+                  )}
 
-                  {suggestionItems.length < OUTFIT_CATEGORIES.length && (
+                  {dirtyOnlyCategories.length > 0 && (
+                    <ul className="mt-4 space-y-1">
+                      {dirtyOnlyCategories.map((category) => (
+                        <li key={category} className="text-sm text-ink/50">
+                          Temiz {category} parçan yok — o kategori boş kaldı.
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+
+                  {emptyCategories.length > 0 && (
                     <p className="mt-4 text-sm text-ink/50">
                       Bazı kategorilerde parçan olmadığı için kombin eksik olabilir.
                     </p>
@@ -215,7 +268,11 @@ function OutfitSuggestion() {
                     <Button variant="outline" onClick={showAnother}>
                       Başka Öneri Göster
                     </Button>
-                    <Button variant="rose" onClick={handleSave} disabled={isSaving || isSaved}>
+                    <Button
+                      variant="rose"
+                      onClick={handleSave}
+                      disabled={isSaving || isSaved || suggestionItems.length === 0}
+                    >
                       {saveButtonLabel}
                     </Button>
                   </div>

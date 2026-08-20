@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
+import { WashingMachine } from 'lucide-react'
 import Button from '../components/ui/Button'
 import Modal from '../components/ui/Modal'
 import PhotoPicker from '../components/ui/PhotoPicker'
@@ -11,6 +12,7 @@ import {
   fetchOutfits,
   logImageOutcome,
   resolveImageUrl,
+  toggleClothingItemCleanStatus,
   toggleClothingItemFavorite,
   uploadClothingItemImage,
 } from '../lib/api'
@@ -29,6 +31,8 @@ function ClothingDetail() {
   const [isLoading, setIsLoading] = useState(true)
   const [isFavorite, setIsFavorite] = useState(false)
   const [isFavoritePending, setIsFavoritePending] = useState(false)
+  const [isClean, setIsClean] = useState(true)
+  const [isCleanPending, setIsCleanPending] = useState(false)
   const [isConfirmOpen, setIsConfirmOpen] = useState(false)
   const [isDeleting, setIsDeleting] = useState(false)
   const [actionError, setActionError] = useState('')
@@ -56,6 +60,7 @@ function ClothingDetail() {
         const loadedItem = toClothingItem(itemRow, toCategoryNameMap(categoryRows))
         setItem(loadedItem)
         setIsFavorite(loadedItem.isFavorite)
+        setIsClean(loadedItem.isClean ?? true)
       } catch (error) {
         if (isStale) return
         console.error('Kıyafet bilgisi alınamadı:', error)
@@ -121,6 +126,27 @@ function ClothingDetail() {
       setActionError(error.message)
     } finally {
       setIsFavoritePending(false)
+    }
+  }
+
+  const handleToggleClean = async () => {
+    if (isCleanPending) return
+
+    const previous = isClean
+
+    setIsClean(!previous)
+    setIsCleanPending(true)
+    setActionError('')
+
+    try {
+      const updated = await toggleClothingItemCleanStatus(id)
+      setIsClean(updated.is_clean)
+    } catch (error) {
+      console.error('Temizlik durumu güncellenemedi:', error)
+      setIsClean(previous)
+      setActionError(error.message)
+    } finally {
+      setIsCleanPending(false)
     }
   }
 
@@ -301,9 +327,17 @@ function ClothingDetail() {
           </div>
 
           <div>
-            <p className="text-[12px] font-medium uppercase tracking-[0.15em] text-dusty-rose">
-              {item.category}
-            </p>
+            <div className="flex flex-wrap items-center gap-3">
+              <p className="text-[12px] font-medium uppercase tracking-[0.15em] text-dusty-rose">
+                {item.category}
+              </p>
+              {!isClean && (
+                <span className="inline-flex items-center gap-1 rounded-full border border-dusty-rose/40 bg-white px-2.5 py-1 text-[10px] font-medium uppercase tracking-[0.1em] text-burgundy/80">
+                  <WashingMachine size={11} strokeWidth={1.75} />
+                  Kirli
+                </span>
+              )}
+            </div>
             <h1 className="mt-3 font-display text-4xl italic text-ink sm:text-5xl">{item.name}</h1>
 
             {item.color && (
@@ -384,6 +418,20 @@ function ClothingDetail() {
                   />
                 </svg>
                 {isFavorite ? 'Favorilerde' : 'Favorilere Ekle'}
+              </Button>
+
+              <Button
+                variant="outline"
+                onClick={handleToggleClean}
+                disabled={isCleanPending}
+                className="ml-3 inline-flex items-center gap-2"
+              >
+                <WashingMachine
+                  size={16}
+                  strokeWidth={1.75}
+                  className={isClean ? 'text-dusty-rose' : 'text-burgundy'}
+                />
+                {isClean ? 'Kirliye Taşı' : 'Temiz Olarak İşaretle'}
               </Button>
             </div>
 
