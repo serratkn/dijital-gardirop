@@ -34,7 +34,7 @@ function OutfitCard({ outfit, categoryNames, onToggleFavorite, onRequestDelete }
     <article className="rounded-2xl border border-ink/10 bg-surface p-6 shadow-[var(--dg-shadow-card)]">
       <div className="flex items-start justify-between gap-4">
         <div>
-          <p className="text-[12px] font-medium uppercase tracking-[0.15em] text-dusty-rose">
+          <p className="text-[12px] font-medium uppercase tracking-[0.15em] text-accent-ink">
             {outfit.occasion || 'Kombin'}
           </p>
           <p className="mt-1 text-xs text-ink/45">

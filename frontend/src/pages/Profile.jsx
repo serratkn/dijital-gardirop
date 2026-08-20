@@ -94,12 +94,12 @@ function Profile({ onLoggedOut }) {
           <div className="rounded-2xl border border-dusty-rose/40 bg-dusty-rose/10 p-6">
             <div className="flex items-start justify-between gap-4">
               <div>
-                <p className="text-xs font-medium uppercase tracking-[0.15em] text-dusty-rose">
+                <p className="text-xs font-medium uppercase tracking-[0.15em] text-accent-ink">
                   Premium Abonelik
                 </p>
                 <p className="mt-1.5 text-sm text-ink/60">Ücretsiz Plan</p>
               </div>
-              <Crown size={22} strokeWidth={1.5} className="text-dusty-rose" />
+              <Crown size={22} strokeWidth={1.5} className="text-accent-ink" />
             </div>
             <Button variant="primary" className="mt-5 w-full">
               Premium'a Geç

@@ -927,9 +927,9 @@ Token'lar `src/index.css` içinde Tailwind v4'ün `@theme` bloğunda tanımlıd�
 
 - Renkler (**rol adı taşırlar, ham renk adı değil**): `ivory` (sayfa zemini),
   `surface` (yükseltilmiş yüzey — kartlar, form alanları, listeler), `ink` (metin),
-  `warm-gray` (yer tutucu / iskelet), `dusty-rose` (yumuşak vurgu),
-  `burgundy` (birincil/aktif), `on-primary` (**dolu** burgundy/dusty-rose yüzeyin
-  üstündeki metin)
+  `warm-gray` (yer tutucu / iskelet), `dusty-rose` (yumuşak vurgu — **yalnızca
+  dekoratif**), `accent-ink` (aynı vurgunun **metin/ikon** tonu), `burgundy`
+  (birincil/aktif), `on-primary` (**dolu** burgundy/dusty-rose yüzeyin üstündeki metin)
 - Fontlar: `font-display` (Playfair Display — başlıklar, **daima italik**),
   `font-body` (Lora), `font-sans` (Inter — arayüz metni)
 - Animasyonlar: `animate-fade-in`, `animate-page-fade`
@@ -939,6 +939,13 @@ Token'lar `src/index.css` içinde Tailwind v4'ün `@theme` bloğunda tanımlıd�
 **`bg-white` KULLANMAYIN** — kart yüzeyi için `bg-surface` vardır. Aynı şekilde dolu bir
 burgundy/dusty-rose zeminin üstündeki metin `text-ivory` değil `text-on-primary` olmalıdır.
 İkisi de karanlık modda ters dönerdi.
+
+**`text-dusty-rose` KULLANMAYIN — metin ve ikon için `text-accent-ink` vardır.**
+`dusty-rose` (`#c9a0a0`) açık zeminde 2.11:1 verir; WCAG AA'nın (4.5:1) çok altında.
+İkisi **aynı vurgunun iki tonudur**: `dusty-rose` çizgi/kenarlık/dolgu gibi dekoratif
+kullanımlar için (kontrast kuralına tabi değil), `accent-ink` (`#995656`) okunması
+gereken her şey için. Karanlık modda ikisi **aynı değeri alır** (`#d9b3b3`), çünkü koyu
+zeminde açılmış rose zaten 9.28:1 verir.
 
 ### Karanlık mod
 
@@ -958,9 +965,10 @@ Vurgu renkleri koyu zeminde **açılır** (`burgundy` → `#cf8e8e`) çünkü `#
 rengi olarak okunmazdı (1.7:1); dolayısıyla karanlık modda vurgu ile üstündeki metnin
 ilişkisi **tersine döner** (açık dolgu + koyu `on-primary`).
 
-Ölçülen kontrastlar karanlık modda açık modun **altına düşmez** — her sayfada en düşük
-değer ≥ 6.64:1 (açık modda bazı sayfalarda 2.11:1). Sayı tablosu `index.css` içindedir;
-yeni renk eklerken bu parite korunmalıdır.
+Ölçülen kontrastlar karanlık modda açık modun **altına düşmez**. Sayı tablosu
+`index.css` içindedir; yeni renk eklerken bu parite korunmalıdır.
+**Her iki tema da artık WCAG AA geçer** (bkz. 2026-08-20 `accent-ink` kaydı):
+sayfa bazında en düşük değer açık modda 4.97:1, karanlık modda 6.64:1.
 
 Bilmeden bozulabilecek üç nokta:
 
@@ -1010,6 +1018,49 @@ fotoğraf sorunu teyit edildikten sonra üç yerden de kaldırılabilir.
 
 > Bundan sonraki her çalışma buraya tarihiyle işlenir: eklenen özellikler, düzeltilen
 > hatalar, alınan mimari kararlar. En yeni kayıt en üstte.
+
+### 2026-08-20 — Açık modda vurgu metinleri WCAG AA'ya çıkarıldı (`accent-ink`)
+- **Sorun:** `text-dusty-rose` (`#c9a0a0`) ile yazılan mikro etiketler açık zeminde
+  okunmuyordu: beyaz kartta **2.33:1**, ivory sayfada **2.11:1** — AA eşiği 4.5:1.
+  Etkilenenler: "Kombin Önerisi" eyebrow'ları, kart kategori etiketleri, kombin durum
+  etiketleri, "Premium Abonelik" ve dusty-rose ikonlar.
+- **Token KOYULAŞTIRILMADI, İKİYE AYRILDI.** `--color-dusty-rose` tek başına
+  koyulaştırılsaydı sayfa başlıklarının altındaki `h-px w-16` ince çizgi, kart hover
+  kenarlıkları ve `border-dusty-rose/40` çerçeveler de koyulaşırdı — yani genel tasarım
+  değişirdi. Bunun yerine **`--color-accent-ink`** eklendi: aynı vurgunun *metin* tonu.
+  `dusty-rose` dekoratif (çizgi/kenarlık/dolgu, 6 dolgu + 24 kenarlık) **aynen kaldı**,
+  yalnızca `text-dusty-rose` → `text-accent-ink` değişti (19 dosya).
+  Bu, `surface` ve `on-primary` ile aynı desendir: rol ayrışıyorsa token de ayrışır.
+- **Renk ölçümle seçildi: `#995656`.** Dusty-rose'un **hue'su (0°) ve doygunluğu
+  (%28, orijinal %27.5) korundu**, yalnızca açıklık %71 → %47'ye indirildi — marka
+  hissi hue+doygunlukta yaşar, okunabilirlik açıklıkta. Adaylar AA geçen en **açık**
+  (yani rose'a en yakın) ton olacak şekilde tarandı.
+- **Belirleyici zemin beyaz değil, ivory'dir.** Metin koyu olduğu için ivory (`#f7f3ed`)
+  beyazdan daha düşük kontrast verir. Üçüncü ve en dar zemin ise Profil'deki Premium
+  kartıdır (`bg-dusty-rose/10` üzerine yazı) — token seçilirken üçü birden denetlendi.
+- **Ölçülen sonuç (açık mod):** ivory 4.97:1, beyaz kart 5.50:1, Premium kartı 4.97:1.
+  Sayfa bazında en düşük değer **2.11 → 4.97**'ye çıktı.
+- **Karanlık mod bu değişiklikten HİÇ etkilenmez.** `.dark` içinde `accent-ink`,
+  `dusty-rose` ile aynı değeri (`#d9b3b3`) alır: koyu zeminde açılmış rose zaten
+  9.28:1 veriyordu, ayrı bir tona gerek yoktu.
+- **Doğrulama:** kontrast denetimi eşiği gerçek **WCAG AA**'ya sıkılaştırıldı (normal
+  metin 4.5:1, büyük metin 3.0:1) ve 9 sayfa × 2 tema yeniden gezildi:
+  **40/40 — her sayfa, her iki tema AA geçiyor** (açık min 4.97, karanlık min 6.64).
+  Öncesinde aynı eşikle 4 sayfa kırmızıydı. 1280px ekran görüntüleriyle etiketlerin
+  okunur, dekoratif çizginin ise **değişmemiş** olduğu görsel olarak da doğrulandı.
+- Regresyon: karanlık mod akış testleri 36/36, istatistik kartı 37/37,
+  `test-stats` 60/60, `test-all-endpoints` 72/72, `test-auth` 48/48,
+  `test-item-outfits` 27/27, `test-clean-status` 26/26, lint + build temiz.
+- **Kapsam dışı bırakılan ilgili nokta:** `Button` `rose` varyantının **hover** hâli
+  (`hover:bg-dusty-rose` + `text-on-primary`) açık modda **2.11:1**'dir. Bu bir etiket
+  değil buton dolgusudur ve düzeltmek butonun görünümünü değiştirir; tek kullanım yeri
+  Kombin Öner'deki "Bu Kombini Kaydet"tir. Düzeltilecekse `hover:bg-accent-ink`
+  yeterlidir (≈4.97:1). Statik denetim hover durumlarını ölçmez, bu yüzden 40/40
+  sonucu bu satırı kapsamaz.
+- **Test tuzağı:** "tekrar açığa dönüyor" kontrolü bir kez haksız yere kırmızı yandı —
+  ölçüm 150ms'de yapılıyordu ama tema geçişi **300ms**. Okunan renk animasyonun ara
+  karesiydi (`rgb(228,224,218)`), ürün hatası değil. Tema rengi ölçen testler geçiş
+  süresinden **sonra** bakmalıdır.
 
 ### 2026-08-20 — Karanlık mod (sınıf stratejisi + rol tabanlı token'lar)
 - **Yaklaşım: `dark:` varyantı serpiştirmek YERİNE token değerlerini değiştirmek.**
@@ -1077,13 +1128,12 @@ fotoğraf sorunu teyit edildikten sonra üç yerden de kaldırılabilir.
   - Regresyon: `test-stats` 60/60, `test-all-endpoints` 72/72, `test-auth` 48/48,
     `test-item-outfits` 27/27, `test-clean-status` 26/26, istatistik kartı tarayıcı
     testi 37/37, lint + build temiz.
-- **Denetimin ortaya çıkardığı MEVCUT sorun (bu çalışmayla ilgisiz, düzeltilmedi):**
-  açık modda `text-dusty-rose` mikro etiketler beyaz kart üzerinde **2.33:1**
-  ("Kombin Önerisi" eyebrow'ları, kart kategori etiketleri, "Premium Abonelik" 2.11:1).
-  Bu, karanlık mod öncesinde de böyleydi — `bg-white` → `bg-surface` açık modda birebir
-  aynı `#ffffff` değeridir. Karanlık modda aynı etiketler 9.28:1'e çıkar. Marka
-  görünümünü tek taraflı değiştirmemek için **dokunulmadı**; düzeltilecekse
-  `dusty-rose` koyulaştırılmalı ya da bu etiketler `burgundy`ye alınmalıdır.
+- **Denetimin ortaya çıkardığı MEVCUT sorun:** açık modda `text-dusty-rose` mikro
+  etiketler beyaz kart üzerinde **2.33:1** ("Kombin Önerisi" eyebrow'ları, kart kategori
+  etiketleri, "Premium Abonelik" 2.11:1). Bu, karanlık mod öncesinde de böyleydi —
+  `bg-white` → `bg-surface` açık modda birebir aynı `#ffffff` değeridir. O sırada marka
+  görünümünü tek taraflı değiştirmemek için dokunulmadı; **bir sonraki kayıtta
+  (`accent-ink`) düzeltildi.**
 
 ### 2026-08-20 — Profil: "Gardırop İstatistiklerim" kartı (yeni `Stats*` katmanı)
 - **Yeni uç `GET /api/users/:id/stats`** — kullanıcının kendi verisinden türetilen özet:

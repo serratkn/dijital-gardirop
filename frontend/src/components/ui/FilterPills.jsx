@@ -13,7 +13,7 @@ function FilterPills({ options, active, onChange, icons, counts }) {
             className={`inline-flex items-center gap-1.5 rounded-full px-5 py-2 text-sm font-medium transition-colors duration-200 ${
               isActive
                 ? 'bg-burgundy text-on-primary'
-                : 'border border-ink/15 text-ink/60 hover:border-dusty-rose hover:text-dusty-rose'
+                : 'border border-ink/15 text-ink/60 hover:border-dusty-rose hover:text-accent-ink'
             }`}
           >
             {Icon && <Icon size={16} strokeWidth={1.75} />}

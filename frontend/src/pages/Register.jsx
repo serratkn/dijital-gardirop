@@ -66,7 +66,7 @@ function Register() {
       footer={
         <>
           Zaten hesabın var mı?{' '}
-          <Link to="/giris" className="text-burgundy underline transition-colors hover:text-dusty-rose">
+          <Link to="/giris" className="text-burgundy underline transition-colors hover:text-accent-ink">
             Giriş yap
           </Link>
         </>

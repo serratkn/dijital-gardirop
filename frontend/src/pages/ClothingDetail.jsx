@@ -222,7 +222,7 @@ function ClothingDetail() {
           <p className="font-display text-2xl italic text-ink">Kıyafet bulunamadı.</p>
           <Link
             to="/gardirop"
-            className="mt-6 inline-block text-sm text-ink/50 transition-colors hover:text-dusty-rose"
+            className="mt-6 inline-block text-sm text-ink/50 transition-colors hover:text-accent-ink"
           >
             Gardıroba dön
           </Link>
@@ -237,7 +237,7 @@ function ClothingDetail() {
         <div className="flex flex-wrap items-center justify-between gap-4">
           <Link
             to="/gardirop"
-            className="inline-flex items-center gap-2 text-sm text-ink/60 transition-colors hover:text-dusty-rose"
+            className="inline-flex items-center gap-2 text-sm text-ink/60 transition-colors hover:text-accent-ink"
           >
             <svg viewBox="0 0 24 24" strokeWidth="1.5" className="h-4 w-4 fill-none stroke-current">
               <path d="M15 19l-7-7 7-7" strokeLinecap="round" strokeLinejoin="round" />
@@ -246,13 +246,13 @@ function ClothingDetail() {
           </Link>
 
           <nav className="flex items-center gap-1.5 text-xs text-ink/40">
-            <Link to="/gardirop" className="transition-colors hover:text-dusty-rose">
+            <Link to="/gardirop" className="transition-colors hover:text-accent-ink">
               Gardırop
             </Link>
             <span className="text-ink/25">/</span>
             <Link
               to={`/gardirop?kategori=${encodeURIComponent(item.category)}`}
-              className="transition-colors hover:text-dusty-rose"
+              className="transition-colors hover:text-accent-ink"
             >
               {item.category}
             </Link>
@@ -294,7 +294,7 @@ function ClothingDetail() {
                     type="button"
                     onClick={() => setIsPhotoEditing(false)}
                     disabled={isPhotoBusy}
-                    className="mt-3 text-sm text-ink/50 underline transition-colors hover:text-dusty-rose disabled:opacity-50"
+                    className="mt-3 text-sm text-ink/50 underline transition-colors hover:text-accent-ink disabled:opacity-50"
                   >
                     Vazgeç
                   </button>
@@ -308,7 +308,7 @@ function ClothingDetail() {
                   type="button"
                   onClick={() => setIsPhotoEditing(true)}
                   disabled={isPhotoBusy}
-                  className="text-sm text-ink/60 underline transition-colors hover:text-dusty-rose disabled:opacity-50"
+                  className="text-sm text-ink/60 underline transition-colors hover:text-accent-ink disabled:opacity-50"
                 >
                   {item.imageUrl ? 'Fotoğrafı Değiştir' : 'Fotoğraf Ekle'}
                 </button>
@@ -328,7 +328,7 @@ function ClothingDetail() {
 
           <div>
             <div className="flex flex-wrap items-center gap-3">
-              <p className="text-[12px] font-medium uppercase tracking-[0.15em] text-dusty-rose">
+              <p className="text-[12px] font-medium uppercase tracking-[0.15em] text-accent-ink">
                 {item.category}
               </p>
               {!isClean && (
@@ -429,7 +429,7 @@ function ClothingDetail() {
                 <WashingMachine
                   size={16}
                   strokeWidth={1.75}
-                  className={isClean ? 'text-dusty-rose' : 'text-burgundy'}
+                  className={isClean ? 'text-accent-ink' : 'text-burgundy'}
                 />
                 {isClean ? 'Kirliye Taşı' : 'Temiz Olarak İşaretle'}
               </Button>

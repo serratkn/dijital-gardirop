@@ -79,7 +79,7 @@ function PhotoPicker({ file, previewUrl, onSelect, onClear, disabled }) {
             type="button"
             disabled={disabled}
             onClick={() => handleNativePick('camera')}
-            className="flex h-32 flex-col items-center justify-center gap-2 rounded-2xl border border-dashed border-ink/20 bg-warm-gray text-sm text-ink/60 transition-colors hover:border-dusty-rose hover:text-dusty-rose disabled:opacity-50"
+            className="flex h-32 flex-col items-center justify-center gap-2 rounded-2xl border border-dashed border-ink/20 bg-warm-gray text-sm text-ink/60 transition-colors hover:border-dusty-rose hover:text-accent-ink disabled:opacity-50"
           >
             <Camera size={22} strokeWidth={1.5} />
             Fotoğraf Çek
@@ -88,7 +88,7 @@ function PhotoPicker({ file, previewUrl, onSelect, onClear, disabled }) {
             type="button"
             disabled={disabled}
             onClick={() => handleNativePick('gallery')}
-            className="flex h-32 flex-col items-center justify-center gap-2 rounded-2xl border border-dashed border-ink/20 bg-warm-gray text-sm text-ink/60 transition-colors hover:border-dusty-rose hover:text-dusty-rose disabled:opacity-50"
+            className="flex h-32 flex-col items-center justify-center gap-2 rounded-2xl border border-dashed border-ink/20 bg-warm-gray text-sm text-ink/60 transition-colors hover:border-dusty-rose hover:text-accent-ink disabled:opacity-50"
           >
             <ImageIcon size={22} strokeWidth={1.5} />
             Galeriden Seç
@@ -107,7 +107,7 @@ function PhotoPicker({ file, previewUrl, onSelect, onClear, disabled }) {
             type="button"
             disabled={disabled}
             onClick={() => inputRef.current?.click()}
-            className="flex h-36 w-full flex-col items-center justify-center gap-2 rounded-2xl border border-dashed border-ink/20 bg-warm-gray text-sm text-ink/60 transition-colors hover:border-dusty-rose hover:text-dusty-rose disabled:opacity-50"
+            className="flex h-36 w-full flex-col items-center justify-center gap-2 rounded-2xl border border-dashed border-ink/20 bg-warm-gray text-sm text-ink/60 transition-colors hover:border-dusty-rose hover:text-accent-ink disabled:opacity-50"
           >
             <ImageIcon size={24} strokeWidth={1.5} />
             Fotoğraf Yükle

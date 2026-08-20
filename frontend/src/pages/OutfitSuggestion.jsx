@@ -319,7 +319,7 @@ function OutfitSuggestion() {
                       şehri olmayan ya da havası alınamayan kullanıcı hiçbir ek metin görmez. */}
                   {weather && suggestionItems.length > 0 && (
                     <p className="mt-4 flex items-center gap-1.5 text-sm text-ink/50">
-                      <CloudSun size={15} strokeWidth={1.75} className="text-dusty-rose" />
+                      <CloudSun size={15} strokeWidth={1.75} className="text-accent-ink" />
                       {cityLocative(weather.cityValue)} {weather.temperature}°C,{' '}
                       {weather.status} hava için önerildi.
                     </p>

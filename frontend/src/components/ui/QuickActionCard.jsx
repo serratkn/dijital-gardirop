@@ -14,7 +14,7 @@ function QuickActionCard({ to, state, eyebrow, title, subtitle, icon: Icon }) {
       </div>
       <div className="space-y-2 p-6">
         {eyebrow && (
-          <p className="text-[12px] font-medium uppercase tracking-[0.15em] text-dusty-rose">
+          <p className="text-[12px] font-medium uppercase tracking-[0.15em] text-accent-ink">
             {eyebrow}
           </p>
         )}

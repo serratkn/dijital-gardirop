@@ -21,7 +21,7 @@ function QuizStep({
         <button
           type="button"
           onClick={onBack}
-          className="inline-flex items-center gap-1 text-sm text-ink/40 transition-colors hover:text-dusty-rose"
+          className="inline-flex items-center gap-1 text-sm text-ink/40 transition-colors hover:text-accent-ink"
         >
           <ChevronLeft size={16} strokeWidth={1.75} />
           Geri

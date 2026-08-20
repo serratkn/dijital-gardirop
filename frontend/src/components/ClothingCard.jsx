@@ -123,7 +123,7 @@ function ClothingCard({ item, onFavoriteChange, onCleanChange }) {
           <WashingMachine
             size={15}
             strokeWidth={1.75}
-            className={isClean ? 'text-dusty-rose' : 'text-burgundy'}
+            className={isClean ? 'text-accent-ink' : 'text-burgundy'}
           />
         </button>
 
@@ -149,7 +149,7 @@ function ClothingCard({ item, onFavoriteChange, onCleanChange }) {
         </button>
       </div>
       <div className="space-y-2 p-5">
-        <p className="flex items-center gap-1 text-[12px] font-medium uppercase tracking-[0.15em] text-dusty-rose">
+        <p className="flex items-center gap-1 text-[12px] font-medium uppercase tracking-[0.15em] text-accent-ink">
           {CategoryIcon && <CategoryIcon size={12} strokeWidth={1.75} />}
           {item.category}
         </p>

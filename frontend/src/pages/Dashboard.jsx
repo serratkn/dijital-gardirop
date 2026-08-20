@@ -169,7 +169,7 @@ function Dashboard() {
             <h2 className="font-display text-2xl italic text-ink">Son Eklenenler</h2>
             <Link
               to="/gardirop"
-              className="text-sm text-ink/50 transition-colors hover:text-dusty-rose"
+              className="text-sm text-ink/50 transition-colors hover:text-accent-ink"
             >
               Tümünü Gör
             </Link>
@@ -190,7 +190,7 @@ function Dashboard() {
               <p className="text-sm text-ink/50">Gardırobunda henüz parça yok.</p>
               <Link
                 to="/gardirop"
-                className="text-sm text-burgundy transition-colors hover:text-dusty-rose"
+                className="text-sm text-burgundy transition-colors hover:text-accent-ink"
               >
                 İlk parçanı ekle
               </Link>

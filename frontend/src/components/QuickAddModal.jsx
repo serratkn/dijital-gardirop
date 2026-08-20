@@ -211,7 +211,7 @@ function QuickAddModal({ isOpen, onClose, onCreated }) {
                 className={`rounded-full px-5 py-2 text-sm font-medium transition-colors duration-200 ${
                   isClean === option.value
                     ? 'bg-burgundy text-on-primary'
-                    : 'border border-ink/15 text-ink/60 hover:border-dusty-rose hover:text-dusty-rose'
+                    : 'border border-ink/15 text-ink/60 hover:border-dusty-rose hover:text-accent-ink'
                 }`}
               >
                 {option.label}

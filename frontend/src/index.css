@@ -12,7 +12,8 @@
      surface    → yükseltilmiş yüzey (kartlar, form alanları, listeler)
      warm-gray  → yer tutucu / iskelet / pasif yüzey
      ink        → metin
-     dusty-rose → yumuşak vurgu
+     dusty-rose → yumuşak vurgu — YALNIZCA dekoratif (çizgi, kenarlık, dolgu)
+     accent-ink → aynı vurgunun METİN/İKON tonu; okunabilirlik için koyulaştırılmış
      burgundy   → birincil / aktif
      on-primary → burgundy veya dusty-rose ile DOLDURULMUŞ bir yüzeyin üstündeki metin
 
@@ -33,6 +34,7 @@
   --color-ink: #1c1a17;
   --color-warm-gray: #e8e3db;
   --color-dusty-rose: #c9a0a0;
+  --color-accent-ink: #995656;
   --color-burgundy: #7a3b3b;
   --color-on-primary: #f7f3ed;
 
@@ -53,7 +55,8 @@
      ink/zemin        15.95  (açık: 15.71)
      ink/50 zemin      4.88  (açık:  3.24)
      ink/40 zemin      3.59  (açık:  2.47)
-     dusty-rose/zemin  9.28  (açık:  2.11)
+     dusty-rose/zemin  9.28  (açık:  2.11 — dekoratif, metin için accent-ink var)
+     accent-ink/zemin  9.28  (açık:  4.97)
      burgundy/zemin    6.64  (açık:  7.55)
      buton metni       6.64  (açık:  7.55)
    Hiçbir ölçüm açık modun altına düşmez. Yeni bir renk eklerken bu paritenin
@@ -64,6 +67,10 @@
   --color-ink: #f7f3ed;
   --color-warm-gray: #37302a;
   --color-dusty-rose: #d9b3b3;
+  /* Karanlıkta ayrı bir tona GEREK YOK: açılmış dusty-rose koyu zeminde
+     zaten 9.28:1 veriyor. accent-ink burada dusty-rose ile aynı değeri alır,
+     yani karanlık mod bu düzeltmeden hiç etkilenmez. */
+  --color-accent-ink: #d9b3b3;
   --color-burgundy: #cf8e8e;
   --color-on-primary: #1c1815;
 }

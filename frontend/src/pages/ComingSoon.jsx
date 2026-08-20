@@ -8,7 +8,7 @@ function ComingSoon({ title }) {
       <div className="mx-auto max-w-md px-6 pt-14 sm:px-8">
         <Link
           to="/profil"
-          className="inline-flex items-center gap-1 text-sm text-ink/50 transition-colors hover:text-dusty-rose"
+          className="inline-flex items-center gap-1 text-sm text-ink/50 transition-colors hover:text-accent-ink"
         >
           <ChevronLeft size={16} strokeWidth={1.75} />
           Profile Dön

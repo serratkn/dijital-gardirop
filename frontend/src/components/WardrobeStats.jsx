@@ -44,7 +44,7 @@ function DetailRow({ icon: Icon, swatch, label, children }) {
   return (
     <div className="flex items-center gap-3.5">
       <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-ink/10 bg-warm-gray">
-        {swatch ?? <Icon size={15} strokeWidth={1.5} className="text-dusty-rose" />}
+        {swatch ?? <Icon size={15} strokeWidth={1.5} className="text-accent-ink" />}
       </span>
       <div className="min-w-0">
         <p className="text-[0.65rem] uppercase tracking-[0.15em] text-ink/40">{label}</p>
@@ -144,7 +144,7 @@ function WardrobeStats() {
             </p>
             <Link
               to="/gardirop"
-              className="text-sm text-burgundy transition-colors hover:text-dusty-rose"
+              className="text-sm text-burgundy transition-colors hover:text-accent-ink"
             >
               İlk parçanı ekle
             </Link>

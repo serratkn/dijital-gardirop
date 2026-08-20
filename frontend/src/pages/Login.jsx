@@ -50,7 +50,7 @@ function Login() {
       footer={
         <>
           Hesabın yok mu?{' '}
-          <Link to="/kayit" className="text-burgundy underline transition-colors hover:text-dusty-rose">
+          <Link to="/kayit" className="text-burgundy underline transition-colors hover:text-accent-ink">
             Kayıt ol
           </Link>
         </>
