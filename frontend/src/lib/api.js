@@ -225,8 +225,13 @@ export function deleteClothingItem(id) {
   return request(`/clothing-items/${encodeURIComponent(id)}`, { method: 'DELETE' })
 }
 
-export function fetchOutfits() {
-  return request('/outfits')
+// clothingItemId verilirse yalnızca o parçanın geçtiği kombinler döner
+// (Kıyafet Detay sayfasındaki "Bu Kıyafetle Yapılan Kombinler" bölümü).
+export function fetchOutfits(clothingItemId) {
+  const query = clothingItemId
+    ? `?clothingItemId=${encodeURIComponent(clothingItemId)}`
+    : ''
+  return request(`/outfits${query}`)
 }
 
 export function createOutfit(payload) {

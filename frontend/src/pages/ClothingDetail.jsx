@@ -8,12 +8,19 @@ import {
   deleteClothingItemImage,
   fetchCategories,
   fetchClothingItem,
+  fetchOutfits,
   logImageOutcome,
   resolveImageUrl,
   toggleClothingItemFavorite,
   uploadClothingItemImage,
 } from '../lib/api'
 import { toCategoryNameMap, toClothingItem } from '../lib/transformers'
+
+const dateFormatter = new Intl.DateTimeFormat('tr-TR', {
+  day: 'numeric',
+  month: 'long',
+  year: 'numeric',
+})
 
 function ClothingDetail() {
   const { id } = useParams()
@@ -28,6 +35,9 @@ function ClothingDetail() {
   const [isPhotoEditing, setIsPhotoEditing] = useState(false)
   const [isPhotoBusy, setIsPhotoBusy] = useState(false)
   const [imageFailed, setImageFailed] = useState(false)
+  const [outfits, setOutfits] = useState([])
+  const [isOutfitsLoading, setIsOutfitsLoading] = useState(true)
+  const [hasOutfitsError, setHasOutfitsError] = useState(false)
 
   useEffect(() => {
     let isStale = false
@@ -56,6 +66,36 @@ function ClothingDetail() {
     }
 
     loadItem()
+
+    return () => {
+      isStale = true
+    }
+  }, [id])
+
+  // Kombinler ayrı bir efektte çekilir: bu istek başarısız olursa sayfanın
+  // tamamı değil yalnızca bu bölüm hata durumuna düşer.
+  useEffect(() => {
+    let isStale = false
+
+    async function loadOutfits() {
+      setIsOutfitsLoading(true)
+      setHasOutfitsError(false)
+
+      try {
+        const outfitRows = await fetchOutfits(id)
+        if (isStale) return
+        setOutfits(outfitRows)
+      } catch (error) {
+        if (isStale) return
+        console.error('Bu kıyafetin kombinleri alınamadı:', error)
+        setHasOutfitsError(true)
+        setOutfits([])
+      } finally {
+        if (!isStale) setIsOutfitsLoading(false)
+      }
+    }
+
+    loadOutfits()
 
     return () => {
       isStale = true
@@ -284,8 +324,50 @@ function ClothingDetail() {
               <p className="text-xs font-medium uppercase tracking-[0.15em] text-ink/50">
                 Bu Kıyafetle Yapılan Kombinler
               </p>
-              {/* Kombin uçları henüz bu sayfaya bağlanmadı. */}
-              <p className="mt-2 text-sm text-ink/50">Henüz bir kombinde kullanılmadı.</p>
+
+              {isOutfitsLoading ? (
+                <div className="mt-3 space-y-2">
+                  {[0, 1].map((index) => (
+                    <div
+                      key={index}
+                      className="h-16 animate-pulse rounded-xl border border-ink/10 bg-warm-gray"
+                    />
+                  ))}
+                </div>
+              ) : hasOutfitsError ? (
+                <p className="mt-2 text-sm text-ink/50">
+                  Kombin bilgisine şu an ulaşılamıyor.
+                </p>
+              ) : outfits.length === 0 ? (
+                <p className="mt-2 text-sm text-ink/50">Henüz bir kombinde kullanılmadı.</p>
+              ) : (
+                <div className="mt-3 space-y-2 animate-fade-in">
+                  {outfits.map((outfit) => (
+                    <Link
+                      key={outfit.id}
+                      to="/kombinlerim"
+                      className="flex items-center justify-between gap-4 rounded-xl border border-ink/10 bg-white px-4 py-3 transition-colors hover:border-dusty-rose"
+                    >
+                      <span className="min-w-0">
+                        <span className="block truncate font-body text-sm text-ink">
+                          {outfit.occasion || 'Kombin'}
+                        </span>
+                        <span className="mt-0.5 block text-xs text-ink/45">
+                          {dateFormatter.format(new Date(outfit.created_at))}
+                          {outfit.items.length > 0 && ` · ${outfit.items.length} parça`}
+                        </span>
+                      </span>
+                      <svg
+                        viewBox="0 0 24 24"
+                        strokeWidth="1.5"
+                        className="h-4 w-4 shrink-0 fill-none stroke-ink/30"
+                      >
+                        <path d="M9 5l7 7-7 7" strokeLinecap="round" strokeLinejoin="round" />
+                      </svg>
+                    </Link>
+                  ))}
+                </div>
+              )}
             </div>
 
             <div className="mt-10">
