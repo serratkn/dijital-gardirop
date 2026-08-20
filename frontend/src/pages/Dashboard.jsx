@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { GraduationCap, Utensils } from 'lucide-react'
 import PageHeader from '../components/ui/PageHeader'
 import StatCard from '../components/ui/StatCard'
@@ -23,8 +23,26 @@ function StatCardSkeleton() {
 }
 
 function Dashboard() {
+  const location = useLocation()
+  const navigate = useNavigate()
   const { name: currentUserName } = getUserProfile()
-  const greeting = currentUserName ? `Hoş Geldin, ${currentUserName}` : 'Hoş Geldin'
+
+  // Tarz anketi biterken StyleQuiz bu işareti taşır — yani kullanıcı yeni kayıt
+  // olmuş ve Ana Sayfa'yı ilk kez görüyor demektir. Başka her geliş (giriş yapma,
+  // uygulamayı yeniden açma, sekmeler arası gezinme) "tekrar" sayılır.
+  // Lazy initializer şart: aşağıdaki effect işareti geçmişten silse de
+  // karşılama bu ekran açık kaldığı sürece değişmemeli.
+  const [isFirstVisit] = useState(() => Boolean(location.state?.justOnboarded))
+
+  const welcome = isFirstVisit ? 'Hoş Geldin' : 'Tekrar Hoş Geldin'
+  const greeting = currentUserName ? `${welcome}, ${currentUserName}` : welcome
+
+  // History state sayfa yenilendiğinde geri gelir; işaret temizlenmezse
+  // kullanıcı her yenilemede yeniden "yeni kayıt" sanılırdı.
+  useEffect(() => {
+    if (!location.state?.justOnboarded) return
+    navigate(location.pathname, { replace: true, state: null })
+  }, [location.pathname, location.state, navigate])
 
   const [items, setItems] = useState([])
   const [outfitCount, setOutfitCount] = useState(0)

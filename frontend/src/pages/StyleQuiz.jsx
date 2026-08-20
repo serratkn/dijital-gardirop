@@ -39,7 +39,9 @@ function StyleQuiz() {
       await saveStylePreferences(toStylePreferencePayload(answers))
       setStyleAnswers(answers)
       setOnboardingCompleted()
-      navigate('/', { replace: true })
+      // Ana Sayfa bu işaretle "Hoş Geldin" der; işaretsiz her geliş
+      // (giriş yapma, uygulamayı yeniden açma) "Tekrar Hoş Geldin" olur.
+      navigate('/', { replace: true, state: { justOnboarded: true } })
     } catch (error) {
       console.error('Tarz tercihleri kaydedilemedi:', error)
       setSaveError(error.message)
