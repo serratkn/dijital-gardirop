@@ -120,9 +120,11 @@ function Dashboard() {
             </>
           ) : (
             <>
-              <StatCard value={statValue(items.length)} label="Toplam Parça" />
-              <StatCard value={statValue(outfitCount)} label="Kombin" />
-              <StatCard value={statValue(favoriteCount)} label="Favori" />
+              <StatCard value={statValue(items.length)} label="Toplam Parça" to="/gardirop" />
+              <StatCard value={statValue(outfitCount)} label="Kombin" to="/kombinlerim" />
+              {/* Gardırop'ta henüz favori filtresi yok; kart şimdilik listenin
+                  tamamına götürür. Filtre eklenirse burası ona bağlanmalı. */}
+              <StatCard value={statValue(favoriteCount)} label="Favori" to="/gardirop" />
             </>
           )}
         </div>
