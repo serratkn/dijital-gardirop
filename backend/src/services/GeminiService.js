@@ -1,13 +1,103 @@
 const { ValidationError, ServiceUnavailableError } = require('../utils/errors')
 const { REQUEST_TIMEOUT_MS, getClient, getModel, isConfigured } = require('../config/gemini')
 
-// AŞAMA 1 — yalnızca bağlantının çalıştığını kanıtlayan servis.
-// Otomatik kıyafet analizi ve vektör veritabanı sonraki aşamaların işidir;
-// buradaki tek sorumluluk: görseli Gemini'ye gönder, JSON cevabı çöz.
-
+// AŞAMA 1 — bağlantıyı kanıtlayan test ucunun kullandığı basit prompt.
+// AŞAMA 2 (otomatik analiz) buildPromptForCategory() ile kategoriye özgü
+// prompt üretir; bu sabit yalnızca /gemini/test-analyze içindir ve o uçla
+// birlikte kaldırılacaktır.
 const ANALYZE_PROMPT =
   'Bu bir kıyafet fotoğrafı. Kısaca şu bilgileri JSON formatında döndür: ' +
   '{ kategori, renk, stil }'
+
+// --- AŞAMA 2: kategoriye göre değişen analiz şemaları ---
+//
+// Alanlar [anahtar, tip, ipucu] üçlüsüdür. Sıra, prompt'taki örnek JSON'ın
+// okunabilirliği içindir.
+//
+// DİKKAT: Bu sıra VERİTABANINDA KORUNMAZ. JSONB anahtarları uzunluğa ve bayt
+// sırasına göre yeniden dizer (json tipi korurdu ama indekslenemez ve
+// normalize edilmez). Bu yüzden arayüzdeki gösterim sırası ayrıca tanımlanır:
+// frontend/src/components/AiAnalysisPanel.jsx > ALAN_ETIKETLERI.
+// Yeni bir alan eklerken oraya da eklenmelidir, yoksa listenin sonuna düşer.
+//
+// tip: 'metin' → kısa etiket (string), 'liste' → kısa etiketlerden dizi.
+// "uyumluluk" her şemada ayrı tanımlanır ve daima liste alanlarından oluşur.
+// "genel_aciklama" her şemanın SONUNA otomatik eklenir.
+
+const GIYIM_ALANLARI = [
+  ['kategori', 'metin', 'ana kategori (Üst, Alt, Elbise gibi)'],
+  ['alt_kategori', 'metin', 'parçanın tam türü (örn. Crop Top, Kot Pantolon, Midi Elbise)'],
+  ['renk', 'metin', 'baskın renk, tek kelime (örn. Bordo)'],
+  ['ikincil_renkler', 'liste', 'varsa diğer renkler; yoksa boş dizi'],
+  ['kumas_deseni', 'metin', 'kumaş ve desen (örn. Pamuklu düz, Çizgili keten)'],
+  ['stil', 'metin', 'stil etiketi (örn. Günlük, Klasik, Spor, Bohem)'],
+  ['mevsim_uygunlugu', 'metin', 'Yaz, Kış, İlkbahar-Sonbahar veya Tüm Sezon'],
+  ['kesim_tipi', 'metin', 'kesim/kalıp (örn. Oversize, Slim Fit, A Kesim)'],
+]
+
+const GIYIM_UYUMLULUK = [
+  ['vucut_tipi', 'liste', 'bu kesimin yakıştığı vücut tipleri (örn. Elma, Armut, Kum saati)'],
+  ['ten_tonu', 'liste', 'bu rengin yakıştığı ten tonları (örn. Sıcak ten, Soğuk ten, Buğday)'],
+  ['uyumlu_parca_turleri', 'liste', 'bununla iyi giden parça türleri (örn. Yüksek bel pantolon)'],
+  ['uyumsuz_kombinasyonlar', 'liste', 'kaçınılması gereken eşleşmeler (örn. Aynı desende alt parça)'],
+]
+
+// Ayakkabı ve çanta giyim şemasını GENİŞLETİR (yeniden yazmaz): ortak alanlar
+// tek yerde durur, kategoriye özgü olanlar sona eklenir.
+const AYAKKABI_EK_ALANLARI = [
+  ['topuk_yuksekligi', 'metin', 'topuk yüksekliği (örn. Düz, 5 cm, Yüksek topuk)'],
+  ['ayakkabi_turu', 'metin', 'ayakkabı türü (örn. Sneaker, Bot, Stiletto, Sandalet)'],
+]
+
+const CANTA_EK_ALANLARI = [
+  ['boyut', 'metin', 'boyut (örn. Mini, Orta, Büyük)'],
+  ['canta_turu', 'metin', 'çanta türü (örn. Omuz çantası, Sırt çantası, Clutch)'],
+]
+
+// Makyaj TAMAMEN AYRI bir şemadır: kesim, kumaş, vücut tipi gibi alanların bir
+// rujda karşılığı yok — giyim şemasını zorlamak modeli uydurmaya iterdi.
+const MAKYAJ_ALANLARI = [
+  ['urun_turu', 'metin', 'ürün türü (örn. Ruj, Maskara, Fondöten, Allık)'],
+  ['renk', 'metin', 'renk, tek kelime veya kısa tanım'],
+  ['urun_adi', 'metin', 'ambalajda okunabiliyorsa marka ve ürün adı, okunmuyorsa null'],
+  ['bitis_efekti', 'metin', 'bitiş efekti (örn. Mat, Parlak, Saten, Işıltılı)'],
+]
+
+const MAKYAJ_UYUMLULUK = [
+  ['ten_tonu', 'liste', 'bu rengin yakıştığı ten tonları'],
+  ['goz_rengi', 'liste', 'bu rengin öne çıkardığı göz renkleri'],
+]
+
+const ACIKLAMA_ALANI = [
+  'genel_aciklama',
+  'metin',
+  'parçayı ve nasıl kombinleneceğini anlatan en fazla iki cümlelik Türkçe açıklama',
+]
+
+const SEMALAR = {
+  giyim: { alanlar: GIYIM_ALANLARI, uyumluluk: GIYIM_UYUMLULUK },
+  ayakkabi: { alanlar: [...GIYIM_ALANLARI, ...AYAKKABI_EK_ALANLARI], uyumluluk: GIYIM_UYUMLULUK },
+  canta: { alanlar: [...GIYIM_ALANLARI, ...CANTA_EK_ALANLARI], uyumluluk: GIYIM_UYUMLULUK },
+  makyaj: { alanlar: MAKYAJ_ALANLARI, uyumluluk: MAKYAJ_UYUMLULUK },
+}
+
+// Veritabanındaki kategori ADI → şema anahtarı.
+// Anahtar olarak ad kullanılıyor çünkü categories.id SERIAL'dir ve farklı bir
+// kurulumda kayabilir; adlar seed veriyle sabittir (001_initial_schema.sql).
+const KATEGORI_SEMASI = {
+  Üst: 'giyim',
+  Alt: 'giyim',
+  Elbise: 'giyim',
+  Ayakkabı: 'ayakkabi',
+  Çanta: 'canta',
+  Makyaj: 'makyaj',
+}
+
+// Modelin uzun paragraflar yazmasını engelleyen sınırlar. Değerler arayüzde
+// kısa etiket (hap/rozet) olarak gösterilir; bir cümle oraya sığmazdı.
+const MAX_LIST_ITEMS = 4
+const MAX_TEXT_LENGTH = 120
+const MAX_DESCRIPTION_LENGTH = 400
 
 // Gemini bazen JSON'ı markdown çitiyle sarar (```json ... ```).
 // responseMimeType ile bunu istemiyoruz ama modelin biçime uymadığı durumlar
@@ -22,9 +112,174 @@ function stripCodeFence(text) {
     .trim()
 }
 
+// Model "bilmiyorum" demek yerine bu tür yer tutucular üretebiliyor; hepsi
+// NULL'a indirgenir ki arayüz boş alanı hiç göstermesin.
+const BOS_DEGERLER = new Set([
+  'null',
+  'bilinmiyor',
+  'belirsiz',
+  'yok',
+  'n/a',
+  'na',
+  'bilinmemektedir',
+  'tespit edilemedi',
+])
+
+function metniNormalize(value, maxLength) {
+  if (value === null || value === undefined) return null
+
+  // Model tek bir metin yerine dizi döndürürse virgülle birleştirilir:
+  // alanın TİPİNİ değiştirmek arayüzü kırardı.
+  const raw = Array.isArray(value) ? value.filter(Boolean).join(', ') : value
+  if (typeof raw === 'boolean' || typeof raw === 'number') return String(raw)
+  if (typeof raw !== 'string') return null
+
+  const trimmed = raw.trim()
+  if (!trimmed || BOS_DEGERLER.has(trimmed.toLowerCase())) return null
+
+  return trimmed.slice(0, maxLength)
+}
+
+function listeyiNormalize(value) {
+  // Tek bir metin geldiyse tek öğeli listeye çevrilir (tersi yukarıda).
+  const items = Array.isArray(value) ? value : [value]
+
+  // Boş dizi de geçerli bir cevaptır ("ikincil renk yok"); null'a çevirmiyoruz.
+  return items
+    .map((item) => metniNormalize(item, MAX_TEXT_LENGTH))
+    .filter(Boolean)
+    .slice(0, MAX_LIST_ITEMS)
+}
+
 class GeminiService {
-  // Görseli analiz eder ve Gemini'nin döndürdüğü JSON'ı nesne olarak verir.
+  // Kategori adından şema anahtarı. Tanınmayan kategori (ileride eklenen bir
+  // kategori ya da kategorisi okunamayan kayıt) giyim şemasına düşer: en genel
+  // şema odur ve hiç analiz etmemekten iyidir.
+  schemaKeyForCategory(categoryName) {
+    return KATEGORI_SEMASI[String(categoryName ?? '').trim()] || 'giyim'
+  }
+
+  // ---- Kategoriye göre farklı prompt üreten metod ----
+  //
+  // Prompt, beklenen JSON'ı ALAN AÇIKLAMALARIYLA BİRLİKTE örnekler. Yalnızca
+  // anahtar listesi verildiğinde model "stil" alanına paragraf, "renk" alanına
+  // "açık pembeye çalan bir ton" gibi cümleler yazıyordu.
+  buildPromptForCategory(categoryName) {
+    const schemaKey = this.schemaKeyForCategory(categoryName)
+    const { alanlar, uyumluluk } = SEMALAR[schemaKey]
+
+    const alanSatiri = ([key, type, hint]) =>
+      type === 'liste' ? `  "${key}": ["${hint}"]` : `  "${key}": "${hint}"`
+
+    const uyumlulukBlogu = [
+      '  "uyumluluk": {',
+      uyumluluk.map(([key, , hint]) => `    "${key}": ["${hint}"]`).join(',\n'),
+      '  }',
+    ].join('\n')
+
+    // uyumluluk bloğu daima genel_aciklama'dan hemen önce gelir.
+    const govde = [...alanlar.map(alanSatiri), uyumlulukBlogu, alanSatiri(ACIKLAMA_ALANI)].join(
+      ',\n',
+    )
+
+    const kategoriNotu = categoryName
+      ? `Bu parça kullanıcının gardırobunda "${categoryName}" kategorisinde kayıtlı.`
+      : 'Parçanın kategorisi kullanıcı tarafından belirtilmemiş.'
+
+    return [
+      'Bu bir kıyafet/aksesuar fotoğrafıdır.',
+      kategoriNotu,
+      'Fotoğraftaki parçayı bir moda editörü gözüyle analiz et ve SADECE aşağıdaki',
+      'şemaya birebir uyan bir JSON döndür. Açıklama, selamlama veya markdown ekleme.',
+      '',
+      'KURALLAR:',
+      '- Tüm değerler TÜRKÇE olsun.',
+      '- Metin alanları kısa ETİKET olsun (cümle değil, en fazla birkaç kelime).',
+      '  Yalnızca "genel_aciklama" en fazla iki cümle olabilir.',
+      `- Dizi alanlarına en fazla ${MAX_LIST_ITEMS} öğe yaz.`,
+      '- Fotoğraftan emin olamadığın alana null yaz; TAHMİN UYDURMA.',
+      '- Şemadaki anahtarların hepsi bulunsun, fazladan anahtar ekleme.',
+      '',
+      'Şema:',
+      '{',
+      govde,
+      '}',
+    ].join('\n')
+  }
+
+  // AŞAMA 1 — /gemini/test-analyze ucunun kullandığı serbest analiz.
+  // Ham JSON'ı olduğu gibi döndürür (şemaya oturtmaz).
   async analyzeClothingImage(file) {
+    const { text, model } = await this.#generate(file, ANALYZE_PROMPT)
+
+    return { model, analysis: this.#parseJson(text), raw: text }
+  }
+
+  // AŞAMA 2 — otomatik analiz. Kategoriye özgü prompt kullanır ve sonucu
+  // şemaya OTURTUR: eksik alanlar null/[] ile tamamlanır, fazlalıklar atılır.
+  // Böylece arayüz her alanın var olduğuna güvenebilir ve modelin biçimden
+  // sapması sayfayı kırmaz.
+  async analyzeClothingItem(file, categoryName) {
+    const schemaKey = this.schemaKeyForCategory(categoryName)
+    const prompt = this.buildPromptForCategory(categoryName)
+
+    const { text, model } = await this.#generate(file, prompt)
+
+    return {
+      sema: schemaKey,
+      model,
+      analiz_tarihi: new Date().toISOString(),
+      gardirop_kategorisi: categoryName ?? null,
+      veri: this.#normalizeToSchema(this.#parseJson(text), schemaKey),
+    }
+  }
+
+  // Modelin çıktısını şemaya oturtur. Anahtar SIRASI şemadan gelir.
+  #normalizeToSchema(parsed, schemaKey) {
+    const { alanlar, uyumluluk } = SEMALAR[schemaKey]
+    const kaynak = parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {}
+
+    const veri = {}
+    for (const [key, type] of alanlar) {
+      veri[key] =
+        type === 'liste'
+          ? listeyiNormalize(kaynak[key])
+          : metniNormalize(kaynak[key], MAX_TEXT_LENGTH)
+    }
+
+    // Model uyumluluk bloğunu düzleştirmiş olabilir (alanları en üst seviyeye
+    // koyarak); veriyi kaybetmemek için iki yere birden bakılır.
+    const uyumlulukKaynak =
+      kaynak.uyumluluk && typeof kaynak.uyumluluk === 'object' ? kaynak.uyumluluk : kaynak
+
+    veri.uyumluluk = {}
+    for (const [key] of uyumluluk) {
+      veri.uyumluluk[key] = listeyiNormalize(uyumlulukKaynak[key])
+    }
+
+    veri.genel_aciklama = metniNormalize(kaynak.genel_aciklama, MAX_DESCRIPTION_LENGTH)
+
+    return veri
+  }
+
+  #parseJson(text) {
+    try {
+      return JSON.parse(stripCodeFence(text))
+    } catch {
+      // Model JSON üretemediyse bu bizim hatamız değil; ham metnin başı
+      // loglanır ki teşhis edilebilsin.
+      console.error('Gemini JSON olarak çözülemedi:', text.slice(0, 200))
+      const error = new ServiceUnavailableError('Gemini yanıtı JSON olarak çözümlenemedi')
+      // Biçim hatası modelin o koşuya özgü sapmasıdır; ikinci deneme
+      // genellikle şemaya uyar.
+      error.isRetryable = true
+      throw error
+    }
+  }
+
+  // Görseli modele gönderen ortak yol. İki analiz metodu da bunu kullanır:
+  // hata çevirisi ve zaman aşımı kuralı tek yerde kalsın diye.
+  async #generate(file, prompt) {
     if (!file || !file.buffer || file.buffer.length === 0) {
       throw new ValidationError('Analiz edilecek bir görsel gönderilmedi')
     }
@@ -47,15 +302,14 @@ class GeminiService {
           {
             role: 'user',
             parts: [
-              // Görsel diskte tutulmaz; multer memoryStorage'dan gelen tampon
-              // doğrudan base64'e çevrilip gönderilir.
+              // Görsel diskte tutulmaz; tampon doğrudan base64'e çevrilip gönderilir.
               {
                 inlineData: {
                   mimeType: file.mimetype,
                   data: file.buffer.toString('base64'),
                 },
               },
-              { text: ANALYZE_PROMPT },
+              { text: prompt },
             ],
           },
         ],
@@ -70,7 +324,21 @@ class GeminiService {
       // SDK hatası ASLA olduğu gibi dışarı sızmamalı: yığın izi ve anahtar
       // parçaları içerebilir. Anlaşılır Türkçe mesaja çevriliyor.
       console.error('Gemini isteği başarısız:', error.message)
-      throw new ServiceUnavailableError(this.#toFriendlyMessage(error))
+
+      const friendly = new ServiceUnavailableError(this.#toFriendlyMessage(error))
+      // Kota/limit hatası, çağıranın SOĞUMA süresi başlatabilmesi için
+      // işaretlenir (bkz. ClothingAnalysisService): arka arkaya istek atıp
+      // kalan kotayı büsbütün tüketmenin önüne geçer.
+      friendly.isRateLimited = this.#isRateLimited(error)
+      // GEÇİCİ hatalar (zaman aşımı, 503, ağ kopması) yeniden denenebilir.
+      // Geçersiz anahtar veya bulunamayan model tekrar denemekle düzelmez —
+      // onlarda ikinci çağrı yalnızca kotayı harcardı.
+      friendly.isRetryable = this.#isRetryable(error)
+      // Gemini kota hatasında ne kadar beklenmesi gerektiğini söyler
+      // (RetryInfo / "Please retry in 24.5s"). Bunu çağırana taşıyoruz ki
+      // soğuma süresi tahminle değil servisin verdiği bilgiyle belirlensin.
+      friendly.retryAfterMs = this.#retryAfterMs(error)
+      throw friendly
     }
 
     const text = typeof response?.text === 'string' ? response.text : ''
@@ -78,22 +346,39 @@ class GeminiService {
       throw new ServiceUnavailableError('Gemini boş bir yanıt döndürdü')
     }
 
-    let parsed
-    try {
-      parsed = JSON.parse(stripCodeFence(text))
-    } catch {
-      // Model JSON üretemediyse bu bizim hatamız değil; ham metni de veriyoruz
-      // ki teşhis edilebilsin.
-      console.error('Gemini JSON olarak çözülemedi:', text.slice(0, 200))
-      throw new ServiceUnavailableError('Gemini yanıtı JSON olarak çözümlenemedi')
-    }
+    return { text, model }
+  }
 
-    return {
-      model,
-      analysis: parsed,
-      // Ham metin teşhis için: modelin ne döndürdüğünü görmeden hata ayıklamak zor.
-      raw: text,
-    }
+  // Ölçümde aynı model aynı fotoğraf için bir kez 6 sn, bir kez 30 sn'yi
+  // aşarak zaman aşımına düştü; bu dalgalanma modelin normal davranışı.
+  // Bu yüzden geçici hatalar yeniden denenebilir sayılır.
+  #isRetryable(error) {
+    const message = String(error?.message || '')
+    const status = error?.status ?? error?.code
+
+    if (this.#isRateLimited(error)) return false
+    if (error?.name === 'TimeoutError' || /abort|timeout/i.test(message)) return true
+    if (status === 500 || status === 502 || status === 503 || status === 504) return true
+    return /UNAVAILABLE|overloaded|high demand|fetch failed|ECONNRESET|ETIMEDOUT/i.test(message)
+  }
+
+  // Hata gövdesindeki bekleme süresini milisaniye olarak çıkarır.
+  // SDK hatayı düz metin olarak taşıdığı için yapılandırılmış alan yerine
+  // metinden okunuyor; okunamazsa null döner ve çağıran varsayılanı kullanır.
+  #retryAfterMs(error) {
+    const message = String(error?.message || '')
+    const match =
+      message.match(/"retryDelay"\s*:\s*"(\d+(?:\.\d+)?)s"/) ||
+      message.match(/retry in (\d+(?:\.\d+)?)s/i)
+
+    if (!match) return null
+    return Math.round(Number(match[1]) * 1000)
+  }
+
+  #isRateLimited(error) {
+    const status = error?.status ?? error?.code
+    const message = String(error?.message || '')
+    return status === 429 || /RESOURCE_EXHAUSTED|quota|rate limit/i.test(message)
   }
 
   // Gemini'nin sık karşılaşılan hatalarını kullanıcının anlayacağı dile çevirir.
@@ -110,7 +395,7 @@ class GeminiService {
     if (status === 401 || status === 403 || /PERMISSION_DENIED|UNAUTHENTICATED/i.test(message)) {
       return 'Gemini API anahtarı reddedildi (yetki hatası). Anahtarın geçerli olduğunu doğrulayın.'
     }
-    if (status === 429 || /RESOURCE_EXHAUSTED|quota/i.test(message)) {
+    if (this.#isRateLimited(error)) {
       return 'Gemini kullanım kotası doldu. Bir süre sonra tekrar deneyin.'
     }
     if (status === 404 || /not found|NOT_FOUND/i.test(message)) {
@@ -120,4 +405,8 @@ class GeminiService {
   }
 }
 
+// Sınıf varsayılan dışa aktarımdır (mevcut çağrı yerleri değişmez); şema
+// tabloları testlerin ve ileriki aşamaların okuyabilmesi için ekli.
 module.exports = GeminiService
+module.exports.SEMALAR = SEMALAR
+module.exports.KATEGORI_SEMASI = KATEGORI_SEMASI

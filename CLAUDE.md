@@ -240,6 +240,11 @@ olduğu için iskelet oraya taşındı, kombin üretimi istemci tarafında anlı
 - **Kombinlerim** — kayıtlı kombinler; parçaları, tarihi, favori ve silme işlemleriyle
 - **Kıyafet Detay** — görüntüleme, favori, onaylı silme, fotoğraf yönetimi ve
   **o parçanın geçtiği kombinlerin listesi**
+- **Otomatik AI analizi** — bir parçaya fotoğraf yüklendiğinde Gemini, **arka planda**
+  (kullanıcı beklemeden) kategoriye özgü bir şemayla analiz eder; sonuç
+  `clothing_items.ai_analysis` (JSONB) kolonuna yazılır ve Kıyafet Detay'daki
+  **"Bu Parça Hakkında"** bölümünde gösterilir. Analiz başarısız olursa kolon NULL
+  kalır, kıyafet ekleme akışı **hiç etkilenmez**
 - **Kombin paylaşımı** — Kombin Öner'deki öneri ve Kombinlerim'deki her kombin,
   Instagram Story oranında (1080×1920) bir PNG olarak indirilebilir; görsel
   **daima açık mod** renklerindedir
@@ -269,7 +274,11 @@ olduğu için iskelet oraya taşındı, kombin üretimi istemci tarafında anlı
 | **Bildirimler / Yardım & Destek** | "Yakında" sayfalarıdır, işlevleri yoktur. |
 | **Gardırop'ta favori filtresi yok** | Sayfada kategori pillerinden ve aramadan başka filtre yoktur; favorileri tek başına listelemenin bir yolu bulunmuyor. Bu yüzden Ana Sayfa'daki "Favori" kartı filtresiz `/gardirop`'a gider. |
 | **Paylaşım indirmesi mobilde denenmedi** | Görsel üretimi platformdan bağımsızdır ama indirme `<a download>` ile yapılır; Android WebView'de çalışmazsa Capacitor Filesystem/Share eklentisine geçilmelidir. Hata hâlinde kullanıcıya mesaj gösterilir, uygulama çökmez. |
-| **Gemini yalnızca test ucunda** | `POST /gemini/test-analyze` bir proof of concept'tir, ürün akışlarına bağlı değildir. Otomatik kıyafet analizi ve vektör veritabanı sonraki aşamaların işi. |
+| **Gemini ücretsiz kotası günde 20 istek** | Ölçüldü (`GenerateRequestsPerDayPerProjectPerModel-FreeTier`, limit 20, `gemini-3.6-flash`). Kota dolduğunda analiz sessizce atlanır ve parça analizsiz kalır; **kendiliğinden yeniden deneyen bir mekanizma yoktur** — `analyze-existing-items.js --uygula` ertesi gün elle çalıştırılır. Gerçek kullanım ücretli plan ister. |
+| **Fotoğraf değişince analiz güncellenmez** | Maliyet koruması "dolu `ai_analysis` varsa tekrar analiz etme" der; fotoğraf değiştirilse bile eski analiz kalır. `ClothingAnalysisService.analyzeItem(id, { force: true })` yolu hazır ama **arayüzde tetikleyicisi yok**. |
+| **Analiz yalnızca fotoğraf yüklenince tetiklenir** | Bu özellikten önce eklenmiş parçalar analizsizdir; toplu doldurma `test-scripts/analyze-existing-items.js` ile elle yapılır. |
+| **`/gemini/test-analyze` hâlâ duruyor** | Aşama 1'den kalan teşhis ucudur; ürün akışı artık otomatik analizdir. Kaldırılmadı çünkü `test-gemini.js` bağlantı/anahtar yollarını bunun üzerinden doğruluyor. |
+| **Vektör veritabanı yok** | ChromaDB ve benzeri arama altyapısı Aşama 3'ün işidir; bu aşamada hiç dokunulmadı. |
 | **Test altyapısı yok** | Test framework'ü yoktur. Doğrulama: `npm run lint` + `backend/test-scripts/` + elle deneme. |
 
 ---
@@ -319,7 +328,26 @@ olduğu için iskelet oraya taşındı, kombin üretimi istemci tarafında anlı
 | `is_favorite` | BOOLEAN | `false` |
 | `is_clean` | BOOLEAN | **NOT NULL**, `true` — kombin önerisi yalnızca `true` olanlardan seçer |
 | `is_deleted` | BOOLEAN | `false` — **soft delete**, her okuma filtreler |
+| `ai_analysis` | JSONB | Gemini otomatik analizi. **NULL = henüz analiz edilmedi veya analiz başarısız oldu** — kıyafet akışı buna hiç bağlı değildir |
 | `created_at` / `updated_at` | TIMESTAMP | |
+
+`ai_analysis` biçimi (bkz. `GeminiService.analyzeClothingItem`):
+
+```json
+{"sema":"canta","model":"gemini-3.6-flash","analiz_tarihi":"2026-08-21T…Z",
+ "gardirop_kategorisi":"Çanta",
+ "veri":{"alt_kategori":"El Çantası","renk":"Siyah","boyut":"Orta",
+         "uyumluluk":{"ten_tonu":["…"]},"genel_aciklama":"…"}}
+```
+
+> **JSONB anahtar SIRASINI KORUMAZ** (uzunluk + bayt sırasına göre yeniden dizer).
+> Bu yüzden arayüzdeki gösterim sırası ayrı tanımlıdır:
+> `AiAnalysisPanel.jsx > ALAN_ETIKETLERI`. Yeni alan eklenirken oraya da yazılmalıdır.
+
+Migration `005` ayrıca **kısmi bir index** ekler
+(`ai_analysis IS NULL AND image_url IS NOT NULL AND is_deleted = false`):
+"analiz bekleyenler" sorgusu tablo taramasına düşmesin diye. Analiz edilmiş
+satırlar index'e hiç girmez, index küçük kalır.
 
 ### `outfits`
 | Kolon | Tip | Not |
@@ -443,16 +471,23 @@ durumu vekiline dönüşürdü. `WEATHER_API_KEY` tanımlı değilse dış servi
 gidilmez**; sunucu `JWT_SECRET`'ten farklı olarak **patlamaz** — hava durumu opsiyonel
 bir özelliktir, uygulamanın geri kalanı anahtarsız da tam çalışır.
 
-### Gemini (GEÇİCİ — Aşama 1)
+### Gemini
+
+**Otomatik analizin AYRI BİR UCU YOKTUR.** Aşama 2'de analiz, mevcut fotoğraf
+yükleme ucunun (`POST /clothing-items/:id/image`) **yan etkisi** olarak arka
+planda çalışır: yanıt önce gönderilir, analiz sonra yapılır ve tamamlandığında
+`ai_analysis` kolonuna yazılır. İstemci sonucu `GET /clothing-items/:id`
+yoklayarak öğrenir. Ayrı bir uç, kullanıcıyı bekletmeden aynı işi yapan ikinci
+bir çağrı demekti; tetikleyici zaten fotoğrafın kendisidir.
 
 | Metod | Yol | Açıklama |
 |---|---|---|
 | `POST` | `/gemini/test-analyze` | **multipart/form-data**, alan adı `image`. Görseli Gemini'ye analiz ettirir |
 
-**Bu uç kalıcı bir özellik DEĞİLDİR.** Yalnızca Gemini bağlantısının çalıştığını
-kanıtlamak için vardır; otomatik kıyafet analizi gerçek akışlara bağlanınca
-kaldırılmalı ya da yerini asıl uca bırakmalıdır. Korumalıdır (token ister) —
-aksi hâlde API anahtarımız herkese açık bir Gemini vekiline dönüşürdü.
+**Bu uç bir TEŞHİS aracıdır, ürün akışı değildir.** Aşama 1'den kalmıştır ve
+`test-gemini.js` anahtar/bağlantı yollarını bunun üzerinden doğrular.
+Korumalıdır (token ister) — aksi hâlde API anahtarımız herkese açık bir Gemini
+vekiline dönüşürdü.
 
 Dosya kısıtları fotoğraf yüklemeyle aynıdır (jpg/png/webp, en fazla 5 MB) ama
 görsel **diske YAZILMAZ**: `uploadImageToMemory` kullanılır ve tampon doğrudan
@@ -582,8 +617,16 @@ yükleme sonrası bir hata olursa yeni yazılan dosya geri alınır (öksüz dos
 ```json
 {"id":"58b9f6da-…","user_id":"e4553e3e-…","category_id":5,"name":"Küçük Omuz Çantası",
  "color":"Kahverengi","brand":"Mango","season":null,"image_url":null,
- "is_favorite":false,"is_deleted":false,"created_at":"…","updated_at":"…"}
+ "is_favorite":false,"is_deleted":false,"ai_analysis":null,
+ "created_at":"…","updated_at":"…"}
 ```
+
+**Fotoğraf yükleme otomatik analizi TETİKLER.** `POST /clothing-items/:id/image`
+yanıtı geldiğinde `ai_analysis` **henüz null'dur** — analiz arka planda sürer
+(tipik 6–10 sn, en kötü ~62 sn). Sonucu görmek için kayıt yeniden okunur;
+Kıyafet Detay sayfası bunu 5 sn aralıklarla yoklar. Analiz zaten doluysa
+**yeniden analiz yapılmaz** (maliyet koruması), dolayısıyla aynı fotoğrafı
+tekrar yüklemek yeni bir Gemini çağrısı doğurmaz.
 
 ### Outfits
 
@@ -650,7 +693,9 @@ altında **yeni** numaralı bir `.sql` dosyasına yazılır; uygulanmış bir mi
 # pipe etmek Türkçe karakterleri bozar ('Üst' bir kez '??st' oldu).
 docker cp backend/src/db/migrations/002_style_preferences_unique_and_indexes.sql \
   dijitalgardirop-db-1:/tmp/m.sql
-docker exec dijitalgardirop-db-1 psql -U postgres -d dijital_gardirop \
+# MSYS_NO_PATHCONV=1 ZORUNLU: Git Bash "/tmp/m.sql" argümanını Windows yoluna
+# çevirir ve psql "No such file or directory" der (005 uygulanırken yaşandı).
+MSYS_NO_PATHCONV=1 docker exec dijitalgardirop-db-1 psql -U postgres -d dijital_gardirop \
   -v ON_ERROR_STOP=1 -f /tmp/m.sql
 ```
 
@@ -768,6 +813,22 @@ node test-scripts/test-stats.js
 node test-scripts/test-clothing-items.js
 node test-scripts/test-clothing-items.js --cleanup   # oluşturduğu kaydı sonda siler
 
+# Otomatik kıyafet analizi — Gemini Aşama 2 (90 kontrol: 40 birim + 13 uçtan uca + 37 gerçek).
+# --birim: yalnızca birim bölümü (sunucu, anahtar ve kota GEREKTİRMEZ, saniyeler sürer)
+# --kotasiz: günlük Gemini kotası dolduysa gerçek analiz bölümünü atlar
+# Test verisi VARSAYILAN OLARAK SİLİNMEZ (DBeaver'da gözle doğrulama için);
+# silmek için --cleanup ya da cleanup.js
+node test-scripts/test-ai-analysis.js
+node test-scripts/test-ai-analysis.js --birim
+node test-scripts/test-ai-analysis.js --kotasiz
+node test-scripts/test-ai-analysis.js --cleanup
+
+# Analizi olmayan (bu özellikten önce eklenmiş) parçaları toplu analiz eder.
+# VARSAYILAN SALT OKUNURDUR: her çağrı gerçek para harcar.
+node test-scripts/analyze-existing-items.js              # yalnızca listeler
+node test-scripts/analyze-existing-items.js --uygula
+node test-scripts/analyze-existing-items.js --uygula --limit 3
+
 # Gemini Aşama 1 (20 kontrol). Birinci bölüm GEÇERLİ ANAHTAR OLMADAN da çalışır
 # (eksik/geçersiz anahtar yolları); analiz bölümü anahtar ve görsel ister.
 node test-scripts/test-gemini.js
@@ -870,9 +931,40 @@ Mevcut sorgulara ve uç noktanın sözleşmesine dokunmak gerekmez — yanıt ya
 anahtarla büyür. **Sayımlar her zaman `::int` ile daraltılmalıdır** (`pg` bigint'i string
 döndürür) ve "en çok" sorguları eşitlik için ikincil sıralama taşımalıdır.
 
-**Gemini katmanı (Aşama 1).** `config/gemini.js` istemciyi kurar (database.js ile
+**Gemini katmanı.** `config/gemini.js` istemciyi kurar (database.js ile
 aynı rol), `GeminiService` görseli gönderip JSON yanıtı çözer, `GeminiController`
 ince adaptördür. Repository yoktur: kalıcı veri yok, yalnızca dış çağrı.
+
+**Otomatik analiz orkestrasyonu `ClothingAnalysisService`'tedir** (Aşama 2) ve
+`GeminiService`'ten AYRI tutulmuştur: `GeminiService` "görseli modele gönder,
+şemaya oturt" der ve **fırlatır**; `ClothingAnalysisService` "hangi parça, ne
+zaman, kaç kez" der ve **ASLA FIRLATMAZ**. Bu ayrım olmasaydı maliyet koruması,
+eşzamanlılık sınırı ve kota soğuması ya prompt mantığına karışır ya da her
+çağrı yerinde tekrar yazılırdı.
+
+Servisin dokunulmaması gereken kuralları:
+
+- **Asla fırlatmaz.** Analiz, kıyafet ekleme akışının parçası değil üstüne konan
+  bir zenginleştirmedir (WeatherService ile aynı ilke). Her yol bir `durum`
+  nesnesiyle biter: `tamamlandi` / `atlandi` / `basarisiz`.
+- **Dolu `ai_analysis` yeniden analiz edilmez** (`force` hariç). Maliyet koruması.
+- **In-flight işareti İLK `await`'ten ÖNCE konur.** Kayıt okuma asenkron olduğu
+  için işaret sonra konsaydı iki eşzamanlı tetikleme de muhafızı geçer ve aynı
+  parça için İKİ Gemini çağrısı yapılırdı (bu hata yaşandı, test kapsıyor).
+- **Eşzamanlılık `MAX_CONCURRENT = 2` ile sınırlı.** Toplu yükleme tek seferde
+  10 eşzamanlı isteğe dönüşseydi dakikalık kota anında dolardı.
+- **Kota hatasında soğuma başlar** ve süresi Gemini'nin bildirdiği `retryDelay`
+  ile varsayılanın büyüğüdür. Kota hatası **yeniden DENENMEZ**.
+- **Yalnızca GEÇİCİ hatalar yeniden denenir** (zaman aşımı, 5xx, çözülemeyen
+  JSON), en fazla `MAX_ATTEMPTS = 2`. Geçersiz anahtar / bulunamayan model
+  tekrar denemekle düzelmez, ikinci çağrı yalnızca kota harcardı.
+
+**Tetikleme CONTROLLER'dadır, servis katmanında değil.** `ClothingItemController.uploadImage`
+önce `res.json(...)` ile yanıtı gönderir, sonra `analyzeItemInBackground(...)`
+çağırır ve **await ETMEZ**. "Önce cevapla, sonra çalış" bir HTTP sınırı
+kararıdır; `ClothingItemService` isteğin ne zaman bittiğini bilmez. Analiz
+servisi controller'a **opsiyonel** ikinci bağımlılık olarak verilir: verilmezse
+fotoğraf yükleme eskisi gibi çalışır, yalnızca analiz devreye girmez.
 `WeatherService` ile aynı iki kural geçerlidir — **anahtar yoksa dış servise HİÇ
 gidilmez** ve **istek zaman aşımsız bırakılmaz** (`AbortSignal.timeout`, 30 sn).
 Farkı: WeatherService asla fırlatmaz (hava durumu isteğe bağlı zenginleştirmedir),
@@ -956,6 +1048,24 @@ yoktur — `OutfitService` yalnızca doğrular ve kaydeder. Rastgele seçim
 uygulanır. Bunun sebebi sayfanın iki durumu ayırt etmek zorunda olmasıdır:
 **"o kategoride hiç parçan yok"** (gardırobu doldur) ile **"temiz parçan yok"**
 (çamaşır yıka) farklı mesajlar gösterir. Havuz baştan filtreli gelseydi bu ayrım kaybolurdu.
+
+**AI analizi (`AiAnalysisPanel`).** Kıyafet Detay sayfasında iki sütunlu ızgaranın
+**ALTINDA, tam genişlikte** durur; sağ sütun `md` üstünde yarım genişliktir ve
+iki sütunlu bilgi kartları oraya sıkışırdı. `ai_analysis` boşsa bileşen `null`
+döner — bölüm hiç render edilmez, boşluk da bırakmaz.
+
+Analiz arka planda tamamlandığı için sayfa **yoklar**: fotoğrafı olup analizi
+olmayan parçada 5 sn aralıkla en fazla 14 kez `GET /clothing-items/:id` çağrılır
+(backend'in en kötü senaryosu ≈ 62 sn: 2 deneme × 30 sn zaman aşımı). Bu sırada
+başlıkta "Yapay zekâ inceliyor" rozeti görünür. Süre dolunca yoklama **sessizce**
+durur; "başarısız oldu" demek zorunlu olmayan bir adım için gereksiz endişe
+yaratırdı. Yoklama hatası da kullanıcıya gösterilmez.
+
+**Gösterim SIRASI arayüzde tanımlıdır** (`ALAN_ETIKETLERI` / `UYUMLULUK_ETIKETLERI`
+nesnelerinin anahtar sırası). Saklanan JSON'ın sırasına güvenilemez: kolon JSONB'dir
+ve anahtarları uzunluk + bayt sırasına göre yeniden dizer. İlk sürümde buna
+güvenilmişti ve kartlar "Baskın Renk, Stil, Boyut, Çanta Türü, Tür…" gibi rastgele
+bir sırayla çıkıyordu. Etiketi olmayan bir alan kaybolmaz, listenin sonuna düşer.
 
 **Veri çekme deseni:** Sayfalar `useEffect` içinde `Promise.all` ile paralel çeker;
 `isStale` bayrağı geç gelen yanıtın state'i ezmesini önler; `isLoading` / `hasError`
@@ -1118,6 +1228,125 @@ fotoğraf sorunu teyit edildikten sonra üç yerden de kaldırılabilir.
 
 > Bundan sonraki her çalışma buraya tarihiyle işlenir: eklenen özellikler, düzeltilen
 > hatalar, alınan mimari kararlar. En yeni kayıt en üstte.
+
+### 2026-08-21 — Gemini Entegrasyonu — Aşama 2: Otomatik Kıyafet Analizi
+- **Ne eklendi:** Bir parçaya fotoğraf yüklendiğinde Gemini **arka planda**
+  kategoriye özgü bir şemayla analiz ediyor; sonuç yeni `clothing_items.ai_analysis`
+  (JSONB) kolonuna yazılıyor ve Kıyafet Detay'daki **"Bu Parça Hakkında"**
+  bölümünde gösteriliyor. **ChromaDB / vektör veritabanına dokunulmadı** —
+  o Aşama 3'ün işi.
+- **Migration `005_add_ai_analysis.sql`:** `ai_analysis JSONB`, **nullable ve
+  varsayılansız**. Şema kategoriye göre DEĞİŞTİĞİ için (giyim / ayakkabı / çanta /
+  makyaj farklı alanlar taşır) sabit kolonlara açmak altı ayrı tablo ya da
+  onlarca çoğu boş kolon demekti. `COMMENT ON COLUMN` eklendi — DBeaver kolon
+  açıklamasında görünüyor. Ayrıca **kısmi index**: analiz edilmiş satırlar
+  index'e hiç girmediği için "analiz bekleyenler" sorgusu ucuz, index küçük.
+- **Kategori bazlı prompt — `GeminiService.buildPromptForCategory()`.** Onaylanan
+  dört şema: giyim (Üst/Alt/Elbise), ayakkabı (+`topuk_yuksekligi`,
+  `ayakkabi_turu`), çanta (+`boyut`, `canta_turu`), makyaj (tamamen ayrı).
+  Ayakkabı ve çanta giyim şemasını **genişletir**, kopyalamaz. Tanınmayan
+  kategori en genel şemaya (giyim) düşer — hiç analiz etmemekten iyidir.
+- **Prompt alan AÇIKLAMALARIYLA örnekleniyor.** Yalnızca anahtar listesi
+  verildiğinde model "stil" alanına paragraf, "renk" alanına "açık pembeye çalan
+  bir ton" gibi cümleler yazıyordu; her anahtarın yanına beklenen biçim örneği
+  konunca kısa etiketler geldi.
+- **Yanıt ŞEMAYA OTURTULUYOR** (`#normalizeToSchema`): eksik alanlar `null`/`[]`
+  ile tamamlanır, fazlalıklar atılır, dizi/metin tip karışması düzeltilir,
+  "bilinmiyor / belirsiz / yok" gibi yer tutucular `null`'a indirgenir, metinler
+  120 (açıklama 400) karaktere, listeler 4 öğeye kırpılır. Böylece arayüz her
+  alanın var olduğuna güvenebilir ve modelin biçimden sapması sayfayı kırmaz.
+- **YENİ SERVİS `ClothingAnalysisService` — GeminiService'ten AYRI.** GeminiService
+  "görseli gönder, şemaya oturt" der ve **fırlatır**; ClothingAnalysisService
+  "hangi parça, ne zaman, kaç kez" der ve **ASLA FIRLATMAZ**. Ayrım olmasaydı
+  maliyet koruması, eşzamanlılık ve kota mantığı prompt koduna karışırdı.
+- **KRİTİK SÖZLEŞME: analiz kıyafet eklemeyi ASLA engellemez.** Gemini düşse,
+  kota dolsa, dosya kaybolsa, veritabanı yazması patlasa bile kıyafet kaydı
+  yerinde durur ve kullanıcı hiçbir hata görmez; kolon NULL kalır. Her yol bir
+  `durum` nesnesiyle biter (`tamamlandi` / `atlandi` / `basarisiz`) ve sessizce
+  loglanır.
+- **Tetikleme controller'da, `res.json()`'DAN SONRA ve `await` EDİLMEDEN.**
+  "Önce cevapla, sonra çalış" bir HTTP sınırı kararıdır — `ClothingItemService`
+  isteğin ne zaman bittiğini bilmez. Analiz servisi controller'a **opsiyonel**
+  bağımlılıktır: verilmezse fotoğraf yükleme eskisi gibi çalışır.
+- **MALİYET KORUMASI:** `ai_analysis` doluysa Gemini'ye **hiç gidilmez**.
+  `analyzeItem(id, { force: true })` yolu duruyor ama arayüzde tetikleyicisi yok
+  (istenmedi). Yan etkisi bilinçli: fotoğraf değiştirilse bile eski analiz kalır —
+  "Eksikler" tablosuna işlendi.
+- **YAŞANAN HATA — in-flight muhafızı çalışmıyordu.** İşaret ilk `await`'ten
+  SONRA konuyordu; kayıt okuma asenkron olduğu için iki eşzamanlı tetikleme de
+  muhafızı geçiyor ve aynı parça için **İKİ Gemini çağrısı** yapılıyordu.
+  Test bunu yakaladı; işaret ilk await'ten önceye alındı.
+- **Eşzamanlılık `MAX_CONCURRENT = 2`** (basit semafor). Toplu yükleme tek
+  seferde 10 eşzamanlı isteğe dönüşseydi dakikalık kota anında dolardı.
+- **ÖLÇÜLDÜ — ücretsiz kota GÜNDE 20 istek**
+  (`GenerateRequestsPerDayPerProjectPerModel-FreeTier`, limit 20,
+  `gemini-3.6-flash`). Toplu analiz sırasında gerçekten doldu ve koruma tam
+  tasarlandığı gibi davrandı: soğuma başladı, sunucu ayakta kaldı, kalan parçalar
+  analizsiz kaldı, kullanıcıya hiçbir şey yansımadı. Soğuma süresi Gemini'nin
+  bildirdiği `retryDelay` ile varsayılanın **büyüğü** olarak alınıyor — servisin
+  istediğinden erken dönmek yeni bir 429'dan başka bir şey getirmezdi.
+- **Sınırlı yeniden deneme eklendi (`MAX_ATTEMPTS = 2`).** Ölçümde aynı model aynı
+  fotoğraf için bir koşuda 6 sn, bir koşuda 30 sn'yi aşarak zaman aşımına düştü;
+  denemesiz bırakıldığında tek bir sıçrama parçayı **kalıcı olarak** analizsiz
+  bırakıyordu (ilk test koşusunda Makyaj parçası tam olarak böyle kaçtı).
+  Yalnızca GEÇİCİ hatalar denenir; geçersiz anahtar / kota / bulunamayan model
+  denenmez — ikinci çağrı yalnızca kota harcardı.
+- **Frontend:** yeni `components/AiAnalysisPanel.jsx`. İki sütunlu ızgaranın
+  **altında, tam genişlikte** (sağ sütun yarım genişlik, kartlar oraya sıkışırdı).
+  `ai_analysis` boşsa bileşen `null` döner — bölüm hiç görünmez, boşluk da kalmaz.
+  Analiz sürerken başlıkta **"Yapay zekâ inceliyor"** rozeti çıkar; sayfa 5 sn
+  aralıkla en fazla 14 kez yoklar (backend'in en kötü senaryosu ≈ 62 sn) ve süre
+  dolunca **sessizce** durur.
+- **YAŞANAN HATA — JSONB anahtar sırasını KORUMAZ.** Kartların backend'deki şema
+  sırasında çıkacağı sanılmıştı; ekran görüntüsünde "Baskın Renk, Stil, Boyut,
+  Çanta Türü, Tür…" gibi rastgele bir sırayla çıktı. Sebep: JSONB anahtarları
+  uzunluk + bayt sırasına göre yeniden dizer (`json` korurdu ama indekslenemez).
+  Gösterim sırası artık arayüzde `ALAN_ETIKETLERI` / `UYUMLULUK_ETIKETLERI`
+  anahtar sırasıyla tanımlı; etiketi olmayan alan kaybolmaz, sona düşer.
+- **Kaynak gizlenmiyor:** panelin altında "gemini-3.6-flash ile otomatik
+  oluşturuldu · 21 Ağustos 2026" dipnotu var — kullanıcı bunun editöryal bir
+  insan yorumu değil, otomatik bir analiz olduğunu bilmeli.
+- **Yeni yardımcı script `analyze-existing-items.js`:** bu özellikten önce
+  eklenmiş parçaları toplu analiz eder. **Varsayılan davranış SALT OKUNURDUR**
+  (`migrate-passwordless-users.js` kalıbı) çünkü her çağrı gerçek para harcar;
+  `--uygula` ve `--limit N` ile çalıştırılır.
+- **Doğrulama — `test-scripts/test-ai-analysis.js`, 90 kontrol:**
+  - *Birim bölümü (40) ANAHTAR VE SUNUCU GEREKTİRMEZ* (`--birim`, saniyeler
+    sürer): dört şemanın prompt'ları, kategori→şema eşlemesi ve asıl güvence —
+    Gemini fırlattığında / zaman aşımında / kota dolduğunda / veritabanı yazması
+    patladığında **servisin fırlatmaması ve kolona yarım veri yazmaması**;
+    maliyet koruması; `force`; in-flight muhafızı; eşzamanlılık sınırı;
+    yeniden deneme kuralları; soğuma süresi.
+  - *KRİTİK uçtan uca (13):* script **ikinci bir sunucu açar** (`:3199`,
+    geçersiz `GEMINI_API_KEY`) ve kıyafet eklemenin hâlâ çalıştığını kanıtlar:
+    sunucu açılıyor, kayıt/kıyafet/fotoğraf 201-200, analiz başarısız olduktan
+    SONRA sunucu ayakta, süreç çökmemiş, `ai_analysis` NULL, fotoğraf yerinde,
+    hata yalnızca loglanmış.
+  - *Gerçek analiz (37):* **3 farklı kategoriden gerçek fotoğrafla** (Üst,
+    Ayakkabı, Makyaj) — kolona yazılma, şemanın kategoriye göre seçilmesi,
+    kategoriye özgü alanların varlığı, uyumluluk dizileri, değerlerin paragraf
+    değil kısa etiket olması, liste sınırı, markdown çitinin sızmaması ve
+    **aynı parçanın tekrar yüklenmesinde yeniden analiz EDİLMEMESİ**.
+  - Sonuçlar gerçek veriyle tutarlı: New Balance 530 → *Sneaker / Beyaz / Düz
+    topuk*, Guess çanta → *El Çantası / Siyah / Kapitone*, Maybelline →
+    **ambalajdan okuyarak** *"Maybelline New York Lifter Gloss - Moon" /
+    Dudak Parlatıcısı*.
+  - *Tarayıcıda (20 kontrol, Playwright + sistem Chrome):* bölümün görünmesi,
+    değerlerin basılması, uyumluluk etiketleri, ham anahtar adının
+    (`alt_kategori`) sızmaması, **analizi olmayan parçada bölümün HİÇ çıkmaması**,
+    "inceliyor" rozeti, karanlık modda token'ların çalışması, 390px'te taşma
+    olmaması, temiz konsol.
+- **Test verisi BİLEREK silinmiyor:** `ai_analysis`'in gerçekten dolduğu DBeaver'da
+  gözle görülebilsin diye script sonda çalıştırılacak SQL'i yazdırır
+  (`jsonb_pretty(ai_analysis)`); temizlik `--cleanup` ya da `cleanup.js` ile.
+  Ayrıca mevcut gardıroptaki 5 gerçek parça analiz edilmiş durumda bırakıldı.
+- Regresyon: `test-all-endpoints` 72/72, `test-auth` 48/48, `test-stats` 60/60,
+  `test-item-outfits` 27/27, `test-clean-status` 26/26, lint + build temiz.
+  `test-gemini` (Aşama 1) 10 kontrol geçti, analiz bölümü **günlük kota dolduğu
+  için** koşamadı — bu çalışmayla ilgisi yok, kota ertesi gün sıfırlanır.
+- **Windows notu:** `docker exec … psql -f /tmp/m.sql` Git Bash'te yol dönüşümüne
+  takılıyor (`/tmp/…` Windows yoluna çevriliyor). Başına `MSYS_NO_PATHCONV=1`
+  eklemek gerekiyor.
 
 ### 2026-08-21 — Gemini entegrasyonu — Aşama 1 (bağlantı kanıtı)
 - **Kapsam:** yalnızca Gemini'nin çalıştığını kanıtlamak. Yeni katman

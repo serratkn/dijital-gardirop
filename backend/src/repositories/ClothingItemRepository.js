@@ -94,6 +94,30 @@ class ClothingItemRepository {
     }
   }
 
+  // Gemini analizini yazar (Aşama 2). Ayrı bir metod: analiz ARKA PLANDA,
+  // kullanıcının isteğinden bağımsız bir anda tamamlanır — o sırada kaydın
+  // diğer alanları başka bir istekle değişmiş olabilir, tam update onları ezerdi.
+  //
+  // updated_at BİLEREK dokunulmadan bırakılır: analiz kullanıcının yaptığı bir
+  // düzenleme değildir, "son güncelleme" damgasını kaydırması yanıltıcı olurdu.
+  async updateAiAnalysis(id, analysis) {
+    try {
+      const result = await this.pool.query(
+        `UPDATE clothing_items
+         SET ai_analysis = $1
+         WHERE id = $2 AND is_deleted = false
+         RETURNING *`,
+        // JSONB kolona nesne DOĞRUDAN geçilemez; pg onu "[object Object]"
+        // metnine çevirirdi. null geçmek analizi temizler (yeniden analiz yolu).
+        [analysis === null ? null : JSON.stringify(analysis), id],
+      )
+      return result.rows[0] || null
+    } catch (error) {
+      console.error('ClothingItemRepository.updateAiAnalysis hatası:', error.message)
+      throw error
+    }
+  }
+
   async softDelete(id) {
     try {
       const result = await this.pool.query(

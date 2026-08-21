@@ -36,6 +36,11 @@ export function toClothingItem(row, categoryNames) {
     imageUrl: row.image_url,
     isFavorite: row.is_favorite,
     isClean: row.is_clean,
+    // Gemini otomatik analizi (Aşama 2). NULL olabilir: analiz arka planda
+    // çalışır, henüz bitmemiş ya da hiç yapılamamış olabilir. Kolonun içeriği
+    // zaten kendi şemasında (Türkçe anahtarlar) olduğu için camelCase'e
+    // ÇEVRİLMEZ — burada yalnızca kolon adı camelCase olur.
+    aiAnalysis: row.ai_analysis ?? null,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
     imgHeight: pickMasonryHeight(row.id),

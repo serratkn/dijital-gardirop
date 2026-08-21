@@ -2,9 +2,13 @@ const BaseController = require('./BaseController')
 const { removeUploadedFile } = require('../config/upload')
 
 class ClothingItemController extends BaseController {
-  constructor(clothingItemService) {
+  // clothingAnalysisService OPSİYONELDİR: verilmezse fotoğraf yükleme eskisi
+  // gibi çalışır, yalnızca otomatik analiz devreye girmez. Testlerin ve
+  // ileride bu davranışı kapatmak isteyen bir kurulumun işini kolaylaştırır.
+  constructor(clothingItemService, clothingAnalysisService = null) {
     super()
     this.clothingItemService = clothingItemService
+    this.clothingAnalysisService = clothingAnalysisService
   }
 
   async getAll(req, res) {
@@ -82,7 +86,16 @@ class ClothingItemController extends BaseController {
 
     try {
       const item = await this.clothingItemService.setImage(req.params.id, req.userId, imageUrl)
+
+      // Yanıt ÖNCE gönderilir: analiz saniyeler sürebilir, kullanıcı onu
+      // beklememelidir. Bu "önce cevapla, sonra çalış" kararı HTTP sınırına
+      // aittir; servis katmanı isteğin ne zaman bittiğini bilmez.
       res.status(200).json(item)
+
+      // BİLEREK await EDİLMEZ. Servis asla fırlatmaz, ama yine de çağrı
+      // buradaki try/catch'in DIŞINDA sayılmalı: hata olsa bile yanıt çoktan
+      // gönderilmiştir ve fotoğraf yükleme başarılıdır.
+      this.clothingAnalysisService?.analyzeItemInBackground(req.params.id)
     } catch (error) {
       // Kayıt güncellenemediyse (yetki/doğrulama hatası) diske yazılmış dosya
       // öksüz kalmamalı.

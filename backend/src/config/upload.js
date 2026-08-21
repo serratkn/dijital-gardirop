@@ -67,6 +67,18 @@ async function removeUploadedFile(fileName) {
   }
 }
 
+// Uzantıdan MIME tipi. Diskteki bir dosyayı yeniden okuyup Gemini'ye
+// göndermek için gerekir (arka plan analizi): orada multer'ın verdiği
+// file.mimetype elimizde olmaz, yalnızca dosya adı vardır.
+const EXT_TO_MIME = Object.fromEntries(
+  Object.entries(ALLOWED_MIME_TYPES).map(([mime, ext]) => [ext, mime]),
+)
+
+function mimeTypeFromFileName(fileName) {
+  if (!fileName) return null
+  return EXT_TO_MIME[path.extname(fileName).toLowerCase()] || null
+}
+
 // image_url "/uploads/abc.jpg" biçiminde saklanır; diskteki adı çıkarır.
 function fileNameFromImageUrl(imageUrl) {
   if (!imageUrl) return null
@@ -81,4 +93,5 @@ module.exports = {
   uploadImageToMemory,
   removeUploadedFile,
   fileNameFromImageUrl,
+  mimeTypeFromFileName,
 }

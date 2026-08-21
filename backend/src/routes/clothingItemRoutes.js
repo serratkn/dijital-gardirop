@@ -3,12 +3,28 @@ const multer = require('multer')
 const pool = require('../config/database')
 const { uploadImage, MAX_FILE_SIZE } = require('../config/upload')
 const ClothingItemRepository = require('../repositories/ClothingItemRepository')
+const CategoryRepository = require('../repositories/CategoryRepository')
 const ClothingItemService = require('../services/ClothingItemService')
+const ClothingAnalysisService = require('../services/ClothingAnalysisService')
+const GeminiService = require('../services/GeminiService')
 const ClothingItemController = require('../controllers/ClothingItemController')
 
 const clothingItemRepository = new ClothingItemRepository(pool)
 const clothingItemService = new ClothingItemService(clothingItemRepository)
-const clothingItemController = new ClothingItemController(clothingItemService)
+
+// Otomatik Gemini analizi (Aşama 2). Kategori adı prompt'u belirlediği için
+// CategoryRepository de bağlanır. Analiz servisi ASLA fırlatmaz; bağlanması
+// fotoğraf yükleme akışının davranışını değiştirmez.
+const clothingAnalysisService = new ClothingAnalysisService(
+  clothingItemRepository,
+  new CategoryRepository(pool),
+  new GeminiService(),
+)
+
+const clothingItemController = new ClothingItemController(
+  clothingItemService,
+  clothingAnalysisService,
+)
 
 const router = Router()
 

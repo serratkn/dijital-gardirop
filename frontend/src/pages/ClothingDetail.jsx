@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
-import { WashingMachine } from 'lucide-react'
+import { Sparkles, WashingMachine } from 'lucide-react'
+import AiAnalysisPanel from '../components/AiAnalysisPanel'
 import Button from '../components/ui/Button'
 import Modal from '../components/ui/Modal'
 import PhotoPicker from '../components/ui/PhotoPicker'
@@ -17,6 +18,14 @@ import {
   uploadClothingItemImage,
 } from '../lib/api'
 import { toCategoryNameMap, toClothingItem } from '../lib/transformers'
+
+// Otomatik AI analizi arka planda çalışır; sayfa bunu yoklayarak bekler.
+// Pencere backend'in EN KÖTÜ senaryosunu kapsar: 2 deneme x 30 sn Gemini
+// zaman aşımı + aradaki bekleme ≈ 62 sn (14 x 5 sn = 70 sn).
+// Süre dolduğunda yoklama SESSİZCE durur: analiz zorunlu bir adım değil,
+// kullanıcıya "başarısız oldu" demek gereksiz bir endişe yaratırdı.
+const ANALYSIS_POLL_INTERVAL_MS = 5000
+const ANALYSIS_POLL_ATTEMPTS = 14
 
 const dateFormatter = new Intl.DateTimeFormat('tr-TR', {
   day: 'numeric',
@@ -42,6 +51,7 @@ function ClothingDetail() {
   const [outfits, setOutfits] = useState([])
   const [isOutfitsLoading, setIsOutfitsLoading] = useState(true)
   const [hasOutfitsError, setHasOutfitsError] = useState(false)
+  const [isAnalysisPending, setIsAnalysisPending] = useState(false)
 
   useEffect(() => {
     let isStale = false
@@ -76,6 +86,61 @@ function ClothingDetail() {
       isStale = true
     }
   }, [id])
+
+  // Fotoğrafı olan ama henüz analizi gelmemiş parça için arka plandaki
+  // Gemini analizini yoklar. Analiz yüklemeden SONRA, ayrı bir istekte
+  // tamamlandığı için sayfanın ilk çekimi onu göremeyebilir.
+  //
+  // Analizi olan parçada efekt hemen çıkar: backend zaten dolu bir
+  // ai_analysis'i TEKRAR ANALİZ ETMEZ (maliyet koruması), beklenecek
+  // bir şey yoktur.
+  useEffect(() => {
+    if (!item?.imageUrl || item.aiAnalysis) {
+      setIsAnalysisPending(false)
+      return
+    }
+
+    let isStale = false
+    let timeoutId
+    let attempt = 0
+
+    setIsAnalysisPending(true)
+
+    async function poll() {
+      attempt += 1
+
+      try {
+        const row = await fetchClothingItem(id)
+        if (isStale) return
+
+        if (row.ai_analysis) {
+          setItem((previous) => (previous ? { ...previous, aiAnalysis: row.ai_analysis } : previous))
+          setIsAnalysisPending(false)
+          return
+        }
+      } catch (error) {
+        // Yoklama hatası kullanıcıya GÖSTERİLMEZ: sayfanın asıl içeriği
+        // çoktan yüklendi, bu yalnızca bir zenginleştirme.
+        console.error('AI analizi yoklanamadı:', error)
+      }
+
+      if (isStale) return
+
+      if (attempt >= ANALYSIS_POLL_ATTEMPTS) {
+        setIsAnalysisPending(false)
+        return
+      }
+
+      timeoutId = setTimeout(poll, ANALYSIS_POLL_INTERVAL_MS)
+    }
+
+    timeoutId = setTimeout(poll, ANALYSIS_POLL_INTERVAL_MS)
+
+    return () => {
+      isStale = true
+      clearTimeout(timeoutId)
+    }
+  }, [id, item?.imageUrl, item?.aiAnalysis])
 
   // Kombinler ayrı bir efektte çekilir: bu istek başarısız olursa sayfanın
   // tamamı değil yalnızca bu bölüm hata durumuna düşer.
@@ -156,7 +221,13 @@ function ClothingDetail() {
 
     try {
       const updated = await uploadClothingItemImage(id, file)
-      setItem((previous) => ({ ...previous, imageUrl: updated.image_url }))
+      // ai_analysis da yanıttan alınır: yeni fotoğrafın analizi arka planda
+      // başlar ve yukarıdaki yoklama efekti bu değişiklikle tetiklenir.
+      setItem((previous) => ({
+        ...previous,
+        imageUrl: updated.image_url,
+        aiAnalysis: updated.ai_analysis ?? null,
+      }))
       setImageFailed(false)
       setIsPhotoEditing(false)
     } catch (error) {
@@ -337,6 +408,12 @@ function ClothingDetail() {
                   Kirli
                 </span>
               )}
+              {isAnalysisPending && (
+                <span className="inline-flex animate-pulse items-center gap-1.5 rounded-full border border-dusty-rose/40 bg-surface px-2.5 py-1 text-[10px] font-medium uppercase tracking-[0.1em] text-accent-ink">
+                  <Sparkles size={11} strokeWidth={1.75} />
+                  Yapay zekâ inceliyor
+                </span>
+              )}
             </div>
             <h1 className="mt-3 font-display text-4xl italic text-ink sm:text-5xl">{item.name}</h1>
 
@@ -446,6 +523,12 @@ function ClothingDetail() {
             </button>
           </div>
         </div>
+
+        {/* Analiz bölümü ızgaranın ALTINDA, tam genişlikte: sağ sütun md
+            altında yarım genişliktir ve iki sütunlu bilgi kartları oraya
+            sıkışırdı. ai_analysis boşsa bileşen null döner, hiçbir boşluk
+            bırakmaz. */}
+        <AiAnalysisPanel analysis={item.aiAnalysis} />
       </div>
 
       <Modal isOpen={isConfirmOpen} onClose={() => !isDeleting && setIsConfirmOpen(false)}>
