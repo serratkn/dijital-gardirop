@@ -5,6 +5,7 @@ import PageHeader from '../components/ui/PageHeader'
 import FilterPills from '../components/ui/FilterPills'
 import EmptyState from '../components/ui/EmptyState'
 import Button from '../components/ui/Button'
+import ShareButton from '../components/ui/ShareButton'
 import ClothingCard from '../components/ClothingCard'
 import { createOutfit, fetchCategories, fetchClothingItems, fetchMe, fetchWeather } from '../lib/api'
 import { toCategoryNameMap, toClothingItems } from '../lib/transformers'
@@ -352,6 +353,9 @@ function OutfitSuggestion() {
                     >
                       {saveButtonLabel}
                     </Button>
+                    {/* Öneri kaydedilmemiş olsa bile paylaşılabilir:
+                        görsel tamamen istemcide üretilir, kayda bağlı değil. */}
+                    <ShareButton occasion={selectedOccasion} items={suggestionItems} />
                   </div>
 
                   {saveError && <p className="mt-3 text-sm text-burgundy">{saveError}</p>}

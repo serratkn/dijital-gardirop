@@ -5,6 +5,7 @@ import PageHeader from '../components/ui/PageHeader'
 import EmptyState from '../components/ui/EmptyState'
 import Modal from '../components/ui/Modal'
 import Button from '../components/ui/Button'
+import ShareButton from '../components/ui/ShareButton'
 import { CATEGORY_ICONS } from '../lib/categoryIcons'
 import {
   deleteOutfit,
@@ -93,6 +94,17 @@ function OutfitCard({ outfit, categoryNames, onToggleFavorite, onRequestDelete }
               </Link>
             )
           })}
+        </div>
+      )}
+
+      {outfit.items.length > 0 && (
+        <div className="mt-5 border-t border-ink/10 pt-4">
+          <ShareButton
+            occasion={outfit.occasion}
+            items={outfit.items}
+            createdAt={outfit.created_at}
+            categoryNames={categoryNames}
+          />
         </div>
       )}
     </article>

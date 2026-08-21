@@ -52,7 +52,8 @@ Kökteki `package.json` yalnızca artık Capacitor bağımlılıkları içerir, 
 ### Frontend
 
 React 19, Vite 8, Tailwind v4, react-router-dom 7, lucide-react (ikonlar),
-Capacitor 8 (Android paketleme). Lint: **oxlint** (depodaki tek otomatik kontrol).
+html-to-image (kombin paylaşım görseli), Capacitor 8 (Android paketleme).
+Lint: **oxlint** (depodaki tek otomatik kontrol).
 
 ### Backend
 
@@ -238,6 +239,9 @@ olduğu için iskelet oraya taşındı, kombin üretimi istemci tarafında anlı
 - **Kombinlerim** — kayıtlı kombinler; parçaları, tarihi, favori ve silme işlemleriyle
 - **Kıyafet Detay** — görüntüleme, favori, onaylı silme, fotoğraf yönetimi ve
   **o parçanın geçtiği kombinlerin listesi**
+- **Kombin paylaşımı** — Kombin Öner'deki öneri ve Kombinlerim'deki her kombin,
+  Instagram Story oranında (1080×1920) bir PNG olarak indirilebilir; görsel
+  **daima açık mod** renklerindedir
 - **Karanlık mod** — Profil > Görünüm'den açılır/kapanır; tercih `dg_theme`'de saklanır,
   ilk açılışta sistem tercihi (`prefers-color-scheme`) varsayılan olur
 - **Onboarding** — kullanıcıyı `POST /api/users` ile oluşturur, tarz anketini
@@ -263,6 +267,7 @@ olduğu için iskelet oraya taşındı, kombin üretimi istemci tarafında anlı
 | **Kombin "giyildi" sayacı** | `PATCH /outfits/:id/worn` ucu hazır; Kombinlerim sayfası `times_worn` değerini gösterir ama artırma butonu yoktur. |
 | **Bildirimler / Yardım & Destek** | "Yakında" sayfalarıdır, işlevleri yoktur. |
 | **Gardırop'ta favori filtresi yok** | Sayfada kategori pillerinden ve aramadan başka filtre yoktur; favorileri tek başına listelemenin bir yolu bulunmuyor. Bu yüzden Ana Sayfa'daki "Favori" kartı filtresiz `/gardirop`'a gider. |
+| **Paylaşım indirmesi mobilde denenmedi** | Görsel üretimi platformdan bağımsızdır ama indirme `<a download>` ile yapılır; Android WebView'de çalışmazsa Capacitor Filesystem/Share eklentisine geçilmelidir. Hata hâlinde kullanıcıya mesaj gösterilir, uygulama çökmez. |
 | **Test altyapısı yok** | Test framework'ü yoktur. Doğrulama: `npm run lint` + `backend/test-scripts/` + elle deneme. |
 
 ---
@@ -896,6 +901,41 @@ uygulanır. Bunun sebebi sayfanın iki durumu ayırt etmek zorunda olmasıdır:
 `isStale` bayrağı geç gelen yanıtın state'i ezmesini önler; `isLoading` / `hasError`
 durumları iskelet ve boş/hata ekranlarını sürer.
 
+**Kombin paylaşım görseli.** `lib/shareCard.js` (üretim mantığı) +
+`components/ShareOutfitCard.jsx` (görselin kendisi) + `components/ui/ShareButton.jsx`
+(düğme ve durum yönetimi). Kütüphane **html-to-image**'dır; SVG `<foreignObject>`
+içinde TARAYICIYA çizdirdiği için Tailwind v4'ün `color-mix(in oklab, …)` değerlerini
+sorunsuz işler (html2canvas kendi CSS ayrıştırıcısını kullanır ve bunlarda kırılır,
+ayrıca son gerçek sürümü 2022'dir).
+
+Bu kodda **bilerek yapılmış ve bozulmaması gereken dört şey** var:
+
+1. **Kart sabit hex renklerle, satır içi stille yazılır** — Tailwind token'ı
+   kullanılmaz. Token'lar karanlık modda koyu değere döner; paylaşılan görsel ise
+   kullanıcının ekran tercihine değil markaya aittir ve **daima açık moddur**.
+2. **Yakalanan düğüm STATİK konumlanmalıdır.** Ekran dışına taşıma işi
+   `ShareButton`'daki sarmalayıcıya aittir: html-to-image, düğümün hesaplanmış
+   stillerini klona da kopyalar; kartta `position:fixed; left:-10000px` olsaydı
+   klon da oraya gider ve PNG **bomboş** çıkardı (yaşandı). `display:none` de
+   olamaz — o hâlde kartın ölçüsü sıfır olur.
+3. **`cacheBust` KULLANILMAZ.** Kütüphane onu her kaynak URL'sinin sonuna
+   `?<zaman>` ekleyerek uygular; fotoğraflar `data:` URI olarak gömüldüğü için bu,
+   base64 yükünü bozar ve üretim **askıda kalır** (fotoğrafsız kombin çalışır,
+   fotoğraflı olan donar — tam olarak bu yaşandı).
+4. **Kart DOM'a `flushSync` ile alınır.** `setCardItems` sonrası DOM'un hazır
+   olduğu garanti değildir; `setTimeout(0)` ile beklemek fotoğrafsız kombinde
+   çalışıp fotoğraflıda `cardRef.current`'ı null bırakıyordu.
+
+Fotoğraflar önce `fetch` + `FileReader` ile **data: URI'ye çevrilir**. Backend
+`:3001`, uygulama `:5173` olduğu için aksi hâlde canvas "tainted" olabilir ya da
+serileştirme sırasında görsel yüklenemezdi. Alınamayan fotoğraf `null` kalır ve o
+parça yer tutucuyla çizilir — tek bir görsel hatası paylaşımı engellemez.
+
+Ölçü `360×640` CSS + `pixelRatio: 3` = **1080×1920** (Instagram Story). Izgara iki
+sütundur; parça sayısı **tekse son parça iki sütuna yayılır**, yoksa sağ altta boş
+hücre kalırdı. Parçalar giyim sırasına (`Üst → Elbise → Alt → Ayakkabı → Çanta`)
+göre dizilir, API sırasına göre değil.
+
 **Kalıcı durum:** `src/lib/onboarding.js` `dg_` önekli localStorage anahtarlarının
 tek sahibidir (onboarding bayrağı, `dg_user_id`, kullanıcı profili, anket cevapları).
 **İki istisna:** `dg_token` `lib/auth.js`'e, `dg_theme` `lib/theme.js`'e aittir.
@@ -1018,6 +1058,64 @@ fotoğraf sorunu teyit edildikten sonra üç yerden de kaldırılabilir.
 
 > Bundan sonraki her çalışma buraya tarihiyle işlenir: eklenen özellikler, düzeltilen
 > hatalar, alınan mimari kararlar. En yeni kayıt en üstte.
+
+### 2026-08-21 — Kombin paylaşımı: Story oranında PNG indirme (html-to-image)
+- **Ne eklendi:** Kombin Öner'deki öneriye ve Kombinlerim'deki HER kombine "Paylaş"
+  düğmesi. Kombin, **1080×1920** (Instagram Story) bir PNG olarak indiriliyor:
+  üstte marka yazısı, ortada parçaların kolajı, altta durum ve tarih.
+- **Kütüphane seçimi — html-to-image.** İstenen iki seçenekten html2canvas'ın son
+  gerçek sürümü **Ocak 2022** (v1.4.1), html-to-image ise aktif bakımda (2025).
+  Teknik olarak da belirleyici: html-to-image SVG `<foreignObject>` içinde
+  **tarayıcıya** çizdirir, dolayısıyla Tailwind v4'ün ürettiği
+  `color-mix(in oklab, …)` değerlerini anlar; html2canvas kendi CSS ayrıştırıcısını
+  kullandığı için modern renk fonksiyonlarında kırılır.
+- **Görsel DAİMA AÇIK MOD.** Kart, Tailwind token'ı değil **sabit hex + satır içi
+  stil** kullanır. Token kullanılsaydı karanlık modda koyu bir kart üretilirdi;
+  oysa paylaşılan görsel kullanıcının ekran tercihine değil markaya aittir.
+  Test bunu karanlık modda indirip **PNG'nin köşe pikselini okuyarak** doğrular
+  (`247,243,237` = ivory).
+- **Fotoğraflar önce `data:` URI'ye çevrilir** (`fetch` + `FileReader`). Backend
+  `:3001`, uygulama `:5173` olduğu için aksi hâlde canvas "tainted" olabilir veya
+  serileştirmede görsel yüklenemezdi. Alınamayan fotoğraf `null` kalır → o parça
+  yer tutucuyla çizilir; tek bir görsel hatası paylaşımı engellemez.
+- **ÜÇ GERÇEK TUZAK yaşandı, üçü de kodda yorumlandı:**
+  1. **PNG bomboş çıktı.** Kartın kendisinde `position:fixed; left:-10000px` vardı;
+     html-to-image yakaladığı düğümün hesaplanmış stillerini klona da kopyaladığı
+     için klon da ekran dışına konumlanıyordu. Çözüm: **kart statik konumlanır**,
+     ekran dışına taşıma işi `ShareButton`'daki sarmalayıcıya ait. (`display:none`
+     de olamaz — o hâlde ölçü sıfır olur.)
+  2. **Fotoğraflı kombinde üretim ASKIDA KALDI** (fotoğrafsız çalışıyordu).
+     Sebep `cacheBust: true`: kütüphane bunu her kaynak URL'sinin sonuna
+     `?<zaman>` ekleyerek uygular ve bu, gömülü `data:` URI'nin base64 yükünü
+     bozuyordu. Gömülü veride önbellek sorunu zaten yok — seçenek kaldırıldı.
+  3. **`cardRef.current` null kaldı** (yine yalnızca fotoğraflı kombinde).
+     `setCardItems` sonrası DOM'un hazır olduğu garanti değil; `setTimeout(0)` ile
+     beklemek fotoğrafsızda tesadüfen çalışıyordu, `embedItemImages`'in await'i
+     zamanlamayı kaydırınca kırıldı. Çözüm: **`flushSync`** ile senkron commit.
+- **Düzen kuralı:** ızgara iki sütun; parça sayısı **tekse son parça iki sütuna
+  yayılır**, yoksa sağ altta boş hücre kalırdı. Parçalar giyim sırasına
+  (`Üst → Elbise → Alt → Ayakkabı → Çanta`) dizilir, API sırasına göre değil.
+- **Hata yolu:** görsel üretimi tarayıcıya bağlıdır; başarısızlıkta `try/catch`
+  nazik bir Türkçe mesaj gösterir, **sayfa çökmez** ve düğme yeniden denenebilir
+  hâle döner. Üretim sırasında düğme "Hazırlanıyor..." + dönen ikon gösterir.
+- **Gizli kart yalnızca üretim sırasında DOM'dadır**; iş bitince kaldırılır.
+  Sürekli duran bir kopya, her kombin kartı için ekstra DOM ve görsel yükü demekti.
+- **Doğrulama — gerçek tarayıcıda 29 kontrol.** İndirme Playwright ile yakalanıp
+  dosya diske yazıldı, sonra PNG **geri açılıp piksel örneklendi**:
+  Story ölçüsü (1080×1920), dosya adının occasion'dan türemesi, zeminin ivory
+  olması, **gömülü fotoğrafların gerçekten görselde çıkması** (test için yüklenen
+  düz mavi `0,128,255` ve magenta `255,0,128` karolar birebir okundu),
+  2/3/4 parçalı düzenlerin bozulmaması, **karanlık modda bile açık mod renkleri**,
+  Kombin Öner sayfasından paylaşım, konsolun temiz kalması ve `getContext`
+  bozulduğunda nazik hata + sayfanın ayakta kalması.
+- Regresyon: statik kontrast denetimi 40/40, karanlık mod akışları 36/36,
+  hover kontrastı 10/10, istatistik kartı 37/37, `test-stats` 60/60,
+  `test-all-endpoints` 72/72, `test-auth` 48/48, `test-item-outfits` 27/27,
+  `test-clean-status` 26/26, lint + build temiz.
+- **Açık iş — mobil indirme.** Görsel üretimi platformdan bağımsız çalışır ama
+  indirme `<a download>` ile yapılır; Android WebView'de bu desteklenmeyebilir.
+  Denenmedi (web önceliklendirildi). Gerekirse Capacitor Filesystem + Share
+  eklentisine geçilmelidir; `downloadBlob` bu ayrımı tek noktada tutuyor.
 
 ### 2026-08-20 — `rose` butonunun hover hâli AA'ya çıkarıldı
 - `Button` `rose` varyantında `hover:bg-dusty-rose` → **`hover:bg-accent-ink`**.
