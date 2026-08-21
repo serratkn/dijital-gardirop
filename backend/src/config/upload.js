@@ -42,6 +42,17 @@ const uploadImage = multer({
   limits: { fileSize: MAX_FILE_SIZE, files: 1 },
 })
 
+// BELLEKTE tutan varyant: dosyayı diske YAZMAZ, `req.file.buffer` verir.
+// Gemini analizi gibi "oku, kullan, at" akışları içindir — diskStorage
+// kullanılsaydı analiz edilen her görsel uploads/ altında hiçbir kaydın
+// referans vermediği öksüz bir dosya olarak kalırdı.
+// Aynı fileFilter ve boyut sınırını paylaşır.
+const uploadImageToMemory = multer({
+  storage: multer.memoryStorage(),
+  fileFilter,
+  limits: { fileSize: MAX_FILE_SIZE, files: 1 },
+})
+
 // Diskteki dosyayı sessizce siler. Dosya yoksa hata fırlatmaz —
 // silme işlemleri idempotent olmalı.
 async function removeUploadedFile(fileName) {
@@ -67,6 +78,7 @@ module.exports = {
   MAX_FILE_SIZE,
   ALLOWED_MIME_TYPES,
   uploadImage,
+  uploadImageToMemory,
   removeUploadedFile,
   fileNameFromImageUrl,
 }

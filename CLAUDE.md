@@ -57,7 +57,8 @@ Lint: **oxlint** (depodaki tek otomatik kontrol).
 
 ### Backend
 
-Express 4, `pg` (PostgreSQL sürücüsü), `cors`, `dotenv`. CommonJS (`require`).
+Express 4, `pg` (PostgreSQL sürücüsü), `cors`, `dotenv`, `@google/genai`
+(Gemini — şimdilik yalnızca Aşama 1 test ucu). CommonJS (`require`).
 
 ### Veritabanı
 
@@ -268,6 +269,7 @@ olduğu için iskelet oraya taşındı, kombin üretimi istemci tarafında anlı
 | **Bildirimler / Yardım & Destek** | "Yakında" sayfalarıdır, işlevleri yoktur. |
 | **Gardırop'ta favori filtresi yok** | Sayfada kategori pillerinden ve aramadan başka filtre yoktur; favorileri tek başına listelemenin bir yolu bulunmuyor. Bu yüzden Ana Sayfa'daki "Favori" kartı filtresiz `/gardirop`'a gider. |
 | **Paylaşım indirmesi mobilde denenmedi** | Görsel üretimi platformdan bağımsızdır ama indirme `<a download>` ile yapılır; Android WebView'de çalışmazsa Capacitor Filesystem/Share eklentisine geçilmelidir. Hata hâlinde kullanıcıya mesaj gösterilir, uygulama çökmez. |
+| **Gemini yalnızca test ucunda** | `POST /gemini/test-analyze` bir proof of concept'tir, ürün akışlarına bağlı değildir. Otomatik kıyafet analizi ve vektör veritabanı sonraki aşamaların işi. |
 | **Test altyapısı yok** | Test framework'ü yoktur. Doğrulama: `npm run lint` + `backend/test-scripts/` + elle deneme. |
 
 ---
@@ -440,6 +442,37 @@ Uç **korumalıdır** (token ister): aksi hâlde API anahtarımız herkese açı
 durumu vekiline dönüşürdü. `WEATHER_API_KEY` tanımlı değilse dış servise **hiç
 gidilmez**; sunucu `JWT_SECRET`'ten farklı olarak **patlamaz** — hava durumu opsiyonel
 bir özelliktir, uygulamanın geri kalanı anahtarsız da tam çalışır.
+
+### Gemini (GEÇİCİ — Aşama 1)
+
+| Metod | Yol | Açıklama |
+|---|---|---|
+| `POST` | `/gemini/test-analyze` | **multipart/form-data**, alan adı `image`. Görseli Gemini'ye analiz ettirir |
+
+**Bu uç kalıcı bir özellik DEĞİLDİR.** Yalnızca Gemini bağlantısının çalıştığını
+kanıtlamak için vardır; otomatik kıyafet analizi gerçek akışlara bağlanınca
+kaldırılmalı ya da yerini asıl uca bırakmalıdır. Korumalıdır (token ister) —
+aksi hâlde API anahtarımız herkese açık bir Gemini vekiline dönüşürdü.
+
+Dosya kısıtları fotoğraf yüklemeyle aynıdır (jpg/png/webp, en fazla 5 MB) ama
+görsel **diske YAZILMAZ**: `uploadImageToMemory` kullanılır ve tampon doğrudan
+base64'e çevrilip gönderilir. `uploadImage` (diskStorage) kullanılsaydı analiz
+edilen her görsel `uploads/` altında hiçbir kaydın referans vermediği öksüz bir
+dosya olarak kalırdı.
+
+```json
+{"model":"gemini-3.6-flash",
+ "analysis":{"kategori":"Crop Top","renk":"Pembe","stil":"Günlük"},
+ "raw":"{
+  \"kategori\": \"Crop Top\", …"}
+```
+
+`raw` teşhis içindir: modelin ne döndürdüğünü görmeden hata ayıklamak zordur.
+
+**Hatalar 500 değil `503` döner** (`ServiceUnavailableError`) ve mesaj açıklayıcıdır:
+anahtar yok, anahtar geçersiz, kota doldu, model bulunamadı, zaman aşımı, JSON
+çözümlenemedi. Ham SDK hatası asla dışarı sızmaz — yığın izi ve anahtar parçası
+içerebilir.
 
 ### Categories (salt okunur)
 
@@ -735,6 +768,11 @@ node test-scripts/test-stats.js
 node test-scripts/test-clothing-items.js
 node test-scripts/test-clothing-items.js --cleanup   # oluşturduğu kaydı sonda siler
 
+# Gemini Aşama 1 (20 kontrol). Birinci bölüm GEÇERLİ ANAHTAR OLMADAN da çalışır
+# (eksik/geçersiz anahtar yolları); analiz bölümü anahtar ve görsel ister.
+node test-scripts/test-gemini.js
+node test-scripts/test-gemini.js --image ../yol/kiyafet.jpg
+
 # Test artıklarını temizler
 node test-scripts/cleanup.js --dry-run               # önce neyin silineceğini göster
 node test-scripts/cleanup.js                         # test parçaları + @example.com kullanıcıları
@@ -832,11 +870,33 @@ Mevcut sorgulara ve uç noktanın sözleşmesine dokunmak gerekmez — yanıt ya
 anahtarla büyür. **Sayımlar her zaman `::int` ile daraltılmalıdır** (`pg` bigint'i string
 döndürür) ve "en çok" sorguları eşitlik için ikincil sıralama taşımalıdır.
 
+**Gemini katmanı (Aşama 1).** `config/gemini.js` istemciyi kurar (database.js ile
+aynı rol), `GeminiService` görseli gönderip JSON yanıtı çözer, `GeminiController`
+ince adaptördür. Repository yoktur: kalıcı veri yok, yalnızca dış çağrı.
+`WeatherService` ile aynı iki kural geçerlidir — **anahtar yoksa dış servise HİÇ
+gidilmez** ve **istek zaman aşımsız bırakılmaz** (`AbortSignal.timeout`, 30 sn).
+Farkı: WeatherService asla fırlatmaz (hava durumu isteğe bağlı zenginleştirmedir),
+GeminiService fırlatır — çünkü burada kullanıcı doğrudan bir analiz istemiştir ve
+sessizce boş dönmek yanlış olurdu.
+
+**Model adı `.env`'den değiştirilebilir** (`GEMINI_MODEL`). Kod değil yapılandırma
+güncellensin diye; model emeklilikleri sık yaşanıyor (bkz. aşağıdaki uyarı).
+
+> **Model listede görünmesi kullanılabilir olduğu anlamına GELMEZ.**
+> `models?key=…` çıktısında `gemini-2.5-flash` görünüyor ama çağrıldığında
+> `404 — no longer available to new users` veriyor. Model değiştirirken listeye
+> bakmak yetmez, gerçekten **çağırarak** doğrulayın.
+
 **Auth katmanı.** `server.js` tek bir `AuthService` ve ondan türetilen tek bir
 `authenticate` middleware kurar (token'ı imzalayan ve doğrulayan aynı örnek olmalı).
 `authRoutes` bu yüzden diğerlerinden farklı olarak bir **fabrikadır**
 (`createAuthRoutes(authService, authenticate)`). Yeni korumalı bir kaynak eklerken
 `app.use('/api', authenticate, yeniRoutes)` deyip controller'da `req.userId` kullanın.
+
+`utils/errors.js` içindeki **`ServiceUnavailableError` (503)** dış servis hataları
+içindir: 500 "bizim kodumuz patladı" der ve kullanıcıya hiçbir şey anlatmaz,
+503 ise "bağımlı olduğumuz servis şu an kullanılamıyor" der. `/health` de
+veritabanı için aynı kodu kullanır.
 
 **Silinmemesi gerekenler:** `config/database.js` içindeki `pool.on('error')` dinleyicisi
 (bkz. Aşama 5), `UserRepository` içindeki açık kolon listesi (bkz. Aşama 6b) ve
@@ -1058,6 +1118,73 @@ fotoğraf sorunu teyit edildikten sonra üç yerden de kaldırılabilir.
 
 > Bundan sonraki her çalışma buraya tarihiyle işlenir: eklenen özellikler, düzeltilen
 > hatalar, alınan mimari kararlar. En yeni kayıt en üstte.
+
+### 2026-08-21 — Gemini entegrasyonu — Aşama 1 (bağlantı kanıtı)
+- **Kapsam:** yalnızca Gemini'nin çalıştığını kanıtlamak. Yeni katman
+  (`config/gemini.js` → `GeminiService` → `GeminiController` → `geminiRoutes`) ve
+  **geçici** bir uç: `POST /api/gemini/test-analyze`. Otomatik kıyafet analizi ve
+  vektör veritabanı **bu aşamanın kapsamı dışında** — kod o yönde genişletilebilir
+  bırakıldı ama hiçbir ürün akışına bağlanmadı.
+- **SDK: `@google/genai` kuruldu, `@google/generative-ai` DEĞİL.** İstenen paket
+  Google'ın eski SDK'sı: 0.24.1'de kalmış, Nisan 2025'ten beri güncellenmemiş,
+  hiç 1.0'a ulaşmamış. Yerini alan resmi paket `@google/genai` (googleapis/js-genai,
+  o sırada 2.18.0, iki gün önce güncellenmiş). Bu dosyalar sonraki aşamaların
+  temeli olduğu için bakımlı olan seçildi. CommonJS ile sorunsuz çalışıyor.
+- **MODEL SEÇİMİ ÖLÇÜMLE YAPILDI — istenen iki model de artık yok:**
+  - `gemini-1.5-flash` ve `gemini-2.0-flash`: API'nin model listesinde **hiç
+    dönmüyorlar**, emekliye ayrılmışlar.
+  - `gemini-2.5-flash`: **listede görünüyor ama çağrıldığında 404**:
+    *"no longer available to new users. Please update your code to use
+    models/gemini-3.6-flash"*. **Alınan ders: listede olmak kullanılabilir olmak
+    değildir** — model seçerken gerçekten çağırarak doğrulayın.
+  - `gemini-3.7-flash`: çağrıldığında `503 high demand`.
+  - **Varsayılan `gemini-3.6-flash`** (Google'ın kendi hata mesajındaki öneri).
+    Gerçek bir kıyafet fotoğrafıyla `gemini-3.5-flash` ile karşılaştırıldı: 3.6
+    iki koşuda da aynı etiketi verdi ("Crop Top"), 3.5 bir koşuda "tişört"e kaydı.
+  - Model `GEMINI_MODEL` ile değiştirilebilir: emeklilikler sık yaşandığı için
+    kod değil yapılandırma güncellensin.
+- **Zaman aşımı 30 sn.** Ölçümde aynı model aynı fotoğraf için bir kez 4.4 sn,
+  bir kez 20.4 sn sürdü; `WeatherService`'teki 5 sn burada yetmezdi. Zaman aşımsız
+  bırakmak ise isteği tutan HTTP bağlantısını askıda bırakırdı.
+- **Görsel DİSKE YAZILMAZ.** `config/upload.js`'e `uploadImageToMemory` eklendi
+  (aynı fileFilter ve 5 MB sınırı, `multer.memoryStorage`). Mevcut `uploadImage`
+  diskStorage kullanıyor; onunla analiz edilen her görsel `uploads/` altında
+  hiçbir kaydın referans vermediği **öksüz bir dosya** olarak kalırdı. Test bunu
+  ayrıca doğruluyor (analiz sonrası dosya sayısı değişmiyor).
+- **Hatalar 500 değil 503.** `utils/errors.js`'e `ServiceUnavailableError` eklendi.
+  500 "bizim kodumuz patladı" der ve kullanıcıya hiçbir şey anlatmaz; 503
+  "bağımlı olduğumuz servis kullanılamıyor" der (`/health` de aynı kodu kullanır).
+  Ayrı ayrı Türkçeleştirilen durumlar: anahtar yok, anahtar geçersiz, yetki
+  reddedildi, kota doldu, model bulunamadı, zaman aşımı, JSON çözülemedi.
+  **Ham SDK hatası asla sızmaz** — yığın izi ve anahtar parçası içerebilir;
+  test bunu ayrıca kontrol ediyor.
+- **Anahtar yoksa sunucu PATLAMAZ** (`WEATHER_API_KEY` ile aynı yaklaşım,
+  `JWT_SECRET`'in aksine): anahtarsız kurulumda uygulamanın geri kalanı tam
+  çalışır, yalnızca bu uç 503 ile "anahtar tanımlı değil" der ve dış servise
+  **hiç gidilmez**.
+- **İstemci önbelleği anahtara bağlandı.** Yalnızca istemci saklansaydı çalışma
+  anında `GEMINI_API_KEY` değiştiğinde eski anahtarlı istemci sessizce kullanılmaya
+  devam ederdi; testte geçersiz anahtar senaryosunu sürmek de imkânsız olurdu.
+- **Uç korumalıdır** (token ister) — aksi hâlde API anahtarımız herkese açık bir
+  Gemini vekiline dönüşürdü. Kimlik `req.userId`'den okunur.
+- **Doğrulama — `test-scripts/test-gemini.js`, 20 kontrol:**
+  - *Birinci bölüm geçerli anahtar OLMADAN çalışır* (`test-weather.js` kalıbı):
+    görselsiz istek 400; anahtarsız 503 + "GEMINI_API_KEY ekleyin"; **gerçekten
+    geçersiz bir anahtarla Gemini'ye gidilip** 503 + Türkçe mesaj alınması ve ham
+    SDK hatasının sızmaması.
+  - *HTTP:* token'sız 401, dosyasız 400, görsel olmayan dosya 400.
+  - *Gerçek analiz:* `uploads/` içindeki en büyük fotoğraf (ya da `--image`) ile
+    200, `model`/`analysis`/`raw` alanları, `kategori`/`renk`/`stil` alanlarının
+    dolu olması, değerlerin **paragraf değil kısa etiket** olması, ham yanıtın
+    markdown çiti içermemesi, süre < 30 sn.
+  - **Sonuç gerçek veriyle doğrulandı:** Gemini `{"kategori":"Crop Top",
+    "renk":"Pembe","stil":"Günlük"}` döndürdü; aynı fotoğrafın veritabanındaki
+    kendi kaydı **"Bershka crop top / Pembe / Üst"** — tür ve renk birebir tutuyor.
+- Regresyon: `test-all-endpoints` 72/72, `test-auth` 48/48, `test-stats` 60/60,
+  `test-item-outfits` 27/27, `test-clean-status` 26/26.
+  `test-image-upload` yine 26/3 — **bilinen ortam sorunu**: script `uploads/`
+  dosyalarını MUTLAK sayar, klasörde 8 gerçek kullanıcı fotoğrafı var. Bu
+  çalışmayla ilgisi yok (Gemini ucu diske hiç yazmıyor).
 
 ### 2026-08-21 — Kombin paylaşımı: Story oranında PNG indirme (html-to-image)
 - **Ne eklendi:** Kombin Öner'deki öneriye ve Kombinlerim'deki HER kombine "Paylaş"

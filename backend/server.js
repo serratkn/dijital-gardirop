@@ -18,6 +18,7 @@ const stylePreferenceRoutes = require('./src/routes/stylePreferenceRoutes')
 const clothingItemRoutes = require('./src/routes/clothingItemRoutes')
 const outfitRoutes = require('./src/routes/outfitRoutes')
 const weatherRoutes = require('./src/routes/weatherRoutes')
+const geminiRoutes = require('./src/routes/geminiRoutes')
 
 const app = express()
 const PORT = process.env.PORT || 3001
@@ -50,6 +51,9 @@ app.use('/api', authenticate, outfitRoutes)
 // Hava durumu da korumalı: aksi hâlde API anahtarımız herkese açık bir
 // hava durumu vekiline dönüşürdü.
 app.use('/api', authenticate, weatherRoutes)
+// GEÇİCİ (Gemini Aşama 1): yalnızca bağlantıyı doğrulayan test ucu.
+// Korumalı — aksi hâlde API anahtarımız herkese açık bir Gemini vekiline dönüşürdü.
+app.use('/api', authenticate, geminiRoutes)
 
 app.listen(PORT, () => {
   console.log(`Sunucu ${PORT} portunda çalışıyor`)

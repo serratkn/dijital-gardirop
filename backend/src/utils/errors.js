@@ -34,4 +34,21 @@ class ForbiddenError extends AppError {
   }
 }
 
-module.exports = { AppError, ValidationError, NotFoundError, ConflictError, ForbiddenError }
+// Dış servis (Gemini gibi) erişilemediğinde veya anlamsız yanıt verdiğinde.
+// 500 DEĞİL: 500 "bizim kodumuz patladı" demektir ve kullanıcıya hiçbir şey
+// anlatmaz. 503 "bağımlı olduğumuz servis şu an kullanılamıyor" demektir ve
+// mesajı da açıklayıcıdır. /health uç noktası da veritabanı için 503 kullanır.
+class ServiceUnavailableError extends AppError {
+  constructor(message = 'Servis şu anda kullanılamıyor') {
+    super(message, 503)
+  }
+}
+
+module.exports = {
+  AppError,
+  ValidationError,
+  NotFoundError,
+  ConflictError,
+  ForbiddenError,
+  ServiceUnavailableError,
+}
