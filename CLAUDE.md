@@ -248,6 +248,12 @@ olduğu için iskelet oraya taşındı, kombin üretimi istemci tarafında anlı
   kullanılabildiyse kartların üstünde **"Tarzına göre seçildi"** rozeti çıkar,
   rastgeleye düşüldüyse çıkmaz. Kalıcı kaydetme ve Ana Sayfa'daki hızlı kombin
   kartlarından doğrudan açılma aynen çalışır
+- **İsteğe bağlı makyaj önerisi** — dört kombin kartının altında, **kapalı başlayan**
+  bir bölüm başlangıç parçasına vektör uzayında en yakın TEMİZ makyaj ürününü önerir.
+  Bölüm yalnızca böyle bir ürün gerçekten bulunduğunda render edilir; makyajı olmayan
+  ya da Chroma'ya ulaşılamayan kullanıcı düğmeyi bile görmez. **Bu kategoride rastgele
+  geri düşüş YOKTUR.** Bölüm açıkken kaydedilen kombine makyaj da dahil edilir,
+  kapalıyken dört parça kaydedilir
 - **Kombinlerim** — kayıtlı kombinler; parçaları, tarihi, favori ve silme işlemleriyle
 - **Kıyafet Detay** — görüntüleme, favori, onaylı silme, fotoğraf yönetimi ve
   **o parçanın geçtiği kombinlerin listesi**
@@ -297,6 +303,8 @@ olduğu için iskelet oraya taşındı, kombin üretimi istemci tarafında anlı
 | **Durum (occasion) vektör aramasına GİRMİYOR** | "Üniversite" ile "Özel Davet" aynı adayları getirir; durum yalnızca kaydedilen kombinin etiketidir. Başlangıç parçası rastgele seçildiği için sonuç yine de her seferinde değişir. Durumu prompt'a/sorguya katmak ayrı bir aşamanın işi. |
 | **Chroma ile Postgres arasında işlem bütünlüğü yok** | İki ayrı depo, dağıtık işlem yok. Kıyafet silinince vektörü de silinir ama bu çağrı başarısız olursa öksüz vektör kalır. `/similar` bunu okurken filtreler (silinmiş parça yanıta düşmez) ve `cleanup.js` öksüzleri toplu siler. |
 | **Embedding modeli değişirse koleksiyon geçersiz olur** | Farklı modellerin vektörleri aynı uzayda değildir. Model değiştirildiğinde `create-embeddings.js --sifirla --uygula` çalıştırılmalıdır; bunu hatırlatan otomatik bir kontrol yok. |
+| **Makyaj önerisi durumdan (occasion) bağımsız** | Öneri yalnızca başlangıç parçasına olan vektör yakınlığına bakar; "Spor" ile "Özel Davet" aynı ürünü getirebilir. Aynı sınırlama kombinin kendisinde de var. |
+| **Makyaj önerisi tek ürün** | Bölüm en yakın TEK ürünü gösterir (havuz derinliği "Başka Öneri Göster" ile ilerler). Birden fazla ürünü aynı anda öneren bir "makyaj seti" akışı yok. |
 | **Kıyafet Detay'da "benzer parçalar" bölümü yok** | `/similar` yalnızca API'de duruyor; benzerlik arayüzde şimdilik SADECE Kombin Öner üzerinden görünür. |
 | **Test altyapısı yok** | Test framework'ü yoktur. Doğrulama: `npm run lint` + `backend/test-scripts/` + elle deneme. |
 
@@ -958,7 +966,7 @@ node test-scripts/cleanup.js --all --user <uuid>     # bir kullanıcının TÜM 
 **Frontend'de de tek bir test scripti var** (`frontend/` klasöründen çalıştırılır):
 
 ```bash
-# Kombin kurma mantığı — saf fonksiyon testleri (48 kontrol).
+# Kombin kurma mantığı + makyaj önerisi — saf fonksiyon testleri (63 kontrol).
 # SUNUCU, CHROMA VE ANAHTAR GEREKTİRMEZ: lib/outfitBuilder.js React'tan ve ağ
 # katmanından bağımsız olduğu için doğrudan node ile koşuyor. Asıl güvence:
 # vektör adaylarının temiz/kirli ve hava durumu filtrelerini ATLAYAMAMASI.
@@ -1274,6 +1282,41 @@ Akış:
    sezon önceliğini uygular. **Vektör benzerliği bu filtreleri atlamaz.** Bir
    kategoride aday kalmazsa YALNIZCA O SLOT `buildRandomOutfit` mantığına düşer.
 
+**İsteğe bağlı makyaj bölümü (`pickMakeupItem`).** Makyaj, `OUTFIT_CATEGORIES`'e
+**bilerek eklenmedi**: kombinin slotu değil, üstüne konan bir öneri. Bunun yerine
+`CANDIDATE_CATEGORIES` (= kombin kategorileri + `Makyaj`) sorgulanır; ızgarayı kuran
+`buildOutfitFromCandidates` yalnızca `OUTFIT_CATEGORIES` üzerinde gezdiği için makyaj
+dört kartlık ızgaraya **yapısal olarak** giremez.
+
+Bu bölümün diğerlerinden ayrılan üç kuralı var:
+
+1. **GERİ DÜŞÜŞ YOK.** Diğer slotlarda rastgele bir parça göstermek "kombin eksik
+   kalmasın" diye değerliydi; makyaj isteğe bağlı bir ek. Vektör bir şey
+   söyleyemiyorsa (embedding yok, Chroma kapalı, hepsi kirli) doğru davranış
+   rastgele bir ruj önermek değil, **bölümü hiç render etmemek**. `pickMakeupItem`
+   bu yüzden `null` döner ve sayfa `{makeupItem && …}` ile tüm bölümü atlar —
+   kullanıcı ölü bir düğme ya da boş bir kutu görmez.
+2. **SEZON UYGULANMAZ.** "Kışlık ruj" diye bir kavram yok; mevsim kuralı kıyafetin
+   sıcaklığıyla ilgili. Temiz/kirli filtresi ise aynen geçerli.
+3. **`variantDepth` makyaj havuzunu SAYMAZ.** Sayılsaydı, çok makyaj ürünü olup tek
+   tişörtü olan bir gardıropta "Başka Öneri Göster" dört kartı hiç değiştirmeden
+   yalnızca ruju döndürür ve düğme bozuk görünürdü.
+
+Öneri **id olarak** saklanır (`makeupItemId`) ve render sırasında güncel kayda
+çözülürken temiz/kirli **yeniden kontrol edilir**: kullanıcı karttan ürünü kirli
+işaretlerse bölüm anında kaybolur, bir sonraki öneriye kadar ortada durmaz.
+
+Açılma animasyonu `grid-rows-[0fr] → [1fr]` geçişidir: `max-height` tahmini
+gerektirmeden gerçek yüksekliği animasyonlar. İçerik kapalıyken de DOM'da durduğu
+için panele **`inert`** verilir — aksi hâlde görünmeyen kart klavyeyle
+odaklanabilir ve ekran okuyucuya okunurdu.
+
+**Kaydetme sözleşmesi: bölüm AÇIKSA makyaj kombine dahildir, KAPALIYSA değildir.**
+Ölçüt "kullanıcı bunu gördü mü" olduğu için açık/kapalı durumu kullanılıyor;
+bölümü hiç açmayan kullanıcı için akış eskisiyle birebir aynı (dört parça).
+Paylaşım görseli de aynı kümeyi kullanır — `ShareOutfitCard`'ın `CATEGORY_ORDER`
+dizisi `Makyaj`'ı zaten tanıyor ve en sona diziyor.
+
 **Rozet (`Tarzına göre seçildi`) `vectorCount > 0` iken gösterilir.** Ölçüt
 "kombinde vektörün getirdiği en az bir parça var mı"dır; tamamen rastgeleye
 düşüldüyse rozet HİÇ çıkmaz. Kullanıcıya olmayan bir zekâyı satmamak için
@@ -1476,6 +1519,86 @@ fotoğraf sorunu teyit edildikten sonra üç yerden de kaldırılabilir.
 
 > Bundan sonraki her çalışma buraya tarihiyle işlenir: eklenen özellikler, düzeltilen
 > hatalar, alınan mimari kararlar. En yeni kayıt en üstte.
+
+### 2026-08-22 — Kombin Öner: isteğe bağlı makyaj önerisi bölümü
+- **Ne eklendi:** Dört kombin kartının altında, **kapalı başlayan** bir bölüm.
+  İçinde fırça ikonu, "Bu kombine uygun makyaj önerisi ister misin?" metni ve bir
+  "Göster" düğmesi var; tıklanınca yumuşak bir geçişle başlangıç parçasına vektör
+  uzayında en yakın TEMİZ makyaj ürünü açılıyor, düğme "Gizle"ye dönüyor.
+  Mevcut RAG akışı, temiz/kirli ve hava durumu kuralları **hiç değişmedi**.
+- **BACKEND'E TEK SATIR EKLENMEDİ.** `/companions` zaten `categoryIds` alıyor;
+  istemci artık listeye Makyaj kategorisini de koyuyor. Yeni uç, yeni servis
+  metodu, yeni migration yok — kategori başına ayrı sorgu atan mevcut tasarım
+  bunu bedavaya veriyordu.
+- **Makyaj `OUTFIT_CATEGORIES`'e BİLEREK EKLENMEDİ.** Kombinin slotu değil, üstüne
+  konan bir öneri. Yeni `CANDIDATE_CATEGORIES` (= kombin kategorileri + Makyaj)
+  yalnızca "neyi sorgula" sorusunu yanıtlıyor; ızgarayı kuran
+  `buildOutfitFromCandidates` hâlâ yalnızca `OUTFIT_CATEGORIES` üzerinde geziyor,
+  dolayısıyla makyaj dört kartlık ızgaraya **yapısal olarak** giremiyor.
+- **BU KATEGORİDE GERİ DÜŞÜŞ YOK — kasıtlı bir istisna.** Diğer slotlarda rastgele
+  bir parça göstermek "kombin eksik kalmasın" diye değerliydi; makyaj isteğe bağlı
+  bir ek. Vektör bir şey söyleyemiyorsa (embedding yok, Chroma kapalı, hepsi kirli)
+  doğru davranış rastgele bir ruj önermek değil, **bölümü hiç render etmemek**.
+  `pickMakeupItem` null döner ve sayfa tüm bölümü atlar: makyajı olmayan kullanıcı
+  boş bir çağrı da, ölü bir düğme de görmez.
+- **Sezon makyaja UYGULANMIYOR** ("kışlık ruj" diye bir kavram yok; mevsim kuralı
+  kıyafetin sıcaklığıyla ilgili), **temiz/kirli filtresi ise aynen geçerli.**
+- **`variantDepth` makyaj havuzunu SAYMIYOR.** Sayılsaydı, çok makyaj ürünü olup
+  tek tişörtü olan bir gardıropta "Başka Öneri Göster" dört kartı hiç
+  değiştirmeden yalnızca ruju döndürür ve düğme bozuk görünürdü.
+- **Öneri id olarak saklanıyor ve render sırasında temiz/kirli YENİDEN kontrol
+  ediliyor:** kullanıcı karttan ürünü kirli işaretlerse bölüm anında kayboluyor,
+  bir sonraki öneriye kadar ortada durmuyor. (Test bunu ayrıca doğruluyor.)
+- **KAYDETME SÖZLEŞMESİ: bölüm AÇIKSA makyaj dahil, KAPALIYSA değil.** Ölçüt
+  "kullanıcı bunu gördü mü" olduğu için açık/kapalı durumu kullanılıyor. Bölümü
+  hiç açmayan kullanıcı için akış eskisiyle birebir aynı — dört parça kaydediliyor,
+  makyaj sessizce eklenmiyor. Paylaşım görseli de aynı kümeyi kullanıyor;
+  `ShareOutfitCard`'ın `CATEGORY_ORDER` dizisi `Makyaj`'ı zaten tanıyor ve en sona
+  diziyor, o yüzden orada değişiklik gerekmedi.
+- **Açılma animasyonu `grid-rows-[0fr] → [1fr]` geçişi.** `max-height` tahmini
+  gerektirmeden gerçek yüksekliği animasyonluyor (ölçüldü: 0 → 295px, 300ms).
+  İçerik kapalıyken de DOM'da durduğu için panele **`inert`** veriliyor — aksi
+  hâlde görünmeyen kart klavyeyle odaklanabilir ve ekran okuyucuya okunurdu.
+- Görsel dil mevcut sisteme bağlı: `rounded-2xl border border-dusty-rose/40
+  bg-surface/60`, `bg-dusty-rose/15` daireli `Brush` ikonu (`text-accent-ink`) ve
+  paylaşılan `Button variant="outline"`. Yeni token ya da yeni idiom icat edilmedi.
+- **Doğrulama — `frontend/test-scripts/test-outfit-builder.mjs` 48 → 63 kontrol.**
+  Yeni bölümler: `pickMakeupItem` (havuz yok/boş/makyajsız → null, en yakın ürün,
+  varyantla ilerleme, **kirli ürünün elenmesi**, **hepsi kirliyse RASTGELEYE
+  DÜŞMEMESİ**, sezonun elemamesi) ve "Makyaj kombin ızgarasına sızmıyor"
+  (`vectorCount`'a sayılmaması, `buildRandomOutfit` regresyonu,
+  `CANDIDATE_CATEGORIES` bileşimi, `variantDepth`'in makyajı saymaması).
+- **Doğrulama — gerçek tarayıcıda 39 + 12 kontrol (Playwright + sistem Chrome):**
+  bölümün dört kartın altında olması, kapalı başlaması (yükseklik 0, `inert`,
+  `aria-expanded=false`), ızgaranın 4 kart kalması, aç/kapa döngüsü ve 300ms
+  geçişi, kartın kategori etiketi + fotoğrafla diğer kartlarla aynı stilde
+  çıkması; **kapalıyken 4 parça / açıkken 5 parça kaydedilmesi ve makyajın
+  `outfit_items`'a gerçekten girmesi (veritabanından doğrulandı)**; ürün karttan
+  kirli işaretlenince bölümün tamamen kaybolması; **makyaj ürünü olmayan
+  kullanıcıda (serra1110) bölümün hiç görünmemesi**; **`/companions` 503'e
+  düşürüldüğünde bölümün gösterilmemesi ama kombinin üretilip kaydedilebilmesi**;
+  temiz konsol. Ayrı koşuda karanlık mod ve 390px: kontrast **7.88:1 / 6.30:1**
+  (ikisi de WCAG AA), yatay taşma yok.
+- **GERÇEK MAKYAJ VERİSİYLE doğrulandı** (2 ürün: Maybelline lifter gloss, panorama
+  maskara). Siyah parçalar siyah maskarayı öne alıyor — siyah pantolon → maskara
+  0.8455 > gloss 0.7892; siyah tişört → 0.8348 > 0.8041; siyah çanta →
+  0.8385 > 0.8016. **Beyaz yazlık keten şortta sıra TERSİNE dönüyor:**
+  gloss 0.7809 > maskara 0.7558. Renk ve ton kümelenmesi makyajda da çalışıyor.
+- Regresyon: `test-outfit-rag` 69/69, `test-vector` 77/77, `test-all-endpoints`
+  72/72, `test-auth` 48/48, `test-stats` 60/60, `test-item-outfits` 27/27,
+  `test-clean-status` 26/26, `test-ai-analysis --kotasiz` 53/53, lint + build temiz.
+- **TEST TUZAĞI — Playwright'ın `:visible` sayımı ata kırpmasını GÖRMEZ.** Kapalı
+  panelin içindeki kart, ata `grid-rows-[0fr]` + `overflow-hidden` ile tamamen
+  kırpılmış olmasına rağmen kendi kutusu olduğu için `:visible` sayılıyor ve
+  "ızgarada 4 kart olmalı" kontrolü 5 buluyordu. Ürün hatası değil; sayım
+  `:not(#makyaj-onerisi a)` ile panel dışına sınırlandı.
+- **TEST TUZAĞI — kontrast ölçümü `oklab()` renklerinde sessizce saçmalıyor.**
+  Tailwind v4 saydamlığı `oklab(… / 0.7)` olarak üretiyor; `rgb()` bekleyen bir
+  regex bu dizeden rastgele rakamlar toplayıp 4.088.840.765:1 gibi "geçen" bir
+  oran üretti — yani kontrol yeşil yandığı hâlde hiçbir şey ölçmüyordu. Ölçüm,
+  rengi canvas'a çizdirip pikselden okuyacak (ve saydam katmanları ata zincirinde
+  birleştirecek) biçimde yeniden yazıldı; gerçek değerler 7.88:1 / 6.30:1.
+  Ders: kontrast testi, ölçtüğü rengi de raporlamalı — yoksa yalancı yeşil verir.
 
 ### 2026-08-22 — Gemini Entegrasyonu — Aşama 4: RAG ile Kombin Öner
 - **Vektör altyapısı nihayet ÜRÜN AKIŞINA BAĞLANDI.** Kombin Öner artık rastgele

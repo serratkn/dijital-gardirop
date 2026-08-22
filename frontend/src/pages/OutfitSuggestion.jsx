@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useLocation } from 'react-router-dom'
-import { CloudSun, Sparkles } from 'lucide-react'
+import { Brush, CloudSun, Sparkles } from 'lucide-react'
 import PageHeader from '../components/ui/PageHeader'
 import FilterPills from '../components/ui/FilterPills'
 import EmptyState from '../components/ui/EmptyState'
@@ -20,10 +20,12 @@ import { OCCASIONS, OCCASION_STATE_KEY } from '../lib/occasions'
 import { seasonsForWeather } from '../lib/seasons'
 import { cityLocative } from '../lib/cities'
 import {
+  CANDIDATE_CATEGORIES,
   OUTFIT_CATEGORIES,
   buildOutfitFromCandidates,
   buildRandomOutfit,
   isSameOutfit,
+  pickMakeupItem,
   pickSeedItem,
   variantDepth,
 } from '../lib/outfitBuilder'
@@ -56,6 +58,11 @@ function OutfitSuggestion() {
   // "tarzına göre seçildi" demek yanıltıcı olurdu.
   const [isSmart, setIsSmart] = useState(false)
   const [isSuggesting, setIsSuggesting] = useState(false)
+  // Makyaj önerisi PARÇA NESNESİ olarak değil id olarak tutulur: kullanıcı
+  // ürünü kirli işaretlerse bölüm anında kaybolmalı (aşağıdaki memo).
+  const [makeupItemId, setMakeupItemId] = useState(null)
+  // Bölüm KAPALI başlar; kullanıcı istemeden makyaj önerisi dayatılmaz.
+  const [isMakeupOpen, setIsMakeupOpen] = useState(false)
 
   const [isSaving, setIsSaving] = useState(false)
   const [isSaved, setIsSaved] = useState(false)
@@ -127,6 +134,14 @@ function OutfitSuggestion() {
 
   const itemsById = useMemo(() => new Map(items.map((item) => [item.id, item])), [items])
 
+  // Öneri id'den GÜNCEL kayda çözülür ve temiz/kirli KONTROLÜ BURADA tekrarlanır:
+  // kullanıcı karttan ürünü kirli işaretlerse bölüm anında kaybolmalı, bir
+  // sonraki öneriye kadar ortada durmamalı. Ürün silinmişse de null'a düşer.
+  const makeupItem = useMemo(() => {
+    const item = makeupItemId ? itemsById.get(makeupItemId) : null
+    return item && item.isClean !== false ? item : null
+  }, [makeupItemId, itemsById])
+
   // "Hiç parçan yok" ile "temiz parçan yok" ayrı mesajları hak eder:
   // ilki gardırobu doldurmayı, ikincisi çamaşır yıkamayı gerektirir.
   const dirtyOnlyCategories = useMemo(
@@ -177,7 +192,10 @@ function OutfitSuggestion() {
   // hata olarak DEĞİL, null olarak temsil edilir; çağıran sessizce rastgeleye düşer.
   const loadCandidateIds = useCallback(
     async (seedItem) => {
-      const targetIds = OUTFIT_CATEGORIES.filter((category) => category !== seedItem.category)
+      // Makyaj da SORGULANIR ama kombin ızgarasına girmez: yalnızca isteğe
+      // bağlı öneri bölümünü besler. Başlangıç parçası hiçbir zaman Makyaj
+      // olamaz (pickSeedItem yalnızca kombin kategorilerinden seçer).
+      const targetIds = CANDIDATE_CATEGORIES.filter((category) => category !== seedItem.category)
         .map((category) => categoryIds.get(category))
         .filter((id) => typeof id === 'number')
 
@@ -193,7 +211,7 @@ function OutfitSuggestion() {
       if (!result?.indekslendi) return null
 
       const byCategory = new Map()
-      for (const category of OUTFIT_CATEGORIES) {
+      for (const category of CANDIDATE_CATEGORIES) {
         const rows = result.adaylar?.[categoryIds.get(category)] ?? []
         if (rows.length > 0) byCategory.set(category, rows.map((row) => row.id))
       }
@@ -220,16 +238,20 @@ function OutfitSuggestion() {
 
   const applyVariant = useCallback(
     (pool, variant) => {
-      // Havuz yoksa MEVCUT rastgele mantık aynen çalışır.
+      // Havuz yoksa MEVCUT rastgele mantık aynen çalışır. Makyaj için geri
+      // düşüş YOKTUR: vektör konuşamıyorsa bölüm hiç gösterilmez.
       if (!pool) {
         setSuggestionItems(buildRandomOutfit(cleanItems, preferredSeasons))
         setIsSmart(false)
+        setMakeupItemId(null)
         return
       }
 
+      const candidatesByCategory = resolveCandidates(pool.candidateIds)
+
       const { items: next, vectorCount } = buildOutfitFromCandidates({
         seedItem: pool.seedItem,
-        candidatesByCategory: resolveCandidates(pool.candidateIds),
+        candidatesByCategory,
         cleanItems,
         seasons: preferredSeasons,
         variant,
@@ -237,6 +259,7 @@ function OutfitSuggestion() {
 
       setSuggestionItems(next)
       setIsSmart(vectorCount > 0)
+      setMakeupItemId(pickMakeupItem(candidatesByCategory, variant)?.id ?? null)
     },
     [cleanItems, preferredSeasons, resolveCandidates],
   )
@@ -259,6 +282,7 @@ function OutfitSuggestion() {
         setIsSuggesting(false)
         setSuggestionItems([])
         setIsSmart(false)
+        setMakeupItemId(null)
         return
       }
 
@@ -323,6 +347,7 @@ function OutfitSuggestion() {
         return next
       })
       setIsSmart(false)
+      setMakeupItemId(null)
       setIsSaved(false)
       setSaveError('')
       return
@@ -346,6 +371,14 @@ function OutfitSuggestion() {
     setSaveError('')
   }
 
+  // Kaydedilen kombin: dört parça + (BÖLÜM AÇIKSA) makyaj önerisi.
+  // Bölümü hiç açmayan kullanıcı için davranış eskisiyle birebir aynı —
+  // makyaj sessizce kombine eklenmez, kullanıcı onu görmemiştir bile.
+  const outfitItems = useMemo(
+    () => (isMakeupOpen && makeupItem ? [...suggestionItems, makeupItem] : suggestionItems),
+    [isMakeupOpen, makeupItem, suggestionItems],
+  )
+
   const handleSave = async () => {
     if (suggestionItems.length === 0 || isSaving || isSaved) return
 
@@ -355,7 +388,7 @@ function OutfitSuggestion() {
     try {
       await createOutfit({
         occasion: selectedOccasion,
-        clothingItemIds: suggestionItems.map((item) => item.id),
+        clothingItemIds: outfitItems.map((item) => item.id),
       })
       setIsSaved(true)
     } catch (error) {
@@ -489,6 +522,60 @@ function OutfitSuggestion() {
                             />
                           ))}
                         </div>
+
+                        {/* İSTEĞE BAĞLI MAKYAJ ÖNERİSİ.
+                            Bölümün KENDİSİ yalnızca vektör araması temiz bir
+                            makyaj ürünü döndürdüyse render edilir: makyajı
+                            olmayan (ya da Chroma'ya ulaşılamayan) kullanıcı
+                            boş bir çağrı da, ölü bir düğme de görmez. */}
+                        {makeupItem && (
+                          <div
+                            className="mt-6 rounded-2xl border border-dusty-rose/40 bg-surface/60 p-5"
+                            data-testid="makyaj-bolumu"
+                          >
+                            <div className="flex flex-wrap items-center justify-between gap-4">
+                              <div className="flex items-center gap-3">
+                                <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-dusty-rose/15">
+                                  <Brush size={16} strokeWidth={1.75} className="text-accent-ink" />
+                                </span>
+                                <p className="text-sm text-ink/70">
+                                  Bu kombine uygun makyaj önerisi ister misin?
+                                </p>
+                              </div>
+                              <Button
+                                variant="outline"
+                                onClick={() => setIsMakeupOpen((previous) => !previous)}
+                                aria-expanded={isMakeupOpen}
+                                aria-controls="makyaj-onerisi"
+                                data-testid="makyaj-dugmesi"
+                              >
+                                {isMakeupOpen ? 'Gizle' : 'Göster'}
+                              </Button>
+                            </div>
+
+                            {/* Yumuşak açılma: grid-rows 0fr -> 1fr geçişi
+                                yüksekliği GERÇEKTEN animasyonlar (max-height
+                                tahmini gerektirmez). İçerik kapalıyken de
+                                DOM'da durur, bu yüzden `inert` ile klavye ve
+                                ekran okuyucudan gizleniyor. */}
+                            <div
+                              id="makyaj-onerisi"
+                              className={`grid transition-all duration-300 ease-out ${
+                                isMakeupOpen ? 'grid-rows-[1fr] opacity-100' : 'grid-rows-[0fr] opacity-0'
+                              }`}
+                              inert={!isMakeupOpen}
+                            >
+                              <div className="overflow-hidden">
+                                <div className="grid grid-cols-2 gap-6 pt-5 sm:grid-cols-4">
+                                  <ClothingCard
+                                    item={makeupItem}
+                                    onCleanChange={handleCleanChange}
+                                  />
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+                        )}
                       </>
                     )}
 
@@ -531,7 +618,10 @@ function OutfitSuggestion() {
                       </Button>
                       {/* Öneri kaydedilmemiş olsa bile paylaşılabilir:
                           görsel tamamen istemcide üretilir, kayda bağlı değil. */}
-                      <ShareButton occasion={selectedOccasion} items={suggestionItems} />
+                      {/* Paylaşım görseli kaydedilenle aynı kümeyi gösterir;
+                          ShareOutfitCard'ın CATEGORY_ORDER'ı Makyaj'ı zaten
+                          tanıyor ve en sona diziyor. */}
+                      <ShareButton occasion={selectedOccasion} items={outfitItems} />
                     </div>
 
                     {saveError && <p className="mt-3 text-sm text-burgundy">{saveError}</p>}

@@ -11,10 +11,13 @@
 // O SLOTUN rastgele seçime düşmesi.
 
 import {
+  CANDIDATE_CATEGORIES,
+  MAKEUP_CATEGORY,
   OUTFIT_CATEGORIES,
   buildOutfitFromCandidates,
   buildRandomOutfit,
   isSameOutfit,
+  pickMakeupItem,
   pickSeedItem,
   variantDepth,
 } from '../src/lib/outfitBuilder.js'
@@ -346,10 +349,87 @@ console.log('\n7) variantDepth — "Başka Öneri Göster" ne zaman yeni başlan
     'Hepsi kirliyse derinlik 0 (hemen yeni başlangıç parçası istenir)',
     variantDepth(new Map([['Alt', [parca({ category: 'Alt', isClean: false })]]])) === 0,
   )
+  check(
+    'MAKYAJ havuzu derinliğe SAYILMIYOR (yoksa dört kart değişmeden düğme dönerdi)',
+    variantDepth(new Map([['Makyaj', temiz(5, 'Makyaj')], ['Alt', temiz(1, 'Alt')]])) === 1,
+  )
 }
 
 // ---------------------------------------------------------------
-console.log('\n8) isSameOutfit')
+console.log('\n8) pickMakeupItem — isteğe bağlı makyaj önerisi')
+
+{
+  const ruj = parca({ name: 'ruj', category: 'Makyaj' })
+  const fondoten = parca({ name: 'fondoten', category: 'Makyaj' })
+  const kirliMaskara = parca({ name: 'maskara-kirli', category: 'Makyaj', isClean: false })
+
+  check('Havuz yoksa null (bölüm hiç gösterilmez)', pickMakeupItem(null) === null)
+  check('Boş havuzda null', pickMakeupItem(new Map()) === null)
+  check(
+    'Makyaj adayı olmayan havuzda null (kombin kategorileri makyaj yerine geçmez)',
+    pickMakeupItem(new Map([['Alt', [parca({ category: 'Alt' })]]])) === null,
+  )
+
+  const havuz = new Map([[MAKEUP_CATEGORY, [ruj, fondoten]]])
+  check('En yakın makyaj ürünü seçiliyor', pickMakeupItem(havuz)?.name === 'ruj')
+  check('variant=1 sıradaki ürünü veriyor', pickMakeupItem(havuz, 1)?.name === 'fondoten')
+  check('Havuz tükenince başa sarıyor', pickMakeupItem(havuz, 2)?.name === 'ruj')
+
+  check(
+    'KİRLİ makyaj ürünü eleniyor',
+    pickMakeupItem(new Map([[MAKEUP_CATEGORY, [kirliMaskara, ruj]]]))?.name === 'ruj',
+  )
+  check(
+    'Hepsi kirliyse null — RASTGELE BİR ÜRÜNE DÜŞÜLMÜYOR',
+    pickMakeupItem(new Map([[MAKEUP_CATEGORY, [kirliMaskara]]])) === null,
+  )
+
+  // Sezon makyaja UYGULANMAZ: "kışlık ruj" diye bir kavram yok.
+  const yazlikRuj = parca({ name: 'yazlik-ruj', category: 'Makyaj', season: 'Yaz' })
+  check(
+    'Sezon makyajı elemiyor',
+    pickMakeupItem(new Map([[MAKEUP_CATEGORY, [yazlikRuj]]]))?.name === 'yazlik-ruj',
+  )
+}
+
+// ---------------------------------------------------------------
+console.log('\n9) Makyaj kombin ızgarasına SIZMIYOR')
+
+{
+  const seed = parca({ name: 'seed-ust', category: 'Üst' })
+  const ruj = parca({ name: 'ruj', category: 'Makyaj' })
+  const alt = parca({ name: 'alt-aday', category: 'Alt' })
+  const cleanItems = [seed, ruj, alt]
+  const havuz = new Map([
+    ['Alt', [alt]],
+    [MAKEUP_CATEGORY, [ruj]],
+  ])
+
+  const sonuc = buildOutfitFromCandidates({
+    seedItem: seed,
+    candidatesByCategory: havuz,
+    cleanItems,
+    seasons: null,
+  })
+  check('Makyaj dört kartlık ızgaraya girmiyor', !adlar(sonuc.items).includes('ruj'))
+  check('Makyaj vectorCount degerine sayilmiyor', sonuc.vectorCount === 1, `${sonuc.vectorCount}`)
+  check(
+    'Rastgele kombin de makyaj seçmiyor (regresyon)',
+    !adlar(buildRandomOutfit(cleanItems, null)).includes('ruj'),
+  )
+  check(
+    'Makyaj yine de ayrı öneri olarak erişilebilir',
+    pickMakeupItem(havuz)?.name === 'ruj',
+  )
+  check(
+    'CANDIDATE_CATEGORIES = kombin kategorileri + Makyaj',
+    JSON.stringify(CANDIDATE_CATEGORIES) === JSON.stringify([...OUTFIT_CATEGORIES, MAKEUP_CATEGORY]),
+    CANDIDATE_CATEGORIES.join(', '),
+  )
+}
+
+// ---------------------------------------------------------------
+console.log('\n10) isSameOutfit')
 
 {
   const a = parca()

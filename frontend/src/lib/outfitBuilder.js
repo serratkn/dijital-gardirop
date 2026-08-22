@@ -14,6 +14,16 @@ import { matchesSeason } from './seasons.js'
 
 export const OUTFIT_CATEGORIES = ['Üst', 'Alt', 'Ayakkabı', 'Çanta']
 
+// Makyaj kombinin PARÇASI DEĞİL, üstüne konan isteğe bağlı bir öneridir:
+// dört kartlık ızgaraya hiç girmez, kendi açılır bölümünde durur ve yalnızca
+// kullanıcı açıkça istediğinde kaydedilen kombine dahil edilir.
+export const MAKEUP_CATEGORY = 'Makyaj'
+
+// Backend'den aday istenen kategorilerin tamamı. OUTFIT_CATEGORIES'ten AYRI
+// tutuluyor çünkü ikisi farklı soruları yanıtlıyor: bu liste "neyi sorgula",
+// öteki "kombinin hangi slotları var" demek.
+export const CANDIDATE_CATEGORIES = [...OUTFIT_CATEGORIES, MAKEUP_CATEGORY]
+
 export const pickRandom = (list) => list[Math.floor(Math.random() * list.length)]
 
 // Hava durumu ÖNCELİKLENDİRİR, ELEMEZ: o kategoride uygun sezonda parça yoksa
@@ -60,13 +70,38 @@ export function pickSeedItem(cleanItems, seasons, { excludeId = null } = {}) {
 // Aynı başlangıç parçası için kaç FARKLI varyant üretilebilir. "Başka Öneri
 // Göster" bu derinlik tükenince yeni bir başlangıç parçasına geçer; yoksa
 // aynı iki kombin arasında gidip gelirdi.
+// MAKYAJ HAVUZU DERİNLİĞE SAYILMAZ: sayılsaydı, çok makyaj ürünü olup tek
+// tişörtü olan bir gardıropta "Başka Öneri Göster" dört kartı hiç
+// değiştirmeden yalnızca ruju döndürür ve düğme bozuk görünürdü.
 export function variantDepth(candidatesByCategory) {
   let depth = 0
-  for (const pool of candidatesByCategory?.values() ?? []) {
+  for (const category of OUTFIT_CATEGORIES) {
+    const pool = candidatesByCategory?.get(category) ?? []
     const secilebilir = pool.filter((item) => item.isClean !== false)
     depth = Math.max(depth, secilebilir.length)
   }
   return depth
+}
+
+// Kombine eşlik edecek makyaj önerisi. Başlangıç parçasına en yakın TEMİZ
+// makyaj ürününü döndürür, yoksa null.
+//
+// BU KATEGORİDE GERİ DÜŞÜŞ YOKTUR ve bu bilinçlidir. Diğer slotlarda rastgele
+// bir parça göstermek "kombinin eksik kalmaması" için değerliydi; makyaj ise
+// isteğe bağlı bir ek. Vektör bir şey söyleyemiyorsa (embedding yok, Chroma
+// kapalı, hepsi kirli) doğru davranış rastgele bir ruj önermek değil, bölümü
+// HİÇ GÖSTERMEMEKTİR — çağıran null'ı tam olarak böyle yorumlar.
+//
+// Sezon önceliği de UYGULANMAZ: "kışlık ruj" diye bir şey yok, mevsim kuralı
+// kıyafetin sıcaklığıyla ilgili bir kavram.
+export function pickMakeupItem(candidatesByCategory, variant = 0) {
+  const temiz = (candidatesByCategory?.get(MAKEUP_CATEGORY) ?? []).filter(
+    (item) => item.isClean !== false,
+  )
+  if (temiz.length === 0) return null
+
+  // Havuzda ilerleme kuralı diğer slotlarla aynı: 0 en yakın, 1 ikinci en yakın.
+  return temiz[variant % temiz.length]
 }
 
 // Vektör adaylarından kombin kurar.
