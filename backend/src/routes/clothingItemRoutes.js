@@ -81,6 +81,12 @@ router.post('/clothing-items/:id/image', handleUpload, (req, res) =>
 router.delete('/clothing-items/:id/image', (req, res) =>
   clothingItemController.deleteImage(req, res),
 )
+// Yeniden analiz: mevcut ai_analysis'in üzerine yazar. Fotoğraf yüklemenin
+// yan etkisi olan otomatik analizden farklı olarak SENKRONDUR — kullanıcı
+// düğmeye basıp sonucu bekliyor (bkz. ClothingItemController.reanalyze).
+router.post('/clothing-items/:id/analyze', (req, res) =>
+  clothingItemController.reanalyze(req, res),
+)
 // AŞAMA 3 doğrulama ucu — hiçbir ürün akışına bağlı değil (elle inceleme için).
 router.get('/clothing-items/:id/similar', (req, res) =>
   clothingItemController.getSimilar(req, res),

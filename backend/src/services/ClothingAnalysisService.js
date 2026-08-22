@@ -73,8 +73,9 @@ class ClothingAnalysisService {
   }
 
   // Tek bir parçayı analiz eder. Fırlatmaz; her yolun sonunda bir durum döner.
-  // force: mevcut analizin üzerine yazar (şu an arayüzde bir tetikleyicisi yok,
-  // yeniden analiz ihtiyacı doğduğunda bağlanacak tek nokta burasıdır).
+  // force: mevcut analizin üzerine yazar. Kıyafet Detay'daki "Yeniden Analiz Et"
+  // düğmesi (POST /clothing-items/:id/analyze) bu yoldan geçer; embedding de
+  // aynı bayrakla yeniden üretilir (bkz. #run sonundaki not).
   async analyzeItem(itemId, { force = false } = {}) {
     if (!isConfigured()) {
       // Anahtar yoksa dış servise HİÇ gidilmez ve bu bir hata değildir:
@@ -107,7 +108,7 @@ class ClothingAnalysisService {
       if (hazirlik.skip) return this.#skip(itemId, hazirlik.skip)
 
       // Eşzamanlılık sınırı: sıra gelene kadar bekle.
-      return await this.#withSlot(() => this.#run(itemId, hazirlik))
+      return await this.#withSlot(() => this.#run(itemId, hazirlik, force))
     } finally {
       this.inFlight.delete(itemId)
     }
@@ -153,7 +154,7 @@ class ClothingAnalysisService {
     return { file: { buffer, mimetype }, categoryName }
   }
 
-  async #run(itemId, { file, categoryName }) {
+  async #run(itemId, { file, categoryName }, force = false) {
     const startedAt = Date.now()
 
     let analysis
@@ -226,7 +227,13 @@ class ClothingAnalysisService {
     // tamamlanmıştır, embedding üretilememesi analizi başarısız yapmaz.
     // VectorService da kendi içinde asla fırlatmaz — buradaki `catch`
     // yalnızca son güvenlik ağıdır.
-    this.vectorService?.indexItemInBackground(itemId)
+    //
+    // `force` AYNEN AKTARILIR. Yeniden analizde bu şarttır: ai_analysis
+    // değiştiği hâlde force geçilmeseydi VectorService "zaten indekslenmiş"
+    // deyip atlar ve parça, ARTIK GEÇERSİZ olan eski vektörüyle kalırdı —
+    // yani Kombin Öner ve "Buna Benzer Diğer Parçalar" bayat veriyle
+    // çalışmaya devam ederdi.
+    this.vectorService?.indexItemInBackground(itemId, { force })
 
     return { durum: DURUM.TAMAMLANDI, analiz: analysis }
   }

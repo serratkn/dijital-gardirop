@@ -341,9 +341,112 @@ async function birimTestleri() {
 
     const zorla = await service.analyzeItem(fotografliParca().id, { force: true })
     check(
-      'force ile yeniden analiz mümkün (ileride "yeniden analiz et" için)',
+      'force ile yeniden analiz mümkün ("Yeniden Analiz Et" düğmesi bu yoldan geçer)',
       zorla.durum === DURUM.TAMAMLANDI && gemini2.cagriSayisi === 1,
     )
+  }
+
+  // YENİDEN ANALİZ — embedding de tazelenmeli.
+  //
+  // ai_analysis üzerine yazıldığında ondan TÜREYEN embedding de bayatlar.
+  // force aktarılmasaydı VectorService'in maliyet koruması ("zaten
+  // indekslenmiş") devreye girer ve parça, artık geçersiz olan eski
+  // vektörüyle kalırdı — Kombin Öner ve "Buna Benzer Diğer Parçalar" bayat
+  // veriyle çalışmaya devam ederdi.
+  {
+    const indekslemeler = []
+    const sahteVektor = {
+      indexItemInBackground(itemId, options) {
+        indekslemeler.push({ itemId, options })
+        return Promise.resolve({ durum: 'tamamlandi' })
+      },
+    }
+
+    const ilk = new ClothingAnalysisService(
+      createFakeRepository(fotografliParca()),
+      fakeCategoryRepository,
+      createFakeGemini(async () => ORNEK_ANALIZ),
+      sahteVektor,
+    )
+    await ilk.analyzeItem(fotografliParca().id)
+    check(
+      'Normal analizde embedding force SUZ isteniyor',
+      indekslemeler.length === 1 && indekslemeler[0].options?.force === false,
+      JSON.stringify(indekslemeler[0]?.options),
+    )
+
+    const tekrar = new ClothingAnalysisService(
+      createFakeRepository(fotografliParca({ ai_analysis: ORNEK_ANALIZ })),
+      fakeCategoryRepository,
+      createFakeGemini(async () => ORNEK_ANALIZ),
+      sahteVektor,
+    )
+    await tekrar.analyzeItem(fotografliParca().id, { force: true })
+    check(
+      'YENİDEN analizde embedding de FORCE ile yenileniyor (bayat vektör kalmaz)',
+      indekslemeler.length === 2 && indekslemeler[1].options?.force === true,
+      JSON.stringify(indekslemeler[1]?.options),
+    )
+  }
+
+  // HATA HÂLİNDE MEVCUT ANALİZ KORUNUR — "Yeniden Analiz Et" sözleşmesinin
+  // en kritik parçası: kullanıcı düğmeye bastı, Gemini düştü, ekrandaki
+  // veri kaybolmamalı.
+  {
+    const mevcut = { ...ORNEK_ANALIZ, analiz_tarihi: '2020-01-01T00:00:00.000Z' }
+    const repo = createFakeRepository(fotografliParca({ ai_analysis: mevcut }))
+    const patlayanGemini = createFakeGemini(async () => {
+      throw Object.assign(new Error('Gemini yanıt vermedi'), { isRetryable: false })
+    })
+    const service = new ClothingAnalysisService(repo, fakeCategoryRepository, patlayanGemini)
+
+    const sonuc = await service.analyzeItem(fotografliParca().id, { force: true })
+    check('Yeniden analiz başarısız olduğunda durum "basarisiz"', sonuc.durum === DURUM.BASARISIZ)
+    check('Kolona HİÇ YAZILMADI (yarım veri yok)', repo.yazmaSayisi === 0)
+    check(
+      'ESKİ ANALİZ AYNEN YERİNDE',
+      repo.item.ai_analysis?.analiz_tarihi === '2020-01-01T00:00:00.000Z',
+      repo.item.ai_analysis?.analiz_tarihi,
+    )
+
+    // Kota hatası da aynı: eski veri silinmez.
+    const kotaRepo = createFakeRepository(fotografliParca({ ai_analysis: mevcut }))
+    const kotaService = new ClothingAnalysisService(
+      kotaRepo,
+      fakeCategoryRepository,
+      createFakeGemini(async () => {
+        throw Object.assign(new Error('kota doldu'), { isRateLimited: true })
+      }),
+    )
+    const kotaSonuc = await kotaService.analyzeItem(fotografliParca().id, { force: true })
+    check(
+      'Kota hatasında da eski analiz korunuyor',
+      kotaSonuc.sebep === 'kota' && kotaRepo.yazmaSayisi === 0 && kotaRepo.item.ai_analysis !== null,
+    )
+  }
+
+  // ÇİFT TIKLAMA — aynı parça için ikinci istek Gemini'ye GİTMEZ.
+  {
+    let cozumle
+    const bekleyen = new Promise((resolve) => { cozumle = resolve })
+    const gemini = createFakeGemini(async () => { await bekleyen; return ORNEK_ANALIZ })
+    const service = new ClothingAnalysisService(
+      createFakeRepository(fotografliParca({ ai_analysis: ORNEK_ANALIZ })),
+      fakeCategoryRepository,
+      gemini,
+    )
+
+    const birinci = service.analyzeItem(fotografliParca().id, { force: true })
+    // İlk çağrı Gemini'de asılıyken ikinci istek gelir (çift tıklama).
+    const ikinci = await service.analyzeItem(fotografliParca().id, { force: true })
+    check(
+      'MALİYET: eszamanli ikinci yeniden analiz Gemini API cagrisi YAPMAZ',
+      ikinci.durum === DURUM.ATLANDI && ikinci.sebep === 'zaten-analiz-ediliyor',
+      ikinci.sebep,
+    )
+    cozumle()
+    await birinci
+    check('Tek Gemini çağrısı yapıldı', gemini.cagriSayisi === 1, `${gemini.cagriSayisi} çağrı`)
   }
 
   // Fotoğrafsız / kaydı olmayan / dosyası silinmiş parçalar.
@@ -677,6 +780,78 @@ async function geminisizSunucuTesti(imagePath) {
     check('Kıyafet kaydı yerinde (analiz başarısız olsa da)', after?.name === item.name)
     check('ai_analysis NULL kaldı (yarım/bozuk veri yazılmadı)', after?.ai_analysis === null)
     check('Fotoğraf kaydı duruyor', isNonEmptyString(after?.image_url))
+
+    // --- YENİDEN ANALİZ, GEMİNİ ERİŞİLEMEZKEN ---
+    // Asıl güvence: kullanıcı düğmeye bastı, Gemini düştü, EKRANDAKİ VERİ
+    // KAYBOLMAMALI. Önce kolona elle bir analiz yazıp "mevcut analiz" kuruyoruz.
+    const ClothingItemRepository = require('../src/repositories/ClothingItemRepository')
+    const pool = require('../src/config/database')
+    const mevcutAnaliz = {
+      sema: 'giyim',
+      model: 'onceki-model',
+      analiz_tarihi: '2020-01-01T00:00:00.000Z',
+      gardirop_kategorisi: 'Üst',
+      veri: { alt_kategori: 'Tişört', renk: 'Siyah', uyumluluk: {}, genel_aciklama: 'Eski analiz' },
+    }
+    await new ClothingItemRepository(pool).updateAiAnalysis(item.id, mevcutAnaliz)
+
+    const { status: yenidenStatus, data: yenidenData } = await call(
+      'POST',
+      `/clothing-items/${item.id}/analyze`,
+      { baseUrl: brokenBase, token },
+    )
+    check(
+      'Yeniden analiz Gemini erişilemezken 503 döndürüyor',
+      yenidenStatus === 503 && isNonEmptyString(yenidenData?.error),
+      `${yenidenStatus} ${yenidenData?.error ?? ''}`,
+    )
+    check(
+      'Mesaj kullanıcıya gösterilebilir (ham sebep kodu SIZMIYOR)',
+      !/gemini-hatasi|hazirlik-hatasi|yazma-hatasi|undefined/.test(yenidenData?.error ?? ''),
+      yenidenData?.error,
+    )
+
+    const { data: yenidenSonrasi } = await call('GET', `/clothing-items/${item.id}`, {
+      baseUrl: brokenBase,
+      token,
+    })
+    check(
+      'ESKİ ANALİZ KORUNDU (üzerine yazılmadı, silinmedi)',
+      yenidenSonrasi?.ai_analysis?.analiz_tarihi === '2020-01-01T00:00:00.000Z' &&
+        yenidenSonrasi?.ai_analysis?.model === 'onceki-model',
+      yenidenSonrasi?.ai_analysis?.analiz_tarihi,
+    )
+    check(
+      'Başarısız yeniden analizden sonra sunucu hâlâ ayakta',
+      (await call('GET', '/health', { baseUrl: brokenBase })).status === 200 &&
+        child.exitCode === null,
+    )
+
+    // Sahiplik: başka bir kullanıcı bu parçayı yeniden analiz EDEMEZ.
+    const { data: digerAuth } = await call('POST', '/auth/register', {
+      baseUrl: brokenBase,
+      body: {
+        name: 'AI Kırık Diger',
+        email: `ai-kirik-diger-${Date.now()}@example.com`,
+        password: 'test1234',
+        age: 25,
+      },
+    })
+    const { status: yabanci } = await call('POST', `/clothing-items/${item.id}/analyze`, {
+      baseUrl: brokenBase,
+      token: digerAuth.token,
+    })
+    check('Başkasının parçası yeniden analiz edilemiyor (404)', yabanci === 404, `${yabanci}`)
+    const { status: tokensizYeniden } = await call(
+      'POST',
+      `/clothing-items/${item.id}/analyze`,
+      { baseUrl: brokenBase },
+    )
+    check('Token olmadan 401', tokensizYeniden === 401)
+    await call('DELETE', `/users/${digerAuth.user.id}`, {
+      baseUrl: brokenBase,
+      token: digerAuth.token,
+    })
 
     const loglar = sunucuLoglari.join('')
     check(

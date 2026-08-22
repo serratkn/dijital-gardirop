@@ -262,7 +262,9 @@ olduğu için iskelet oraya taşındı, kombin üretimi istemci tarafında anlı
   (kullanıcı beklemeden) kategoriye özgü bir şemayla analiz eder; sonuç
   `clothing_items.ai_analysis` (JSONB) kolonuna yazılır ve Kıyafet Detay'daki
   **"Bu Parça Hakkında"** bölümünde gösterilir. Analiz başarısız olursa kolon NULL
-  kalır, kıyafet ekleme akışı **hiç etkilenmez**
+  kalır, kıyafet ekleme akışı **hiç etkilenmez**. Panelin altındaki
+  **"Yeniden Analiz Et"** düğmesi analizi elle tazeler (fotoğraf değiştirildiyse
+  hatırlatma da çıkar); hata hâlinde eski analiz olduğu gibi korunur
 - **Vektör veritabanı** — analiz tamamlanınca parçanın özeti Gemini embedding'ine
   çevrilip ChromaDB'ye yazılır. İki okuma ucu da artık ÜRÜN AKIŞINDA:
   `GET /clothing-items/:id/companions` Kombin Öner'i besler (kategoriler arası),
@@ -298,8 +300,8 @@ olduğu için iskelet oraya taşındı, kombin üretimi istemci tarafında anlı
 | **Gardırop'ta favori filtresi yok** | Sayfada kategori pillerinden ve aramadan başka filtre yoktur; favorileri tek başına listelemenin bir yolu bulunmuyor. Bu yüzden Ana Sayfa'daki "Favori" kartı filtresiz `/gardirop`'a gider. |
 | **Paylaşım indirmesi mobilde denenmedi** | Görsel üretimi platformdan bağımsızdır ama indirme `<a download>` ile yapılır; Android WebView'de çalışmazsa Capacitor Filesystem/Share eklentisine geçilmelidir. Hata hâlinde kullanıcıya mesaj gösterilir, uygulama çökmez. |
 | **Gemini ücretsiz kotası günde 20 istek** | Ölçüldü (`GenerateRequestsPerDayPerProjectPerModel-FreeTier`, limit 20, `gemini-3.6-flash`). Kota dolduğunda analiz sessizce atlanır ve parça analizsiz kalır; **kendiliğinden yeniden deneyen bir mekanizma yoktur** — `analyze-existing-items.js --uygula` ertesi gün elle çalıştırılır. Gerçek kullanım ücretli plan ister. |
-| **Fotoğraf değişince analiz güncellenmez** | Maliyet koruması "dolu `ai_analysis` varsa tekrar analiz etme" der; fotoğraf değiştirilse bile eski analiz kalır. `ClothingAnalysisService.analyzeItem(id, { force: true })` yolu hazır ama **arayüzde tetikleyicisi yok**. |
-| **Analiz yalnızca fotoğraf yüklenince tetiklenir** | Bu özellikten önce eklenmiş parçalar analizsizdir; toplu doldurma `test-scripts/analyze-existing-items.js` ile elle yapılır. |
+| **Fotoğraf değişince analiz KENDİLİĞİNDEN güncellenmez** | Maliyet koruması "dolu `ai_analysis` varsa tekrar analiz etme" der. Artık **elle tetiklenebiliyor**: Kıyafet Detay'daki "Yeniden Analiz Et" düğmesi (`POST /clothing-items/:id/analyze`) ve fotoğraf değiştirildiğinde çıkan hatırlatma. Otomatik yapılmıyor çünkü her çağrı gerçek para harcıyor. |
+| **Analizi NULL kalan parçada arayüzde tetikleyici yok** | "Yeniden Analiz Et" düğmesi AI panelinin içindedir, panel de yalnızca analiz varken render edilir. Analizi hiç oluşmamış (ya da başarısız olmuş) bir parçada düğme görünmez; toplu doldurma `test-scripts/analyze-existing-items.js` ile elle yapılır. |
 | **`/gemini/test-analyze` hâlâ duruyor** | Aşama 1'den kalan teşhis ucudur; ürün akışı artık otomatik analizdir. Kaldırılmadı çünkü `test-gemini.js` bağlantı/anahtar yollarını bunun üzerinden doğruluyor. |
 | **Öneri kalitesi indekslenmiş parça sayısına bağlı** | Vektör eşleştirmesi yalnızca `ai_analysis` (dolayısıyla fotoğrafı) olan parçalar için çalışır. Analizsiz bir gardıropta Kombin Öner sessizce eskisi gibi rastgele seçim yapar ve rozet hiç görünmez — hatalı değil ama "akıllı" da değildir. Toplu doldurma `analyze-existing-items.js` + `create-embeddings.js` ile elle yapılır. |
 | **Durum (occasion) vektör aramasına GİRMİYOR** | "Üniversite" ile "Özel Davet" aynı adayları getirir; durum yalnızca kaydedilen kombinin etiketidir. Başlangıç parçası rastgele seçildiği için sonuç yine de her seferinde değişir. Durumu prompt'a/sorguya katmak ayrı bir aşamanın işi. |
@@ -502,6 +504,32 @@ gidilmez**; sunucu `JWT_SECRET`'ten farklı olarak **patlamaz** — hava durumu 
 bir özelliktir, uygulamanın geri kalanı anahtarsız da tam çalışır.
 
 ### Gemini
+
+### Yeniden analiz
+
+| Metod | Yol | Açıklama |
+|---|---|---|
+| `POST` | `/clothing-items/:id/analyze` | Mevcut analizin ÜZERİNE yazar (`force: true`) |
+
+Kıyafet Detay'daki **"Yeniden Analiz Et"** düğmesinin ucudur. Başarıda `200` +
+güncel kıyafet kaydı döner.
+
+**Bu uç SENKRONDUR** — deponun "önce cevapla, sonra çalış" kuralından bilinçli
+sapma. Fotoğraf yüklemede analiz arka planda çalışır çünkü kullanıcı fotoğrafı
+bırakıp işine bakar; burada düğmeye basıp ekrana bakıyor ve sonucu bekliyor.
+202 + yoklama yolu, arayüze "yeni analiz geldi mi" sorusunu çözdürmek zorunda
+bırakırdı (kolon zaten dolu, null kontrolü işe yaramaz).
+
+- **HATA HÂLİNDE ESKİ ANALİZ KORUNUR.** `ClothingAnalysisService` yalnızca
+  başarıda kolona yazar; 503 dönen bir istek mevcut veriye dokunmaz.
+- **Sahiplik controller'da doğrulanır** (`getItemById`): `analyzeItem` yalnızca
+  id ile çalışır, kullanıcıya bakmaz. Kontrol olmasaydı bir kullanıcı
+  başkasının parçası için Gemini çağrısı tetikleyebilirdi. Başkasının kaydı `404`.
+- **Çift tıklama Gemini'ye İKİNCİ ÇAĞRI YAPMAZ:** in-flight muhafızı devrede,
+  ikinci istek `409` ile döner.
+- Servisin `sebep` kodları Türkçe mesajlara çevrilir; **ham kod dışarı sızmaz**:
+  `409` zaten analiz ediliyor · `400` fotoğraf yok / okunamıyor ·
+  `404` kayıt yok · `503` anahtar yok, kota dolu, Gemini erişilemiyor.
 
 **Otomatik analizin AYRI BİR UCU YOKTUR.** Aşama 2'de analiz, mevcut fotoğraf
 yükleme ucunun (`POST /clothing-items/:id/image`) **yan etkisi** olarak arka
@@ -710,6 +738,7 @@ istemcide hiçbir toplama yapılmaz.
 | `PATCH` | `/clothing-items/:id/clean-status` | Temiz/kirli durumunu tersine çevirir (atomik) |
 | `POST` | `/clothing-items/:id/image` | **multipart/form-data**, alan adı `image`. jpg/png/webp, en fazla 5 MB |
 | `DELETE` | `/clothing-items/:id/image` | Fotoğrafı kaldırır (`image_url` → `null`, dosya diskten silinir) |
+| `POST` | `/clothing-items/:id/analyze` | **Yeniden analiz** — mevcut `ai_analysis` üzerine yazar (senkron) |
 | `GET` | `/clothing-items/:id/similar?limit=&categoryId=` | **Aşama 3 doğrulama ucu** — vektör uzayındaki en yakın komşular |
 | `GET` | `/clothing-items/:id/companions?categoryIds=*&limit=` | **Aşama 4** — Kombin Öner'i besleyen kategori bazlı aday araması |
 
@@ -929,7 +958,8 @@ node test-scripts/test-stats.js
 node test-scripts/test-clothing-items.js
 node test-scripts/test-clothing-items.js --cleanup   # oluşturduğu kaydı sonda siler
 
-# Otomatik kıyafet analizi — Gemini Aşama 2 (90 kontrol: 40 birim + 13 uçtan uca + 37 gerçek).
+# Otomatik kıyafet analizi + yeniden analiz — Gemini Aşama 2 (104 kontrol:
+# 48 birim + 19 uçtan uca + 37 gerçek).
 # --birim: yalnızca birim bölümü (sunucu, anahtar ve kota GEREKTİRMEZ, saniyeler sürer)
 # --kotasiz: günlük Gemini kotası dolduysa gerçek analiz bölümünü atlar
 # Test verisi VARSAYILAN OLARAK SİLİNMEZ (DBeaver'da gözle doğrulama için);
@@ -1105,6 +1135,12 @@ Servisin dokunulmaması gereken kuralları:
   10 eşzamanlı isteğe dönüşseydi dakikalık kota anında dolardı.
 - **Kota hatasında soğuma başlar** ve süresi Gemini'nin bildirdiği `retryDelay`
   ile varsayılanın büyüğüdür. Kota hatası **yeniden DENENMEZ**.
+- **`force` EMBEDDING'E DE AKTARILIR.** Yeniden analiz `ai_analysis` üzerine
+  yazdığında ondan TÜREYEN embedding de bayatlar; `indexItemInBackground`'a
+  `{ force }` geçilmeseydi VectorService'in maliyet koruması ("zaten
+  indekslenmiş") devreye girer ve parça artık geçersiz olan eski vektörüyle
+  kalırdı — Kombin Öner ve "Buna Benzer Diğer Parçalar" bayat veriyle
+  çalışmaya devam ederdi. Test bunu ayrıca doğruluyor.
 - **Yalnızca GEÇİCİ hatalar yeniden denenir** (zaman aşımı, 5xx, çözülemeyen
   JSON), en fazla `MAX_ATTEMPTS = 2`. Geçersiz anahtar / bulunamayan model
   tekrar denemekle düzelmez, ikinci çağrı yalnızca kota harcardı.
@@ -1390,6 +1426,19 @@ başlıkta "Yapay zekâ inceliyor" rozeti görünür. Süre dolunca yoklama **se
 durur; "başarısız oldu" demek zorunlu olmayan bir adım için gereksiz endişe
 yaratırdı. Yoklama hatası da kullanıcıya gösterilmez.
 
+**"Yeniden Analiz Et" düğmesi panelin içindedir** ve `onReanalyze` verilmezse
+hiç render edilmez (panel, bu yeteneği olmayan bir yerde de kullanılabilsin).
+İstek boyunca düğme kilitlenir; backend'de de in-flight muhafızı var, o yol
+`409` döner. **Hata hâlinde `item` GÜNCELLENMEZ** — ekrandaki analiz olduğu gibi
+kalır ve mesaj panelin altında, verilerin ALTINDA gösterilir; kullanıcı neyin
+korunduğunu görür.
+
+**Fotoğraf değişti ipucu OTURUM İÇİDİR.** Şemada "fotoğraf ne zaman değişti"
+bilgisi yok (`updated_at` her düzenlemede değişir) ve bunun için migration
+yazmaya değmezdi: hatırlatmanın hedefi zaten kullanıcının AZ ÖNCE yaptığı
+değişiklik. `handlePhotoUpload` başarılı olduğunda ve parçanın analizi doluysa
+`photoChanged` açılır, yeniden analiz sonrası kapanır.
+
 **Gösterim SIRASI arayüzde tanımlıdır** (`ALAN_ETIKETLERI` / `UYUMLULUK_ETIKETLERI`
 nesnelerinin anahtar sırası). Saklanan JSON'ın sırasına güvenilemez: kolon JSONB'dir
 ve anahtarları uzunluk + bayt sırasına göre yeniden dizer. İlk sürümde buna
@@ -1557,6 +1606,85 @@ fotoğraf sorunu teyit edildikten sonra üç yerden de kaldırılabilir.
 
 > Bundan sonraki her çalışma buraya tarihiyle işlenir: eklenen özellikler, düzeltilen
 > hatalar, alınan mimari kararlar. En yeni kayıt en üstte.
+
+### 2026-08-22 — Kıyafet Detay: "Yeniden Analiz Et" düğmesi
+- **Ne eklendi:** AI analiz panelinin altında ince outline bir düğme. Tıklanınca
+  "Analiz ediliyor..." durumuna geçip kilitleniyor, sonuç gelince panel yeni
+  veriyle güncelleniyor. Yeni uç: **`POST /clothing-items/:id/analyze`**.
+- **`force: true` yolu zaten hazırdı** (Aşama 2'de "ileride bağlanacak tek nokta"
+  diye bırakılmıştı) — `#prepare` içindeki maliyet koruması force ile atlanıyor,
+  in-flight muhafızı ve eşzamanlılık semaforu da yerindeydi. Servis tarafında
+  yalnızca aşağıdaki hata düzeltildi.
+- **YAKALANAN HATA — yeniden analiz BAYAT VEKTÖR bırakıyordu.** `#run`, analizi
+  yazdıktan sonra `vectorService.indexItemInBackground(itemId)` çağırıyordu ama
+  `force` AKTARILMIYORDU. VectorService'in kendi maliyet koruması ("zaten
+  indekslenmiş") devreye giriyor, embedding eski `ai_analysis` metnine ait
+  kalıyordu — yani parça yeniden analiz edilse bile Kombin Öner ve "Buna Benzer
+  Diğer Parçalar" ESKİ vektörle çalışmaya devam ederdi. `force` artık zincir
+  boyunca aktarılıyor (`analyzeItem → #run → indexItemInBackground → indexItem`).
+  Gerçek veriyle doğrulandı: yeniden analiz sonrası Chroma'daki vektör tarihi de
+  değişti (00:25 → 19:34).
+- **UÇ SENKRON — deponun "önce cevapla, sonra çalış" kuralından bilinçli sapma.**
+  Fotoğraf yüklemede analiz arka planda çalışır çünkü kullanıcı fotoğrafı bırakıp
+  işine bakar; burada düğmeye basıp ekrana bakıyor. 202 + yoklama yolu, arayüze
+  "yeni analiz geldi mi" sorusunu çözdürmek zorunda bırakırdı — kolon zaten dolu
+  olduğu için mevcut null-yoklaması işe yaramaz, `analiz_tarihi` karşılaştırmak
+  gerekirdi. Ölçülen gerçek süre: **8.7 sn**.
+- **HATA HÂLİNDE ESKİ ANALİZ KORUNUR** — özelliğin en kritik sözleşmesi.
+  `ClothingAnalysisService` yalnızca BAŞARIDA kolona yazıyor (yapısal garanti),
+  arayüz de `item`'ı yalnızca 200 yanıtında güncelliyor. Ekrandaki veri hiçbir
+  hata yolunda boşaltılmıyor; mesaj panelin altında, verilerin ALTINDA çıkıyor
+  ki kullanıcı neyin korunduğunu görsün.
+- **Sahiplik CONTROLLER'da doğrulanıyor.** `analyzeItem` yalnızca id ile çalışır,
+  kullanıcıya bakmaz — kontrol olmasaydı bir kullanıcı başkasının parçası için
+  Gemini çağrısı tetikleyebilirdi (para harcatma yolu). `getItemById(id, userId)`
+  ile doğrulanıyor, başkasının kaydı **404**.
+- **Çift tıklama Gemini'ye ikinci çağrı YAPMAZ:** arayüzde düğme kilitleniyor,
+  backend'de mevcut in-flight muhafızı **409** döndürüyor. Test, ilk çağrı
+  Gemini'de asılıyken ikinci isteği atıp tek çağrı yapıldığını doğruluyor.
+- **Sebep kodları Türkçe mesajlara çevriliyor, HAM KOD SIZMIYOR:** 409 zaten
+  analiz ediliyor · 400 fotoğraf yok/okunamıyor · 404 kayıt yok · 503 anahtar
+  yok, kota dolu, Gemini erişilemiyor. Genel 503 mesajı bilerek şunu diyor:
+  *"Analiz şu anda yapılamadı, mevcut analiz korundu."*
+- **İstemci zaman aşımı 90 sn** — sunucunun KENDİ en kötü senaryosunun
+  (2 deneme x 30 sn + kuyruk ≈ 62 sn) ÜSTÜNDE. Erken kesilseydi sunucu analizi
+  yazmaya devam eder, arayüz "olmadı" der ve ekran bayat kalırdı; bu sınır
+  normal işleyişte hiç devreye girmez.
+- **Fotoğraf değişti hatırlatması** (istenen opsiyonel iyileştirme): panelde
+  *"Fotoğrafı değiştirdin — bu analiz hâlâ eski fotoğrafa ait. Güncellemek ister
+  misin?"* İpucu OTURUM İÇİDİR: şemada "fotoğraf ne zaman değişti" bilgisi yok
+  (`updated_at` her düzenlemede değişir) ve bunun için migration yazmaya
+  değmezdi — hatırlatmanın hedefi zaten kullanıcının az önce yaptığı değişiklik.
+  Otomatik yeniden analiz YAPILMIYOR: her çağrı gerçek para harcıyor, kararı
+  kullanıcı veriyor.
+- **Doğrulama — `test-ai-analysis.js` 90 → 104 kontrol.** Yeni birim kontrolleri:
+  normal analizde embedding `force:false`, **yeniden analizde `force:true`**
+  (bayat vektör düzeltmesi); Gemini patladığında ve kota dolduğunda
+  **kolona HİÇ yazılmaması ve eski analizin aynen kalması**; çift tıklamada
+  ikinci isteğin `zaten-analiz-ediliyor` ile dönüp tek Gemini çağrısı yapılması.
+  Uçtan uca (geçersiz anahtarlı ikinci sunucu, `:3199`): yeniden analiz **503**,
+  ham sebep kodu sızmıyor, **eski analiz korunuyor**, sunucu ayakta, başkasının
+  parçası 404, token'sız 401.
+- **Doğrulama — gerçek tarayıcıda 28 kontrol (Playwright + sistem Chrome).**
+  Geçici bir test kullanıcısı kuruluyor (sonda siliniyor), kullanıcının kendi
+  gardırobuna dokunulmuyor: düğmenin panel içinde ve outline stilde olması;
+  503'e düşürüldüğünde "Analiz ediliyor..." + kilit + dönen ikon, ardından nazik
+  mesaj ve **eski analizin hem ekranda hem veritabanında durması**; sonra
+  **gerçek bir Gemini çağrısıyla** analizin güncellenmesi ve panelin yeni veriyi
+  basması (`eski-test-modeli` → `gemini-3.6-flash`); fotoğraf değiştirilince
+  ipucunun çıkması; karanlık mod ve 390px'te taşma olmaması; temiz konsol.
+- **Gerçek gardıroptan da doğrulandı:** Guess siyah çanta yeniden analiz edildi —
+  8.7 sn, `analiz_tarihi` 2026-08-21 → 2026-08-22, Chroma vektörü de tazelendi.
+- Regresyon: `test-ai-analysis --kotasiz` 67/67, `test-vector` 82/82,
+  `test-outfit-rag` 69/69, `test-outfit-builder` 63/63, `test-all-endpoints`
+  72/72, `test-auth` 48/48, `test-stats` 60/60, `test-item-outfits` 27/27,
+  `test-clean-status` 26/26, lint + build temiz.
+- **TEST TUZAĞI — kasten kırılan istek konsol denetimini kirletir.** Tarayıcı
+  testinde 503 senaryosundan sonra "konsol temiz mi" kontrolü kırmızı yandı:
+  topladığı iki satır da BİZİM kurduğumuz 503'e aitti (tarayıcının
+  "Failed to load resource" kaydı ve uygulamanın kendi `console.error`'ı).
+  Ürün hatası değil; denetim, kasıtlı hata bölümünden SONRA sıfırlanacak
+  biçimde düzeltildi.
 
 ### 2026-08-22 — Kıyafet Detay: "Buna Benzer Diğer Parçalar" bölümü
 - **Ne eklendi:** Kıyafet Detay'da, kombinler bölümünün altında, aynı kategoriden

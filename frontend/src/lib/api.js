@@ -236,6 +236,23 @@ export function toggleClothingItemCleanStatus(id) {
   return request(`/clothing-items/${encodeURIComponent(id)}/clean-status`, { method: 'PATCH' })
 }
 
+// "Yeniden Analiz Et" — mevcut analizin üzerine yazar (backend force:true).
+//
+// SENKRONDUR: yanıt geldiğinde analiz bitmiştir ve gövde güncel kaydı taşır.
+// Zaman aşımı, sunucunun KENDİ en kötü senaryosunun (2 deneme x 30 sn Gemini
+// zaman aşımı + eşzamanlılık kuyruğu) ÜSTÜNDE tutuldu; erken kesilseydi sunucu
+// analizi yazmaya devam eder, arayüz ise "olmadı" der ve ekran bayat kalırdı.
+// Yani bu sınır normal işleyişte hiç devreye girmez, yalnızca gerçekten
+// takılmış bir istek için son çıkıştır.
+const REANALYZE_TIMEOUT_MS = 90000
+
+export function reanalyzeClothingItem(id) {
+  return request(`/clothing-items/${encodeURIComponent(id)}/analyze`, {
+    method: 'POST',
+    timeoutMs: REANALYZE_TIMEOUT_MS,
+  })
+}
+
 export function deleteClothingItem(id) {
   return request(`/clothing-items/${encodeURIComponent(id)}`, { method: 'DELETE' })
 }

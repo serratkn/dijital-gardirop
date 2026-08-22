@@ -14,6 +14,7 @@ import {
   fetchOutfits,
   fetchSimilarItems,
   logImageOutcome,
+  reanalyzeClothingItem,
   resolveImageUrl,
   toggleClothingItemCleanStatus,
   toggleClothingItemFavorite,
@@ -66,6 +67,13 @@ function ClothingDetail() {
   // Benzer parçalar. Hata durumu YOK: bu bölüm başarısız olursa sessizce
   // hiç görünmez (aşağıdaki efekte bakın).
   const [similarItems, setSimilarItems] = useState([])
+  const [isReanalyzing, setIsReanalyzing] = useState(false)
+  const [reanalyzeError, setReanalyzeError] = useState('')
+  // Fotoğraf BU OTURUMDA değiştirildi mi? Şemada "fotoğraf ne zaman değişti"
+  // bilgisi yok (updated_at her düzenlemede değişir), ama hatırlatmanın asıl
+  // hedefi zaten kullanıcının az önce yaptığı değişiklik. Yeniden analizden
+  // sonra sıfırlanır.
+  const [photoChanged, setPhotoChanged] = useState(false)
 
   useEffect(() => {
     let isStale = false
@@ -243,6 +251,34 @@ function ClothingDetail() {
     }
   }, [id, item?.categoryId])
 
+  // Yeniden analiz. Düğme istek boyunca kilitli kalır (çift tıklama koruması
+  // arayüzde), backend'de de aynı parça için in-flight muhafızı var — o yol
+  // 409 döner, iki Gemini çağrısı yapılmaz.
+  //
+  // HATA HÂLİNDE MEVCUT ANALİZ KORUNUR: `item` yalnızca 200 yanıtında
+  // güncellenir. Backend zaten yalnızca başarıda kolona yazıyor, arayüz de
+  // bu sözleşmeye uyuyor — ekrandaki veri asla boşaltılmıyor.
+  const handleReanalyze = async () => {
+    if (isReanalyzing) return
+
+    setIsReanalyzing(true)
+    setReanalyzeError('')
+
+    try {
+      const updated = await reanalyzeClothingItem(id)
+      setItem((previous) =>
+        previous ? { ...previous, aiAnalysis: updated.ai_analysis ?? previous.aiAnalysis } : previous,
+      )
+      setPhotoChanged(false)
+    } catch (error) {
+      console.error('Yeniden analiz başarısız:', error)
+      // Backend Türkçe ve kullanıcıya gösterilebilir mesajlar döndürüyor.
+      setReanalyzeError(error.message)
+    } finally {
+      setIsReanalyzing(false)
+    }
+  }
+
   const handleToggleFavorite = async () => {
     if (isFavoritePending) return
 
@@ -299,6 +335,10 @@ function ClothingDetail() {
         imageUrl: updated.image_url,
         aiAnalysis: updated.ai_analysis ?? null,
       }))
+      // Dolu bir analizin üstüne yeni fotoğraf yüklendiyse analiz artık ESKİ
+      // görseli anlatıyor: maliyet koruması yüzünden kendiliğinden
+      // güncellenmez, panelde hatırlatma gösterilir.
+      setPhotoChanged(Boolean(updated.ai_analysis))
       setImageFailed(false)
       setIsPhotoEditing(false)
     } catch (error) {
@@ -599,7 +639,13 @@ function ClothingDetail() {
             altında yarım genişliktir ve iki sütunlu bilgi kartları oraya
             sıkışırdı. ai_analysis boşsa bileşen null döner, hiçbir boşluk
             bırakmaz. */}
-        <AiAnalysisPanel analysis={item.aiAnalysis} />
+        <AiAnalysisPanel
+          analysis={item.aiAnalysis}
+          onReanalyze={handleReanalyze}
+          isReanalyzing={isReanalyzing}
+          reanalyzeError={reanalyzeError}
+          photoChanged={photoChanged}
+        />
 
         {/* "Buna Benzer Diğer Parçalar" — analiz paneliyle AYNI GEREKÇEYLE
             ızgaranın altında, tam genişlikte: sağ sütun md üstünde yarım

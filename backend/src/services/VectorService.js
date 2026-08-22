@@ -147,8 +147,13 @@ class VectorService {
   // ---- Yazma yolu (asla fırlatmaz) ----
 
   // Analiz tamamlandıktan sonra çağrılır; await EDİLMEZ.
-  indexItemInBackground(itemId) {
-    return this.indexItem(itemId).catch((error) => {
+  //
+  // `options` doğrudan indexItem'a geçer. YENİDEN ANALİZDE `force: true`
+  // gelmesi ŞART: ai_analysis üzerine yazıldıysa ondan türeyen embedding de
+  // bayatlamıştır ve maliyet koruması ("zaten indekslenmiş") aksi hâlde
+  // eski vektörü olduğu gibi bırakırdı.
+  indexItemInBackground(itemId, options = {}) {
+    return this.indexItem(itemId, options).catch((error) => {
       // Buraya normalde hiç düşülmez (indexItem yutar); son güvenlik ağı.
       console.error('Embedding beklenmedik şekilde hata verdi:', error?.message)
       return { durum: DURUM.BASARISIZ, sebep: 'beklenmeyen-hata' }

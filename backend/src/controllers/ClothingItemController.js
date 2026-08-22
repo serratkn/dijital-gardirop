@@ -84,6 +84,79 @@ class ClothingItemController extends BaseController {
     }
   }
 
+  // "Yeniden Analiz Et" — mevcut analizin ÜZERİNE yazar (force).
+  //
+  // BU UÇ, deponun "önce cevapla, sonra çalış" kuralından BİLİNÇLİ SAPMADIR.
+  // Fotoğraf yüklemede analiz arka planda çalışır çünkü kullanıcı fotoğrafı
+  // bırakıp işine bakar; burada ise düğmeye basıp ekrana bakıyor ve sonucu
+  // bekliyor. 202 + yoklama yolu, arayüze "yeni analiz geldi mi" sorusunu
+  // çözdürmek zorunda bırakırdı (kolon zaten dolu, null kontrolü işe yaramaz).
+  //
+  // ClothingAnalysisService ASLA FIRLATMAZ; sonucu `durum` nesnesiyle bildirir.
+  // Çeviri burada yapılır çünkü HTTP anlamı bir sınır kararıdır.
+  async reanalyze(req, res) {
+    try {
+      if (!this.clothingAnalysisService) {
+        return res.status(503).json({ error: 'Yapay zekâ analizi bu kurulumda etkin değil' })
+      }
+
+      // SAHİPLİK: analyzeItem yalnızca id ile çalışır, kullanıcıya bakmaz.
+      // Kontrol burada yapılmazsa bir kullanıcı başkasının parçası için
+      // Gemini çağrısı tetikleyebilirdi. Başkasının kaydı 404 döner.
+      await this.clothingItemService.getItemById(req.params.id, req.userId)
+
+      const sonuc = await this.clothingAnalysisService.analyzeItem(req.params.id, { force: true })
+
+      if (sonuc.durum === 'tamamlandi') {
+        // Kayıt YENİDEN OKUNUR: yanıt, JSONB'nin sakladığı hâli taşımalı
+        // (kolon anahtar sırasını korumaz) ve arayüz doğrudan bunu basar.
+        const item = await this.clothingItemService.getItemById(req.params.id, req.userId)
+        return res.status(200).json(item)
+      }
+
+      const { statusCode, error } = this.#reanalyzeError(sonuc.sebep)
+      res.status(statusCode).json({ error })
+    } catch (error) {
+      this.handleError(error, res)
+    }
+  }
+
+  // Servisin `sebep` kodlarını kullanıcıya gösterilebilir Türkçe mesajlara
+  // çevirir. HAM SEBEP KODU DIŞARI SIZMAZ.
+  //
+  // Hepsinin ortak yanı: BU YOLLARIN HİÇBİRİ mevcut analizi silmez. #run
+  // yalnızca başarıda yazar, dolayısıyla hata hâlinde eski analiz yerinde
+  // kalır — arayüz de bu yüzden eski veriyi ekranda tutabiliyor.
+  #reanalyzeError(sebep) {
+    switch (sebep) {
+      case 'zaten-analiz-ediliyor':
+        // Çift tıklama / iki sekme. 409, "boşuna deneme" demenin doğru yolu.
+        return { statusCode: 409, error: 'Bu parça şu anda analiz ediliyor, lütfen bekleyin' }
+      case 'fotograf-yok':
+        return { statusCode: 400, error: 'Analiz için önce bir fotoğraf eklemelisiniz' }
+      case 'dosya-diskte-yok':
+      case 'desteklenmeyen-dosya-turu':
+        return { statusCode: 400, error: 'Fotoğraf okunamadı, yeniden yüklemeyi deneyin' }
+      case 'kayit-yok':
+      case 'kayit-analiz-sirasinda-silindi':
+        return { statusCode: 404, error: 'Kıyafet bulunamadı' }
+      case 'anahtar-yok':
+        return { statusCode: 503, error: 'Yapay zekâ servisi bu kurulumda tanımlı değil' }
+      case 'kota':
+      case 'kota-soğuma-suresi':
+        return {
+          statusCode: 503,
+          error: 'Yapay zekâ kotası şu anda dolu, biraz sonra tekrar deneyin',
+        }
+      default:
+        // gemini-hatasi, yazma-hatasi, hazirlik-hatasi ve beklenmeyenler.
+        return {
+          statusCode: 503,
+          error: 'Analiz şu anda yapılamadı, mevcut analiz korundu',
+        }
+    }
+  }
+
   // AŞAMA 4 — Kombin Öner'in RETRIEVAL ucu. Bir başlangıç parçası verilir,
   // istenen diğer kategorilerin her birinden en yakın adaylar döner.
   //

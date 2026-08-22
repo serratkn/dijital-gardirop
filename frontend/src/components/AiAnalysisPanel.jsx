@@ -1,4 +1,5 @@
-import { Sparkles } from 'lucide-react'
+import { RefreshCw, Sparkles } from 'lucide-react'
+import Button from './ui/Button'
 
 // Kıyafet Detay sayfasındaki "Bu Parça Hakkında" bölümü.
 // Veriyi Gemini üretir (bkz. backend GeminiService, Aşama 2) ve clothing_items.ai_analysis
@@ -87,7 +88,15 @@ function Etiket({ children }) {
   )
 }
 
-function AiAnalysisPanel({ analysis }) {
+// onReanalyze verilmezse düğme HİÇ render edilmez: panel, yeniden analiz
+// yeteneği olmayan bir yerde (ya da testte) de olduğu gibi kullanılabilsin.
+function AiAnalysisPanel({
+  analysis,
+  onReanalyze = null,
+  isReanalyzing = false,
+  reanalyzeError = '',
+  photoChanged = false,
+}) {
   const veri = analysis?.veri
   if (!veri || typeof veri !== 'object') return null
 
@@ -173,6 +182,43 @@ function AiAnalysisPanel({ analysis }) {
           ? ` · ${dateFormatter.format(analizTarihi)}`
           : ''}
       </p>
+
+      {onReanalyze && (
+        <div className="mt-5">
+          {/* Fotoğraf bu oturumda değiştirildiyse analiz artık ESKİ görsele ait.
+              Kullanıcıyı zorlamak yerine hatırlatıyoruz — yeniden analiz gerçek
+              para harcadığı için kararı ona bırakmak doğru. */}
+          {photoChanged && !isReanalyzing && (
+            <p className="mb-3 text-sm text-ink/60">
+              Fotoğrafı değiştirdin — bu analiz hâlâ eski fotoğrafa ait.
+              Güncellemek ister misin?
+            </p>
+          )}
+
+          <Button
+            variant="outline"
+            onClick={onReanalyze}
+            disabled={isReanalyzing}
+            className="inline-flex items-center gap-2 text-xs"
+            data-testid="yeniden-analiz"
+          >
+            <RefreshCw
+              size={13}
+              strokeWidth={1.75}
+              className={isReanalyzing ? 'animate-spin' : ''}
+            />
+            {isReanalyzing ? 'Analiz ediliyor...' : 'Yeniden Analiz Et'}
+          </Button>
+
+          {/* HATA MESAJI PANELİN İÇİNDE ve analizin ALTINDA: yukarıdaki veriler
+              yerinde duruyor, kullanıcı neyin korunduğunu görüyor. */}
+          {reanalyzeError && !isReanalyzing && (
+            <p className="mt-3 text-sm text-burgundy" data-testid="yeniden-analiz-hatasi">
+              {reanalyzeError}
+            </p>
+          )}
+        </div>
+      )}
     </section>
   )
 }
