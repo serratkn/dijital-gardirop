@@ -25,7 +25,7 @@ kombin önerileri üreten bir stil platformudur.
 | Özellik | Durum |
 |---|---|
 | Gardırop yönetimi (kategori filtresi, arama) | Gerçek API'ye bağlı |
-| Kombin önerisi (duruma göre rastgele kombin) | Gerçek API'ye bağlı |
+| Kombin önerisi (vektör benzerliğiyle akıllı eşleştirme) | Gerçek API'ye bağlı |
 | Ana sayfa istatistikleri ve son eklenenler | Gerçek API'ye bağlı |
 | İlk açılış onboarding akışı + tarz anketi | localStorage |
 | Profil / hesap yönetimi ekranları | localStorage |
@@ -241,9 +241,13 @@ olduğu için iskelet oraya taşındı, kombin üretimi istemci tarafında anlı
   temiz/kirli işaretleme (kirli parçalar listede kalır, yalnızca kombin önerisi dışında tutulur)
 - **Ana Sayfa** — gerçek istatistikler (parça/kombin/favori) ve son eklenen 4 parça;
   istatistik kartları tıklanabilir (Gardırop / Kombinlerim)
-- **Kombin Öner** — gerçek gardıroptan (yalnızca temiz parçalardan, şehir tanımlıysa
-  hava durumuna uygun sezon öncelikli) kombin üretimi ve
-  kalıcı kaydetme; Ana Sayfa'daki hızlı kombin kartlarından doğrudan öneri üretilmiş halde açılır
+- **Kombin Öner (RAG)** — rastgele bir "başlangıç parçası" seçilir, ChromaDB'den o
+  parçaya en yakın adaylar DİĞER kategorilerden çekilir ve kombin bunlardan kurulur.
+  Temiz/kirli ve hava durumu filtreleri adaylara da uygulanır; bir kategoride vektör
+  adayı yoksa **yalnızca o slot** sessizce rastgele seçime düşer. Vektör yolu
+  kullanılabildiyse kartların üstünde **"Tarzına göre seçildi"** rozeti çıkar,
+  rastgeleye düşüldüyse çıkmaz. Kalıcı kaydetme ve Ana Sayfa'daki hızlı kombin
+  kartlarından doğrudan açılma aynen çalışır
 - **Kombinlerim** — kayıtlı kombinler; parçaları, tarihi, favori ve silme işlemleriyle
 - **Kıyafet Detay** — görüntüleme, favori, onaylı silme, fotoğraf yönetimi ve
   **o parçanın geçtiği kombinlerin listesi**
@@ -252,10 +256,10 @@ olduğu için iskelet oraya taşındı, kombin üretimi istemci tarafında anlı
   `clothing_items.ai_analysis` (JSONB) kolonuna yazılır ve Kıyafet Detay'daki
   **"Bu Parça Hakkında"** bölümünde gösterilir. Analiz başarısız olursa kolon NULL
   kalır, kıyafet ekleme akışı **hiç etkilenmez**
-- **Vektör veritabanı (altyapı)** — analiz tamamlanınca parçanın özeti Gemini
-  embedding'ine çevrilip ChromaDB'ye yazılır; `GET /clothing-items/:id/similar`
-  en yakın komşuları döndürür. **Henüz hiçbir ürün akışına bağlı değildir**
-  (Kombin Öner dokunulmadı) — bu bir doğrulama ucudur
+- **Vektör veritabanı** — analiz tamamlanınca parçanın özeti Gemini embedding'ine
+  çevrilip ChromaDB'ye yazılır. İki okuma ucu var:
+  `GET /clothing-items/:id/companions` **Kombin Öner'i besler** (ürün akışı),
+  `GET /clothing-items/:id/similar` elle inceleme için duran doğrulama ucudur
 - **Kombin paylaşımı** — Kombin Öner'deki öneri ve Kombinlerim'deki her kombin,
   Instagram Story oranında (1080×1920) bir PNG olarak indirilebilir; görsel
   **daima açık mod** renklerindedir
@@ -289,10 +293,11 @@ olduğu için iskelet oraya taşındı, kombin üretimi istemci tarafında anlı
 | **Fotoğraf değişince analiz güncellenmez** | Maliyet koruması "dolu `ai_analysis` varsa tekrar analiz etme" der; fotoğraf değiştirilse bile eski analiz kalır. `ClothingAnalysisService.analyzeItem(id, { force: true })` yolu hazır ama **arayüzde tetikleyicisi yok**. |
 | **Analiz yalnızca fotoğraf yüklenince tetiklenir** | Bu özellikten önce eklenmiş parçalar analizsizdir; toplu doldurma `test-scripts/analyze-existing-items.js` ile elle yapılır. |
 | **`/gemini/test-analyze` hâlâ duruyor** | Aşama 1'den kalan teşhis ucudur; ürün akışı artık otomatik analizdir. Kaldırılmadı çünkü `test-gemini.js` bağlantı/anahtar yollarını bunun üzerinden doğruluyor. |
-| **Benzerlik hiçbir ürün akışında kullanılmıyor** | Vektör altyapısı kuruldu ve veri akıyor ama `/similar` yalnızca bir doğrulama ucudur; Kombin Öner hâlâ istemci tarafında rastgele seçim yapıyor. Bağlama işi bir sonraki aşamanın. |
+| **Öneri kalitesi indekslenmiş parça sayısına bağlı** | Vektör eşleştirmesi yalnızca `ai_analysis` (dolayısıyla fotoğrafı) olan parçalar için çalışır. Analizsiz bir gardıropta Kombin Öner sessizce eskisi gibi rastgele seçim yapar ve rozet hiç görünmez — hatalı değil ama "akıllı" da değildir. Toplu doldurma `analyze-existing-items.js` + `create-embeddings.js` ile elle yapılır. |
+| **Durum (occasion) vektör aramasına GİRMİYOR** | "Üniversite" ile "Özel Davet" aynı adayları getirir; durum yalnızca kaydedilen kombinin etiketidir. Başlangıç parçası rastgele seçildiği için sonuç yine de her seferinde değişir. Durumu prompt'a/sorguya katmak ayrı bir aşamanın işi. |
 | **Chroma ile Postgres arasında işlem bütünlüğü yok** | İki ayrı depo, dağıtık işlem yok. Kıyafet silinince vektörü de silinir ama bu çağrı başarısız olursa öksüz vektör kalır. `/similar` bunu okurken filtreler (silinmiş parça yanıta düşmez) ve `cleanup.js` öksüzleri toplu siler. |
 | **Embedding modeli değişirse koleksiyon geçersiz olur** | Farklı modellerin vektörleri aynı uzayda değildir. Model değiştirildiğinde `create-embeddings.js --sifirla --uygula` çalıştırılmalıdır; bunu hatırlatan otomatik bir kontrol yok. |
-| **Arayüzde benzerlik gösterimi yok** | `/similar` yalnızca API'de; Kıyafet Detay sayfasına "benzer parçalar" bölümü eklenmedi (bu aşamada istenmedi). |
+| **Kıyafet Detay'da "benzer parçalar" bölümü yok** | `/similar` yalnızca API'de duruyor; benzerlik arayüzde şimdilik SADECE Kombin Öner üzerinden görünür. |
 | **Test altyapısı yok** | Test framework'ü yoktur. Doğrulama: `npm run lint` + `backend/test-scripts/` + elle deneme. |
 
 ---
@@ -523,15 +528,54 @@ anahtar yok, anahtar geçersiz, kota doldu, model bulunamadı, zaman aşımı, J
 çözümlenemedi. Ham SDK hatası asla dışarı sızmaz — yığın izi ve anahtar parçası
 içerebilir.
 
+### Kombin adayları (vektör veritabanı — Aşama 4)
+
+| Metod | Yol | Açıklama |
+|---|---|---|
+| `GET` | `/clothing-items/:id/companions?categoryIds=*&limit=` | Başlangıç parçasına en yakın adaylar, **istenen her kategoriden ayrı ayrı** |
+
+**Kombin Öner sayfasının RETRIEVAL ucu** — Aşama 4'ün ürün akışı budur.
+`categoryIds` **ZORUNLUDUR** (virgülle ayrılmış id listesi); `limit` kategori
+başına aday sayısıdır (varsayılan 5, en fazla 20).
+
+```json
+{"id":"a2e3779d-…","indekslendi":true,
+ "adaylar":{"2":[{"id":"b5c4ef01-…","name":"H&M siyah kumaş pantolon","category_id":2,
+                  "color":"Siyah","image_url":"/uploads/….png","season":"Tüm Sezon",
+                  "is_clean":true,"mesafe":0.0896,"benzerlik":0.9104}],
+            "4":[…],"5":[…]}}
+```
+
+- **KATEGORİ BAŞINA AYRI SORGU atılır.** Tek bir büyük sorgu (`nResults=50`)
+  istatistiksel olarak çok parçalı bir kategoriyi öne alır ve az parçalı
+  kategoriden hiç sonuç döndürmeyebilirdi; kombin ise her slotu doldurmak zorunda.
+- **Başlangıç parçasının KENDİ kategorisi hedeflerden düşer** (kombin slotu başka
+  bir kategoriye ait). Geriye hedef kalmazsa `400`.
+- **`is_clean` ve `season` yanıtta döner ama BACKEND FİLTRELEMEZ.** Temiz/kirli ve
+  hava durumu kuralları istemcide (`lib/outfitBuilder.js`) uygulanır — kombin kurma
+  mantığının tek sahibi orası. Değişken durum daima Postgres'ten okunur, Chroma
+  metadata'sından değil.
+- **Chroma erişilemezse `503` döner, boş liste değil.** Uç "dürüst"tür; *sessizce
+  rastgeleye düşme* kararı istemcinindir. Uç boş dönseydi arayüz akıllı olmayan bir
+  öneriyi akıllı sanar ve rozeti haksız yere gösterirdi.
+- **Öneri başına Gemini çağrısı YOKTUR:** başlangıç parçasının vektörü Chroma'da
+  zaten var, oradan okunur. Her öneri gerçek para harcasaydı özellik kullanılamazdı.
+- **Zaman aşımı 3 sn** (`COMPANION_TIMEOUT_MS`). `VectorRepository`'nin 10 sn'lik
+  sınırı burada fazla uzun: kullanıcı öneri ekranına bakıp bekliyor.
+- Sorgu daima `user_id` ile filtrelenir ve sonuçlar Postgres'ten doğrulanır
+  (silinmiş/başkasına ait parça yanıta sızmaz). Bozuk biçimli id `400`.
+- Henüz indekslenmemiş başlangıç parçası hata değildir:
+  `{"indekslendi": false, "sebep": "analiz-yok", "adaylar": {}}`.
+
 ### Benzer parçalar (vektör veritabanı — Aşama 3)
 
 | Metod | Yol | Açıklama |
 |---|---|---|
 | `GET` | `/clothing-items/:id/similar` | `limit` (varsayılan 5, en fazla 20) ve `categoryId` opsiyoneldir |
 
-**Bu bir DOĞRULAMA UCUDUR, ürün akışı değildir.** Kombin Öner'e ya da başka bir
-ekrana bağlı değildir; embedding'lerin gerçekten anlamlı olup olmadığını gözle
-görmek için var.
+**Bu bir DOĞRULAMA UCUDUR, ürün akışı değildir.** Kombin Öner `/companions`
+ucunu kullanır; bu uç embedding'lerin anlamlı olup olmadığını elle gözle
+görmek için duruyor.
 
 ```json
 {"id":"b25ab24e-…","indekslendi":true,
@@ -644,6 +688,7 @@ istemcide hiçbir toplama yapılmaz.
 | `POST` | `/clothing-items/:id/image` | **multipart/form-data**, alan adı `image`. jpg/png/webp, en fazla 5 MB |
 | `DELETE` | `/clothing-items/:id/image` | Fotoğrafı kaldırır (`image_url` → `null`, dosya diskten silinir) |
 | `GET` | `/clothing-items/:id/similar?limit=&categoryId=` | **Aşama 3 doğrulama ucu** — vektör uzayındaki en yakın komşular |
+| `GET` | `/clothing-items/:id/companions?categoryIds=*&limit=` | **Aşama 4** — Kombin Öner'i besleyen kategori bazlı aday araması |
 
 **Temiz/kirli (`isClean`).** Boolean dışında bir değer `400` döner; gevşek dönüşüm
 yapılmaz (`"false"` metni `true` olurdu). `POST`'ta belirtilmezse parça **temiz** sayılır.
@@ -871,7 +916,14 @@ node test-scripts/test-ai-analysis.js --birim
 node test-scripts/test-ai-analysis.js --kotasiz
 node test-scripts/test-ai-analysis.js --cleanup
 
-# Vektör veritabanı — Gemini Aşama 3 (76 kontrol: 45 birim + 4 bağlantı + 27 uçtan uca).
+# RAG ile Kombin Öner — Gemini Aşama 4 (69 kontrol: 36 birim + 21 uçtan uca + 12 Chromasız).
+# --birim: yalnızca birim bölümü (Chroma, anahtar ve kota GEREKTİRMEZ)
+# Bölüm 3 Chroma'sı ÖLÜ BİR PORTA bakan ikinci bir sunucu açar (:3197).
+node test-scripts/test-outfit-rag.js
+node test-scripts/test-outfit-rag.js --birim
+node test-scripts/test-outfit-rag.js --cleanup
+
+# Vektör veritabanı — Gemini Aşama 3 (77 kontrol: 46 birim + 4 bağlantı + 27 uçtan uca).
 # --birim: yalnızca birim bölümü (Chroma, anahtar ve kota GEREKTİRMEZ)
 # Bölüm 3 ai_analysis'i ELLE yazar (sentetik): "iki beyaz üst yakın çıkmalı"
 # iddiası ancak girdi kontrol edilirse deterministik sınanabilir.
@@ -901,6 +953,16 @@ node test-scripts/test-gemini.js --image ../yol/kiyafet.jpg
 node test-scripts/cleanup.js --dry-run               # önce neyin silineceğini göster
 node test-scripts/cleanup.js                         # test parçaları + @example.com kullanıcıları
 node test-scripts/cleanup.js --all --user <uuid>     # bir kullanıcının TÜM verisi
+```
+
+**Frontend'de de tek bir test scripti var** (`frontend/` klasöründen çalıştırılır):
+
+```bash
+# Kombin kurma mantığı — saf fonksiyon testleri (48 kontrol).
+# SUNUCU, CHROMA VE ANAHTAR GEREKTİRMEZ: lib/outfitBuilder.js React'tan ve ağ
+# katmanından bağımsız olduğu için doğrudan node ile koşuyor. Asıl güvence:
+# vektör adaylarının temiz/kirli ve hava durumu filtrelerini ATLAYAMAMASI.
+node test-scripts/test-outfit-builder.mjs
 ```
 
 `test-all-endpoints.js` mutlu yolun yanı sıra doğrulama hatalarını (400), bulunamayan
@@ -1055,9 +1117,23 @@ uyar; tek fark, "veritabanı" burada Postgres değil Chroma.
   Embedding, kıyafet akışının parçası değil üstüne konan bir zenginleştirmedir.
   Chroma kapalıysa, kota dolduysa veya ağ düştüyse kıyafet kaydı ve analizi
   yerinde durur, kullanıcı hiçbir şey görmez.
-- **OKUMA (`findSimilar`): FIRLATIR.** Kullanıcı doğrudan "benzerleri göster"
-  demiştir; sessizce boş liste dönmek "benzer parça yok" gibi YANLIŞ bir cevap
-  olurdu. Erişilemeyen servis `503` ile bildirilir.
+- **OKUMA (`findSimilar` / `findCompanions`): FIRLATIR.** Sessizce boş liste
+  dönmek "benzer parça yok" gibi YANLIŞ bir cevap olurdu. Erişilemeyen servis
+  `503` ile bildirilir. **Aşama 4 bu kuralı değiştirmedi:** Kombin Öner'in
+  rastgeleye düşmesi gerekiyor ama bu kararı İSTEMCİ verir — API dürüst kalır,
+  yoksa arayüz rastgele bir öneriyi "akıllı" sanıp rozeti haksız yere gösterirdi.
+
+`findCompanions` (Aşama 4) `findSimilar`'dan üç noktada ayrılır: **kategori
+başına AYRI sorgu** atar (tek büyük sorgu az parçalı kategoriyi hiç
+döndürmeyebilirdi), sonuçları **kategoriye göre gruplanmış** verir ve
+**3 sn'lik kendi zaman aşımı** vardır (`COMPANION_TIMEOUT_MS`) — repository'nin
+10 sn'si öneri ekranında bekleyen kullanıcı için fazla uzun. Zenginleştirme tek
+sorguda yapılır (`ClothingItemRepository.findByIds`): kategori başına N aday için
+ayrı ayrı `findById` atmak veritabanına onlarca tur demekti.
+
+**Bozuk biçimli id her iki okuma yolunda da `assertUuid` ile `400`'e çevrilir.**
+Doğrudan Postgres'e gitseydi `22P02` ile `500` dönerdi — `GET /outfits?clothingItemId=`
+filtresinde yaşanan tuzağın aynısı.
 
 Aynı ayrım GeminiService ↔ WeatherService arasında da var ve aynı ölçüte
 dayanıyor: **o anda cevap bekleyen bir kullanıcı var mı, yok mu.**
@@ -1172,10 +1248,49 @@ backend'deki `WeatherService.#toStatus` ile **birebir aynı tutulmalıdır**.
 Türkçe ünlü uyumuna tabi olduğu için kural değil **veri**dir
 ("İstanbul'da" ama "İzmir'de", "Gaziantep'te").
 
-**Kombin üretimi ISTEMCI TARAFINDADIR.** Backend'de rastgele kombin üreten hiçbir kod
-yoktur — `OutfitService` yalnızca doğrular ve kaydeder. Rastgele seçim
-`pages/OutfitSuggestion.jsx` içindeki `buildRandomOutfit()` fonksiyonundadır.
-Öneri kuralları (örn. "yalnızca temiz parçalar") **oraya** yazılır, servise değil.
+**Kombin ÜRETİMİ hâlâ İSTEMCİ TARAFINDADIR; backend yalnızca RETRIEVAL yapar.**
+Bu ayrım Aşama 4'te bilinçli olarak korundu: `GET /clothing-items/:id/companions`
+"vektör uzayında bunlar yakın" der ve orada durur; hangi slotun neyle dolacağı,
+temiz/kirli ve hava durumu kuralları, varyant ilerletme ve geri düşüş
+**`src/lib/outfitBuilder.js`** içindedir. `OutfitService` hâlâ yalnızca doğrular
+ve kaydeder — backend'de kombin üreten hiçbir kod yoktur.
+
+Mantık sayfadan `lib/outfitBuilder.js`'e ÇIKARILDI çünkü Aşama 4'te iki yol oluştu
+(vektör eşleştirmesi + rastgele geri düşüş) ve ikisi de saf fonksiyon olarak
+React'sız test edilebilmeliydi (`frontend/test-scripts/test-outfit-builder.mjs`).
+Modül `./seasons.js` importunda **uzantıyı bilerek yazar**: Node'un ESM
+çözümleyicisi uzantısız yolu bulamaz, Vite ikisini de kabul eder.
+
+Akış:
+
+1. **`pickSeedItem`** — temiz parçalar arasından bir başlangıç parçası seçer.
+   **Analizi olan parçalar önceliklidir**: embedding'in kaynağı `ai_analysis`
+   kolonudur, analizsiz bir parçayı başlangıç yapmak aramayı baştan boşa çıkarırdı.
+   Sonra hava durumuna uygun sezon önceliklendirilir.
+2. **`fetchCompanions`** — diğer kategorilerin adaylarını çeker. Bu çağrının
+   **her hatası yutulur** (Chroma kapalı, zaman aşımı, ağ hatası, indekslenmemiş
+   parça): sonuç `null` olur ve akış rastgele seçime döner.
+3. **`buildOutfitFromCandidates`** — adayları önce TEMİZ olanlara indirger, sonra
+   sezon önceliğini uygular. **Vektör benzerliği bu filtreleri atlamaz.** Bir
+   kategoride aday kalmazsa YALNIZCA O SLOT `buildRandomOutfit` mantığına düşer.
+
+**Rozet (`Tarzına göre seçildi`) `vectorCount > 0` iken gösterilir.** Ölçüt
+"kombinde vektörün getirdiği en az bir parça var mı"dır; tamamen rastgeleye
+düşüldüyse rozet HİÇ çıkmaz. Kullanıcıya olmayan bir zekâyı satmamak için
+kural bilinçli olarak bu yönde katı.
+
+**"Başka Öneri Göster" aynı başlangıç parçasıyla havuzda İLERLER** (en yakın →
+ikinci en yakın → …). `variantDepth` tükendiğinde yeni bir başlangıç parçası
+seçilir ve `excludeSeedId` ile öncekinin tekrar gelmesi engellenir. Rastgele
+moddayken düğme eskisi gibi davranır (aynı kombin gelmesin diye 5 deneme).
+
+**Adaylar id olarak saklanır, parça nesnesi olarak değil** (`poolRef`). Her kombin
+kurulumunda güncel gardıroptan yeniden çözülürler; böylece karttaki temiz/kirli
+iyimser güncellemesi bir sonraki "Başka Öneri"ye anında yansır.
+
+**Yanıt beklenirken sayfa iskelet gösterir** ve geç gelen yanıt `requestIdRef` ile
+elenir: kullanıcı bekleme sırasında başka bir duruma tıklarsa bayat yanıt yeni
+öneriyi ezmemeli.
 
 `buildRandomOutfit()` kendisine verilen havuzdan seçer; temiz filtresi çağıranda
 uygulanır. Bunun sebebi sayfanın iki durumu ayırt etmek zorunda olmasıdır:
@@ -1361,6 +1476,122 @@ fotoğraf sorunu teyit edildikten sonra üç yerden de kaldırılabilir.
 
 > Bundan sonraki her çalışma buraya tarihiyle işlenir: eklenen özellikler, düzeltilen
 > hatalar, alınan mimari kararlar. En yeni kayıt en üstte.
+
+### 2026-08-22 — Gemini Entegrasyonu — Aşama 4: RAG ile Kombin Öner
+- **Vektör altyapısı nihayet ÜRÜN AKIŞINA BAĞLANDI.** Kombin Öner artık rastgele
+  bir "başlangıç parçası" seçip ChromaDB'den o parçaya en yakın adayları DİĞER
+  kategorilerden çekiyor ve kombini bunlardan kuruyor. Mevcut temiz/kirli ve hava
+  durumu filtreleri **korundu ve adaylara da uygulanıyor** — vektör benzerliği
+  hiçbir filtreyi atlamıyor.
+- **Yeni uç `GET /clothing-items/:id/companions?categoryIds=1,2,4,5&limit=8`.**
+  `categoryIds` zorunlu; başlangıç parçasının KENDİ kategorisi hedeflerden düşer.
+- **KATEGORİ BAŞINA AYRI SORGU — ölçülmüş bir gereklilik, süsleme değil.** Tek bir
+  büyük sorgu (`nResults=50`) istatistiksel olarak çok parçalı bir kategoriyi öne
+  alır ve az parçalı kategoriden hiç sonuç döndürmeyebilir; kombin ise HER slotu
+  doldurmak zorunda. Sorgular paralel gidiyor, Chroma yerel ağda.
+- **RETRIEVAL backend'de, KOMBİN KURMA istemcide.** Bilinçli bir sınır: uç "vektör
+  uzayında bunlar yakın" der ve durur. Hangi slotun neyle dolacağı, temiz/kirli,
+  hava durumu, varyant ilerletme ve geri düşüş **yeni `src/lib/outfitBuilder.js`**
+  modülünde. `OutfitService` hâlâ yalnızca doğrulayıp kaydediyor.
+- **Mantık `OutfitSuggestion.jsx`'ten `lib/outfitBuilder.js`'e ÇIKARILDI** çünkü artık
+  iki yol var (vektör + rastgele geri düşüş) ve ikisi de React'sız, deterministik
+  test edilebilmeliydi. Modül `./seasons.js` importunda **uzantıyı bilerek yazıyor**:
+  Node'un ESM çözümleyicisi uzantısız yolu bulamaz, Vite ikisini de kabul eder.
+- **BAŞLANGIÇ PARÇASI ANALİZLİ OLANLARDAN SEÇİLİR.** Embedding'in kaynağı
+  `ai_analysis` kolonudur; analizsiz bir parçayı başlangıç yapmak aramayı baştan
+  boşa çıkarır ve her seferinde rastgeleye düşerdi. Sonra hava durumuna uygun
+  sezon önceliklendirilir (mevcut kural).
+- **GERİ DÜŞÜŞ KATEGORİ BAZINDA, KOMBİN BAZINDA DEĞİL.** Çanta kategorisinde vektör
+  adayı yoksa (embedding'i olmayan parça, ya da hepsi kirli) yalnızca o slot
+  rastgele seçime düşer; kalan üç slot vektörden gelmeye devam eder. "Ya hep ya
+  hiç" olsaydı tek bir indekslenmemiş parça tüm özelliği kapatırdı.
+- **"Başka Öneri Göster" aynı başlangıç parçasıyla HAVUZDA İLERLİYOR** (en yakın →
+  ikinci en yakın → …). Kategori başına 8 aday isteniyor; havuz tükendiğinde yeni
+  bir başlangıç parçası seçiliyor ve `excludeSeedId` ile öncekinin tekrar gelmesi
+  engelleniyor. Rastgele moddayken düğme eskisi gibi davranıyor.
+- **Adaylar id olarak saklanıyor, parça nesnesi olarak DEĞİL.** Her kombin
+  kurulumunda güncel gardıroptan yeniden çözülüyorlar; böylece karttaki
+  temiz/kirli iyimser güncellemesi bir sonraki öneriye anında yansıyor. Nesne
+  saklansaydı havuz kullanıcının az önce kirli işaretlediği parçayı önermeye
+  devam ederdi.
+- **API DÜRÜST KALDI: Chroma erişilemezse uç `503` döner, boş liste değil.**
+  Sessizce rastgeleye düşme kararı İSTEMCİNİN. Uç boş dönseydi arayüz akıllı
+  olmayan bir öneriyi akıllı sanar ve rozeti haksız yere gösterirdi. VectorService'in
+  "OKUMA fırlatır" sözleşmesi bu yüzden değişmedi.
+- **Rozet: "✦ Tarzına göre seçildi".** `vectorCount > 0` iken görünür; tamamen
+  rastgeleye düşüldüyse HİÇ çıkmaz. Mikro etiket idiomu (`uppercase`,
+  `tracking-[0.15em]`, `text-accent-ink`) — yeni bir görsel dil icat edilmedi.
+  Ölçüldü: açık modda **4.97:1**, karanlık modda **9.28:1**, ikisi de WCAG AA.
+- **ÖNERİ BAŞINA GEMİNİ ÇAĞRISI YOK.** Başlangıç parçasının vektörü Chroma'da zaten
+  var, oradan okunuyor. Her öneri gerçek para harcasaydı özellik kullanılamazdı;
+  test bunu ayrıca doğruluyor.
+- **Zaman aşımı 3 sn** (`COMPANION_TIMEOUT_MS`), istemcide 4 sn. `VectorRepository`'nin
+  10 sn'lik sınırı burada FAZLA UZUN: orada kullanıcı fotoğraf yükleyip işine
+  bakıyor, burada öneri ekranına bakıp bekliyor. Sınır servis katmanında ayrıca
+  uygulanıyor çünkü koleksiyon nesnesi üzerinden yapılan `get`/`query` çağrıları
+  repository'nin kendi zaman aşımının dışında kalıyor. Ölçülen gerçek yanıt: **53–77 ms**.
+- **Zenginleştirme tek sorguda** (`ClothingItemRepository.findByIds`): kategori
+  başına N aday için ayrı ayrı `findById` atmak veritabanına onlarca tur demekti
+  ve bu yol kullanıcı beklerken çalışıyor.
+- **YAKALANAN HATA — bozuk id 500 döndürüyordu.** Test `?id=bozuk-uuid` ile
+  `500` aldı: id doğrudan Postgres'e gidip `22P02` veriyordu. `assertUuid` ile
+  `400`'e çevrildi; **aynı hata `/similar` ucunda da vardı ve o da düzeltildi**
+  (`GET /outfits?clothingItemId=` filtresinde yaşanan tuzağın aynısı).
+- **Doğrulama — `backend/test-scripts/test-outfit-rag.js`, 69 kontrol:**
+  - *Birim (36) CHROMA VE ANAHTAR GEREKTİRMEZ* (`--birim`): yetkilendirme
+    (başkasının parçası 404, bozuk id 400, `categoryIds` yoksa 400); **her
+    sorguda kullanıcı VE kategori filtresinin bulunması**; kategori başına ayrı
+    sorgu; başlangıç parçasının kendisinin elenmesi; Chroma'da kalan öksüz
+    vektörün Postgres doğrulamasında düşmesi; `limit` sınırlaması; indekslenmemiş
+    parçanın hata DEĞİL `indekslendi:false` dönmesi; **Chroma çöktüğünde 503
+    FIRLATMASI**; **askıda kalan Chroma'nın 3 sn'de zaman aşımına düşmesi**;
+    `CHROMA_ENABLED=false`; ve **öneri başına Gemini çağrısı olmaması**.
+  - *Gerçek embedding (21):* kontrollü sentetik veriyle (siyah tişört, siyah
+    pantolon, beyaz yazlık şort, sneaker, kirli çanta). **Sonuç: siyah pantolon
+    0.9638, beyaz şort 0.8518** — fark 0.1120, gürültünün çok üstünde. Ayrıca
+    kirli adayın backend'de ELENMEYİP `is_clean:false` ile işaretli dönmesi,
+    `season`/`image_url`/`color` alanlarının varlığı, 401/400/404, `limit=1`,
+    **başka kullanıcının NEREDEYSE AYNI parçasının sonuçlara sızmaması** ve
+    kıyafet silinince adaylardan düşmesi.
+  - *KRİTİK — Chroma erişilemezken (12):* script **ikinci bir sunucu açar**
+    (`:3197`, ölü Chroma portu) ve Kombin Öner'i besleyen akışın kırılmadığını
+    kanıtlar: sunucu açılıyor, kategoriler/gardırop/kullanıcı okunabiliyor,
+    **kombin kaydedilebiliyor**, `/companions` **503 ile açıkça** bildiriyor
+    (18 ms'de, istemci beklemiyor), ham bağlantı hatası sızmıyor, süreç çökmüyor.
+- **Doğrulama — `frontend/test-scripts/test-outfit-builder.mjs`, 48 kontrol.**
+  Depodaki İLK frontend test scripti. Sunucu/Chroma/anahtar gerektirmez.
+  Asıl güvence burada: **vektör adaylarının temiz/kirli ve hava durumu
+  filtrelerini atlayamaması** (100 kombinde kirli parça çıkmaması dahil), geri
+  düşüşün kategori bazında olması, varyant ilerletme, `variantDepth`, ve
+  `buildRandomOutfit`'in eski davranışının birebir korunması.
+- **Doğrulama — gerçek tarayıcıda (Playwright + sistem Chrome), 23 + 9 kontrol:**
+  rozetin görünmesi ve metni, `accent-ink` rengi ve mikro etiket idiomu, kirli
+  parçanın kombine girmemesi, "Başka Öneri Göster"in farklı kombinler üretmesi;
+  **`/companions` 503'e düşürüldüğünde kombinin YİNE üretilmesi, rozetin
+  ÇIKMAMASI, kullanıcıya hata gösterilmemesi ve sayfanın çökmemesi**; ağ tamamen
+  koptuğunda aynı davranış; **hiç analizi olmayan bir gardıropta (serra1110)
+  sessizce rastgeleye düşülmesi**; iki Alt parçası kirletildiğinde 8 önerinin
+  hiçbirinde çıkmaması ve "Temiz Alt parçan yok" notunun görünmesi; temiz konsol.
+  Ayrı koşuda karanlık mod ve 390px: rozet görünür, kontrast **9.28:1 / 4.97:1**,
+  yatay taşma yok.
+- **GERÇEK GARDIROP VERİSİYLE de doğrulandı** (`deneme@gmail.com`, 6 indeksli parça):
+  siyah tişört → **siyah pantolon 0.9104** > siyah çanta 0.8643 > beyaz şort 0.8492
+  > sneaker 0.8465; siyah çanta → siyah pantolon 0.8801; beyaz yazlık şort →
+  sneaker 0.8502, siyah çanta ise en sonda (0.8013). Renk ve resmiyet kümelenmesi
+  gözle görülür biçimde doğru.
+- **Not — bu gardıropta "Üst" slotu genellikle rastgele doluyor:** tek indeksli
+  üst parçası (Colins siyah tişört) kirli, temiz olan (Bershka crop top) ise
+  analizsiz. Kombin yine kuruluyor ve rozet çıkıyor (Ayakkabı + Çanta vektörden
+  geliyor) — geri düşüşün kategori bazında olmasının pratikteki karşılığı tam
+  olarak bu.
+- Regresyon: `test-all-endpoints` 72/72, `test-auth` 48/48, `test-stats` 60/60,
+  `test-item-outfits` 27/27, `test-clean-status` 26/26, `test-vector` 77/77,
+  `test-ai-analysis --kotasiz` 53/53, lint + build temiz.
+- **TEST TUZAĞI (iki kez yaşandı):** `assertUuid` eklenince, item id'si olarak
+  `'x'` / `'yok-boyle-bir-id'` gibi **yer tutucu** kullanan iki eski kontrol
+  kırmızı yandı — ürün hatası değil, fixture hatası. Yer tutucu id'ler biçimi
+  geçerli UUID'lerle değiştirildi ve bozuk biçim için AYRI birer kontrol eklendi.
+  Ders: id doğrulaması ekleyen bir değişiklik, id'yi önemsemeyen testleri de kırar.
 
 ### 2026-08-21 — Gemini Entegrasyonu — Aşama 3: Vektör Veritabanı (ChromaDB)
 - **Kapsam: YALNIZCA ALTYAPI.** Analiz tamamlanınca parçanın özeti embedding'e

@@ -1,46 +1,41 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useLocation } from 'react-router-dom'
-import { CloudSun } from 'lucide-react'
+import { CloudSun, Sparkles } from 'lucide-react'
 import PageHeader from '../components/ui/PageHeader'
 import FilterPills from '../components/ui/FilterPills'
 import EmptyState from '../components/ui/EmptyState'
 import Button from '../components/ui/Button'
 import ShareButton from '../components/ui/ShareButton'
 import ClothingCard from '../components/ClothingCard'
-import { createOutfit, fetchCategories, fetchClothingItems, fetchMe, fetchWeather } from '../lib/api'
-import { toCategoryNameMap, toClothingItems } from '../lib/transformers'
+import {
+  createOutfit,
+  fetchCategories,
+  fetchClothingItems,
+  fetchCompanions,
+  fetchMe,
+  fetchWeather,
+} from '../lib/api'
+import { toCategoryIdMap, toCategoryNameMap, toClothingItems } from '../lib/transformers'
 import { OCCASIONS, OCCASION_STATE_KEY } from '../lib/occasions'
-import { matchesSeason, seasonsForWeather } from '../lib/seasons'
+import { seasonsForWeather } from '../lib/seasons'
 import { cityLocative } from '../lib/cities'
-
-const OUTFIT_CATEGORIES = ['Üst', 'Alt', 'Ayakkabı', 'Çanta']
+import {
+  OUTFIT_CATEGORIES,
+  buildOutfitFromCandidates,
+  buildRandomOutfit,
+  isSameOutfit,
+  pickSeedItem,
+  variantDepth,
+} from '../lib/outfitBuilder'
 
 // outfits.occasion kolonu VARCHAR(50); daha uzun metin veritabanı
 // hatasına düşeceği için girişte sınırlanıyor.
 const OCCASION_MAX_LENGTH = 50
 
-const pickRandom = (list) => list[Math.floor(Math.random() * list.length)]
-
-// Her kategoriden rastgele bir parça seçer; o kategoride seçilebilir parça
-// yoksa slot atlanır (kombin eksik parçayla da oluşabilir).
-// Kendisine YALNIZCA temiz parçalar verilir — filtreleme çağıranda yapılır ki
-// sayfa "hiç parça yok" ile "temiz parça yok" durumlarını ayırt edebilsin.
-//
-// `seasons` verilirse hava durumuna uyan parçalar ÖNCELİKLİDİR ama ZORUNLU DEĞİL:
-// o kategoride uygun sezonda parça yoksa tüm havuza düşülür. Sert filtre olsaydı
-// hava durumu yüzünden kombin slotları boş kalırdı — istenen davranış
-// "önceliklendir", "ele" değil.
-const buildRandomOutfit = (items, seasons) =>
-  OUTFIT_CATEGORIES.map((category) => {
-    const pool = items.filter((item) => item.category === category)
-    if (pool.length === 0) return null
-
-    const preferred = pool.filter((item) => matchesSeason(item, seasons))
-    return pickRandom(preferred.length > 0 ? preferred : pool)
-  }).filter(Boolean)
-
-const isSameOutfit = (a, b) =>
-  a.length === b.length && a.every((item, index) => item.id === b[index]?.id)
+// Kategori başına kaç aday istenecek. 1 değil N: "Başka Öneri Göster" aynı
+// başlangıç parçasıyla bu havuzda ilerliyor (en yakın, ikinci en yakın…).
+// Havuz kirli parçalarla incelebileceği için istenen sayı biraz cömert.
+const COMPANION_LIMIT = 8
 
 function OutfitSuggestion() {
   const location = useLocation()
@@ -48,6 +43,7 @@ function OutfitSuggestion() {
   const requestedOccasion = location.state?.[OCCASION_STATE_KEY]
 
   const [items, setItems] = useState([])
+  const [categoryIds, setCategoryIds] = useState(() => new Map())
   const [weather, setWeather] = useState(null)
   const [isLoading, setIsLoading] = useState(true)
   const [hasError, setHasError] = useState(false)
@@ -55,6 +51,11 @@ function OutfitSuggestion() {
   const [selectedOccasion, setSelectedOccasion] = useState('')
   const [customText, setCustomText] = useState('')
   const [suggestionItems, setSuggestionItems] = useState([])
+  // Kombinde vektör aramasının getirdiği en az bir parça var mı? Rozet
+  // yalnızca bu doğruyken görünür — rastgele seçime düşülmüşse kullanıcıya
+  // "tarzına göre seçildi" demek yanıltıcı olurdu.
+  const [isSmart, setIsSmart] = useState(false)
+  const [isSuggesting, setIsSuggesting] = useState(false)
 
   const [isSaving, setIsSaving] = useState(false)
   const [isSaved, setIsSaved] = useState(false)
@@ -80,6 +81,9 @@ function OutfitSuggestion() {
         if (isStale) return
 
         setItems(toClothingItems(itemRows, toCategoryNameMap(categoryRows)))
+        // Ters eşleme vektör sorgusu için gerekli: Chroma metadata'sında
+        // kategori adı değil id var.
+        setCategoryIds(toCategoryIdMap(categoryRows))
 
         // Hava durumu İSTEĞE BAĞLI bir zenginleştirmedir. Başarısız olursa
         // (anahtar yok, servis düşmüş, şehir tanınmıyor) sayfa hiçbir şey
@@ -121,6 +125,8 @@ function OutfitSuggestion() {
   // gardıropta görünür, sadece bu seçimin dışında kalır.
   const cleanItems = useMemo(() => items.filter((item) => item.isClean !== false), [items])
 
+  const itemsById = useMemo(() => new Map(items.map((item) => [item.id, item])), [items])
+
   // "Hiç parçan yok" ile "temiz parçan yok" ayrı mesajları hak eder:
   // ilki gardırobu doldurmayı, ikincisi çamaşır yıkamayı gerektirir.
   const dirtyOnlyCategories = useMemo(
@@ -139,34 +145,148 @@ function OutfitSuggestion() {
   )
 
   // Karttan temizlik durumu değiştirilirse havuz da güncellenmeli ki
-  // "Başka Öneri Göster" artık kirli olan parçayı seçmesin.
+  // "Başka Öneri Göster" artık kirli olan parçayı seçmesin. Vektör adayları
+  // id olarak saklandığı ve her kombin kurulumunda yeniden çözüldüğü için
+  // bu güncelleme onlara da yansır.
   const handleCleanChange = useCallback((itemId, isClean) => {
     setItems((previous) =>
       previous.map((item) => (item.id === itemId ? { ...item, isClean } : item)),
     )
   }, [])
 
-  // Hava bilinmiyorsa null kalır ve buildRandomOutfit sezon önceliği uygulamaz —
-  // yani şehri olmayan ya da hava durumu alınamayan kullanıcı için davranış
-  // önceki hâliyle birebir aynı kalır.
+  // Hava bilinmiyorsa null kalır ve sezon önceliği uygulanmaz — yani şehri
+  // olmayan ya da hava durumu alınamayan kullanıcı için davranış önceki
+  // hâliyle birebir aynı kalır.
   const preferredSeasons = useMemo(
     () => (weather ? seasonsForWeather(weather.status) : null),
     [weather],
   )
 
-  const startSuggestion = useCallback(
-    (occasion) => {
+  // Aktif vektör havuzu: { seedItem, candidateIds }. Rastgele seçime
+  // düşüldüyse null olur ve "Başka Öneri Göster" eski davranışa döner.
+  const poolRef = useRef(null)
+  const variantRef = useRef(0)
+  // Kullanıcı yanıt beklerken başka bir duruma tıklarsa, geç gelen yanıt
+  // yeni öneriyi ezmemeli.
+  const requestIdRef = useRef(0)
+
+  // ---- Vektör aday havuzu ----
+
+  // Başlangıç parçasına en yakın adayları DİĞER kategorilerden çeker.
+  // Başarısızlık (Chroma kapalı, zaman aşımı, indekslenmemiş parça) burada
+  // hata olarak DEĞİL, null olarak temsil edilir; çağıran sessizce rastgeleye düşer.
+  const loadCandidateIds = useCallback(
+    async (seedItem) => {
+      const targetIds = OUTFIT_CATEGORIES.filter((category) => category !== seedItem.category)
+        .map((category) => categoryIds.get(category))
+        .filter((id) => typeof id === 'number')
+
+      if (targetIds.length === 0) return null
+
+      const result = await fetchCompanions(seedItem.id, {
+        categoryIds: targetIds,
+        limit: COMPANION_LIMIT,
+      })
+
+      // Başlangıç parçasının henüz vektörü yok (analizi bitmemiş ya da hiç
+      // fotoğrafı yok): hata değil, yalnızca akıllı yol kullanılamaz.
+      if (!result?.indekslendi) return null
+
+      const byCategory = new Map()
+      for (const category of OUTFIT_CATEGORIES) {
+        const rows = result.adaylar?.[categoryIds.get(category)] ?? []
+        if (rows.length > 0) byCategory.set(category, rows.map((row) => row.id))
+      }
+      return byCategory.size > 0 ? byCategory : null
+    },
+    [categoryIds],
+  )
+
+  // Saklanan kimlikleri GÜNCEL gardırop kayıtlarına çevirir. Kimlik saklamanın
+  // sebebi: aradaki temiz/kirli değişikliklerini (iyimser güncelleme) yakalamak.
+  const resolveCandidates = useCallback(
+    (candidateIds) => {
+      if (!candidateIds) return null
+
+      const resolved = new Map()
+      for (const [category, ids] of candidateIds) {
+        const parcalar = ids.map((id) => itemsById.get(id)).filter(Boolean)
+        if (parcalar.length > 0) resolved.set(category, parcalar)
+      }
+      return resolved.size > 0 ? resolved : null
+    },
+    [itemsById],
+  )
+
+  const applyVariant = useCallback(
+    (pool, variant) => {
+      // Havuz yoksa MEVCUT rastgele mantık aynen çalışır.
+      if (!pool) {
+        setSuggestionItems(buildRandomOutfit(cleanItems, preferredSeasons))
+        setIsSmart(false)
+        return
+      }
+
+      const { items: next, vectorCount } = buildOutfitFromCandidates({
+        seedItem: pool.seedItem,
+        candidatesByCategory: resolveCandidates(pool.candidateIds),
+        cleanItems,
+        seasons: preferredSeasons,
+        variant,
+      })
+
+      setSuggestionItems(next)
+      setIsSmart(vectorCount > 0)
+    },
+    [cleanItems, preferredSeasons, resolveCandidates],
+  )
+
+  const runSuggestion = useCallback(
+    async (occasion, { excludeSeedId = null } = {}) => {
+      const requestId = requestIdRef.current + 1
+      requestIdRef.current = requestId
+
       setSelectedOccasion(occasion)
-      setSuggestionItems(buildRandomOutfit(cleanItems, preferredSeasons))
       setIsSaved(false)
       setSaveError('')
+
+      const seedItem = pickSeedItem(cleanItems, preferredSeasons, { excludeId: excludeSeedId })
+
+      // Hiç temiz parça yok: mevcut "Şu an temiz parçan yok" ekranı devreye girer.
+      if (!seedItem) {
+        poolRef.current = null
+        variantRef.current = 0
+        setIsSuggesting(false)
+        setSuggestionItems([])
+        setIsSmart(false)
+        return
+      }
+
+      setIsSuggesting(true)
+
+      let candidateIds = null
+      try {
+        candidateIds = await loadCandidateIds(seedItem)
+      } catch (error) {
+        // SESSİZ GERİ DÜŞÜŞ. ChromaDB kapalı, zaman aşımı, ağ hatası — hiçbiri
+        // kullanıcıya gösterilmez; kombin yine üretilir, yalnızca rozet çıkmaz.
+        console.warn('Akıllı eşleştirme kullanılamadı, rastgele seçime düşülüyor:', error.message)
+      }
+
+      // Kullanıcı bu arada başka bir duruma tıkladıysa bu yanıt bayattır.
+      if (requestId !== requestIdRef.current) return
+
+      const pool = candidateIds ? { seedItem, candidateIds } : null
+      poolRef.current = pool
+      variantRef.current = 0
+      applyVariant(pool, 0)
+      setIsSuggesting(false)
     },
-    [cleanItems, preferredSeasons],
+    [cleanItems, preferredSeasons, loadCandidateIds, applyVariant],
   )
 
   // Ana Sayfa kartından gelindiyse kullanıcı tekrar tıklamak zorunda kalmadan
-  // öneri üretilir. Gardırop yüklenmeden çalışamaz: buildRandomOutfit'in seçecek
-  // parçası olmalı.
+  // öneri üretilir. Gardırop yüklenmeden çalışamaz: seçilecek parça olmalı.
   //
   // Ref ile YALNIZCA BİR KEZ çalışır. cleanItems, karttaki temiz/kirli toggle'ıyla
   // değişiyor; guard olmasaydı efekt yeniden tetiklenip kullanıcının o sırada seçtiği
@@ -178,26 +298,50 @@ function OutfitSuggestion() {
     if (isLoading || hasError || !requestedOccasion) return
 
     hasAppliedRequest.current = true
-    startSuggestion(requestedOccasion)
-  }, [isLoading, hasError, requestedOccasion, startSuggestion])
+    runSuggestion(requestedOccasion)
+  }, [isLoading, hasError, requestedOccasion, runSuggestion])
 
   const handleCustomSubmit = (event) => {
     event.preventDefault()
     if (!customText.trim()) return
-    startSuggestion(customText.trim())
+    runSuggestion(customText.trim())
   }
 
   const showAnother = () => {
-    setSuggestionItems((previous) => {
-      let next = buildRandomOutfit(cleanItems, preferredSeasons)
-      let attempts = 0
-      // Aynı kombinin üst üste gelmemesi için birkaç kez yeniden dener.
-      while (attempts < 5 && isSameOutfit(next, previous)) {
-        next = buildRandomOutfit(cleanItems, preferredSeasons)
-        attempts += 1
-      }
-      return next
-    })
+    const pool = poolRef.current
+
+    // Rastgele mod (vektör kullanılamadı): eski davranış birebir korunur.
+    if (!pool) {
+      setSuggestionItems((previous) => {
+        let next = buildRandomOutfit(cleanItems, preferredSeasons)
+        let attempts = 0
+        // Aynı kombinin üst üste gelmemesi için birkaç kez yeniden dener.
+        while (attempts < 5 && isSameOutfit(next, previous)) {
+          next = buildRandomOutfit(cleanItems, preferredSeasons)
+          attempts += 1
+        }
+        return next
+      })
+      setIsSmart(false)
+      setIsSaved(false)
+      setSaveError('')
+      return
+    }
+
+    // Akıllı mod: aynı başlangıç parçasıyla havuzda BİR SIRA İLERLE
+    // (en yakın, sonra ikinci en yakın...).
+    const depth = variantDepth(resolveCandidates(pool.candidateIds))
+    const next = variantRef.current + 1
+
+    // Havuz tükendi: aynı başlangıç parçasından yeni bir kombin çıkmaz,
+    // BAŞKA bir başlangıç parçasıyla baştan aranır.
+    if (next >= depth) {
+      runSuggestion(selectedOccasion, { excludeSeedId: pool.seedItem.id })
+      return
+    }
+
+    variantRef.current = next
+    applyVariant(pool, next)
     setIsSaved(false)
     setSaveError('')
   }
@@ -262,7 +406,7 @@ function OutfitSuggestion() {
                 <FilterPills
                   options={OCCASIONS}
                   active={selectedOccasion}
-                  onChange={startSuggestion}
+                  onChange={(occasion) => runSuggestion(occasion)}
                 />
               </div>
 
@@ -297,69 +441,102 @@ function OutfitSuggestion() {
                   {selectedOccasion} için seçtiklerimiz
                 </p>
 
-                <div className="animate-fade-in">
-                  {suggestionItems.length === 0 ? (
-                    <div className="mt-6 rounded-2xl border border-ink/10 bg-warm-gray px-6 py-10 text-center">
-                      <p className="font-display text-xl italic text-ink">
-                        Şu an temiz parçan yok.
-                      </p>
-                      <p className="mt-2 text-sm text-ink/50">
-                        Gardırobundaki parçaları yıkadıkça "Temiz" olarak işaretle,
-                        kombin önerisi onları hemen kullansın.
-                      </p>
-                    </div>
-                  ) : (
-                    <div className="mt-6 grid grid-cols-2 gap-6 sm:grid-cols-4">
-                      {suggestionItems.map((item) => (
-                        <ClothingCard key={item.id} item={item} onCleanChange={handleCleanChange} />
-                      ))}
-                    </div>
-                  )}
+                {isSuggesting ? (
+                  <div
+                    className="mt-6 grid grid-cols-2 gap-6 sm:grid-cols-4"
+                    data-testid="oneri-iskeleti"
+                  >
+                    {Array.from({ length: 4 }).map((_, index) => (
+                      <div key={index} className="animate-pulse">
+                        <div className="h-56 rounded-2xl bg-ink/10" />
+                        <div className="mt-3 h-3 w-2/3 rounded-full bg-ink/10" />
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="animate-fade-in">
+                    {suggestionItems.length === 0 ? (
+                      <div className="mt-6 rounded-2xl border border-ink/10 bg-warm-gray px-6 py-10 text-center">
+                        <p className="font-display text-xl italic text-ink">
+                          Şu an temiz parçan yok.
+                        </p>
+                        <p className="mt-2 text-sm text-ink/50">
+                          Gardırobundaki parçaları yıkadıkça "Temiz" olarak işaretle,
+                          kombin önerisi onları hemen kullansın.
+                        </p>
+                      </div>
+                    ) : (
+                      <>
+                        {/* Rozet YALNIZCA vektör eşleştirmesi gerçekten çalıştıysa
+                          görünür. Rastgele seçime düşüldüyse hiç çıkmaz —
+                          kullanıcıya olmayan bir zekâyı satmayalım. */}
+                        {isSmart && (
+                          <p
+                            className="mt-5 flex items-center gap-1.5 text-xs font-medium uppercase tracking-[0.15em] text-accent-ink"
+                            data-testid="akilli-rozet"
+                          >
+                            <Sparkles size={13} strokeWidth={1.75} />
+                            Tarzına göre seçildi
+                          </p>
+                        )}
+
+                        <div className="mt-4 grid grid-cols-2 gap-6 sm:grid-cols-4">
+                          {suggestionItems.map((item) => (
+                            <ClothingCard
+                              key={item.id}
+                              item={item}
+                              onCleanChange={handleCleanChange}
+                            />
+                          ))}
+                        </div>
+                      </>
+                    )}
 
                     {/* Hava durumu notu yalnızca gerçekten dikkate alındıysa görünür;
                       şehri olmayan ya da havası alınamayan kullanıcı hiçbir ek metin görmez. */}
-                  {weather && suggestionItems.length > 0 && (
-                    <p className="mt-4 flex items-center gap-1.5 text-sm text-ink/50">
-                      <CloudSun size={15} strokeWidth={1.75} className="text-accent-ink" />
-                      {cityLocative(weather.cityValue)} {weather.temperature}°C,{' '}
-                      {weather.status} hava için önerildi.
-                    </p>
-                  )}
+                    {weather && suggestionItems.length > 0 && (
+                      <p className="mt-4 flex items-center gap-1.5 text-sm text-ink/50">
+                        <CloudSun size={15} strokeWidth={1.75} className="text-accent-ink" />
+                        {cityLocative(weather.cityValue)} {weather.temperature}°C,{' '}
+                        {weather.status} hava için önerildi.
+                      </p>
+                    )}
 
-                {dirtyOnlyCategories.length > 0 && (
-                    <ul className="mt-4 space-y-1">
-                      {dirtyOnlyCategories.map((category) => (
-                        <li key={category} className="text-sm text-ink/50">
-                          Temiz {category} parçan yok — o kategori boş kaldı.
-                        </li>
-                      ))}
-                    </ul>
-                  )}
+                    {dirtyOnlyCategories.length > 0 && (
+                      <ul className="mt-4 space-y-1">
+                        {dirtyOnlyCategories.map((category) => (
+                          <li key={category} className="text-sm text-ink/50">
+                            Temiz {category} parçan yok — o kategori boş kaldı.
+                          </li>
+                        ))}
+                      </ul>
+                    )}
 
-                  {emptyCategories.length > 0 && (
-                    <p className="mt-4 text-sm text-ink/50">
-                      Bazı kategorilerde parçan olmadığı için kombin eksik olabilir.
-                    </p>
-                  )}
+                    {emptyCategories.length > 0 && (
+                      <p className="mt-4 text-sm text-ink/50">
+                        Bazı kategorilerde parçan olmadığı için kombin eksik olabilir.
+                      </p>
+                    )}
 
-                  <div className="mt-8 flex flex-wrap items-center gap-3">
-                    <Button variant="outline" onClick={showAnother}>
-                      Başka Öneri Göster
-                    </Button>
-                    <Button
-                      variant="rose"
-                      onClick={handleSave}
-                      disabled={isSaving || isSaved || suggestionItems.length === 0}
-                    >
-                      {saveButtonLabel}
-                    </Button>
-                    {/* Öneri kaydedilmemiş olsa bile paylaşılabilir:
-                        görsel tamamen istemcide üretilir, kayda bağlı değil. */}
-                    <ShareButton occasion={selectedOccasion} items={suggestionItems} />
+                    <div className="mt-8 flex flex-wrap items-center gap-3">
+                      <Button variant="outline" onClick={showAnother}>
+                        Başka Öneri Göster
+                      </Button>
+                      <Button
+                        variant="rose"
+                        onClick={handleSave}
+                        disabled={isSaving || isSaved || suggestionItems.length === 0}
+                      >
+                        {saveButtonLabel}
+                      </Button>
+                      {/* Öneri kaydedilmemiş olsa bile paylaşılabilir:
+                          görsel tamamen istemcide üretilir, kayda bağlı değil. */}
+                      <ShareButton occasion={selectedOccasion} items={suggestionItems} />
+                    </div>
+
+                    {saveError && <p className="mt-3 text-sm text-burgundy">{saveError}</p>}
                   </div>
-
-                  {saveError && <p className="mt-3 text-sm text-burgundy">{saveError}</p>}
-                </div>
+                )}
               </section>
             )}
           </>

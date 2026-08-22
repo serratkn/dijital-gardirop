@@ -29,6 +29,27 @@ class ClothingItemRepository {
     }
   }
 
+  // Birden çok id'yi TEK sorguda okur. Vektör araması kategori başına N aday
+  // döndürüyor; her biri için ayrı findById atmak veritabanına onlarca tur
+  // demekti ve bu yol kullanıcı öneriyi beklerken çalışıyor.
+  //
+  // Sıra KORUNMAZ: çağıran zaten benzerlik sırasını Chroma'dan biliyor ve
+  // burada yalnızca id → kayıt eşlemesi kuruyor.
+  async findByIds(ids) {
+    if (!Array.isArray(ids) || ids.length === 0) return []
+
+    try {
+      const result = await this.pool.query(
+        'SELECT * FROM clothing_items WHERE id = ANY($1::uuid[]) AND is_deleted = false',
+        [ids],
+      )
+      return result.rows
+    } catch (error) {
+      console.error('ClothingItemRepository.findByIds hatası:', error.message)
+      throw error
+    }
+  }
+
   async findByCategory(userId, categoryId) {
     try {
       const result = await this.pool.query(

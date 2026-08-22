@@ -442,13 +442,26 @@ async function birimTestleri() {
     )
     let hata = null
     try {
-      await s.findSimilar('x', 'user-1')
+      await s.findSimilar(sahteParca().id, 'user-1')
     } catch (error) {
       hata = error
     }
     check(
       'Başkasının parçası için 404 (403 DEĞİL — varlığı ele vermez)',
       hata?.statusCode === 404,
+      hata?.message,
+    )
+
+    // Bozuk biçimli id Postgres'e HİÇ gitmemeli: 22P02 ile 500 dönerdi.
+    hata = null
+    try {
+      await s.findSimilar('bozuk-id', 'user-1')
+    } catch (error) {
+      hata = error
+    }
+    check(
+      'Bozuk biçimli id 400 (Postgres 22P02 yüzünden 500 DEĞİL)',
+      hata?.statusCode === 400,
       hata?.message,
     )
   }

@@ -23,6 +23,12 @@ export function toCategoryNameMap(categoryRows) {
   return new Map(categoryRows.map((row) => [row.id, row.name]))
 }
 
+// Ters yön: kategori ADI → id. Vektör araması kategori id'siyle sorgulanır
+// (Chroma metadata'sında id var, ad yok) ama arayüzün her yeri adla çalışır.
+export function toCategoryIdMap(categoryRows) {
+  return new Map(categoryRows.map((row) => [row.name, row.id]))
+}
+
 export function toClothingItem(row, categoryNames) {
   return {
     id: row.id,

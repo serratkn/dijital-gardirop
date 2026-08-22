@@ -81,9 +81,14 @@ router.post('/clothing-items/:id/image', handleUpload, (req, res) =>
 router.delete('/clothing-items/:id/image', (req, res) =>
   clothingItemController.deleteImage(req, res),
 )
-// AŞAMA 3 doğrulama ucu — henüz hiçbir ürün akışına bağlı değil.
+// AŞAMA 3 doğrulama ucu — hiçbir ürün akışına bağlı değil (elle inceleme için).
 router.get('/clothing-items/:id/similar', (req, res) =>
   clothingItemController.getSimilar(req, res),
+)
+// AŞAMA 4 — Kombin Öner sayfasının akıllı eşleştirme ucu. Bir başlangıç
+// parçasına, istenen DİĞER kategorilerden en yakın adayları döndürür.
+router.get('/clothing-items/:id/companions', (req, res) =>
+  clothingItemController.getCompanions(req, res),
 )
 
 module.exports = router

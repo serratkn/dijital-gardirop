@@ -75,9 +75,13 @@ function notifyUnauthorized() {
 // böylece hiçbir çağrı yerinde token yönetmek zorunda kalmaz.
 // keepSessionOn401: bazı uçlarda 401 "oturum düştü" değil "girilen şifre yanlış"
 // demektir (örn. şifre değiştirme). Bu durumda kullanıcı dışarı atılmamalıdır.
+// timeoutMs: isteğin en fazla ne kadar bekleyeceği. Varsayılan YOK (sınırsız) —
+// çoğu uç için tarayıcının kendi davranışı yeterli. Yalnızca kullanıcının
+// ekrana bakıp beklediği ve BAŞARISIZLIĞI TOLERE EDİLEBİLEN çağrılarda
+// kullanılır (bkz. fetchCompanions).
 async function request(
   endpoint,
-  { method = 'GET', body, skipAuth = false, keepSessionOn401 = false } = {},
+  { method = 'GET', body, skipAuth = false, keepSessionOn401 = false, timeoutMs } = {},
 ) {
   const headers = {}
   if (body) headers['Content-Type'] = 'application/json'
@@ -91,6 +95,7 @@ async function request(
     method,
     headers,
     body: body ? JSON.stringify(body) : undefined,
+    signal: timeoutMs ? AbortSignal.timeout(timeoutMs) : undefined,
   })
 
   if (!response.ok) {
@@ -200,6 +205,10 @@ export function changePassword(payload) {
   })
 }
 
+// Akıllı öneri çağrısının istemci tarafı zaman aşımı. Sunucu kendi tarafında
+// 3 sn'de vazgeçiyor; buradaki pay ağ ve zenginleştirme için.
+const COMPANION_TIMEOUT_MS = 4000
+
 // --- Kaynaklar (userId artık gönderilmez: sunucu token'dan okur) ---
 export function fetchCategories() {
   return request('/categories')
@@ -227,6 +236,22 @@ export function toggleClothingItemCleanStatus(id) {
 
 export function deleteClothingItem(id) {
   return request(`/clothing-items/${encodeURIComponent(id)}`, { method: 'DELETE' })
+}
+
+// AŞAMA 4 — Kombin Öner'in akıllı eşleştirme çağrısı. Başlangıç parçasına
+// vektör uzayında en yakın adayları, istenen DİĞER kategorilerden döndürür.
+//
+// ÇAĞIRAN HATAYI YUTMALIDIR: ChromaDB kapalıysa uç 503 döner ve bu bir kırılma
+// değil, "rastgele seçime düş" işaretidir (bkz. lib/outfitBuilder.js).
+// Zaman aşımı kısa tutuldu: kullanıcı öneri ekranına bakıp bekliyor, birkaç
+// saniyeden fazlası için beklemektense rastgele bir kombin göstermek daha iyi.
+export function fetchCompanions(id, { categoryIds, limit } = {}) {
+  const params = new URLSearchParams({ categoryIds: categoryIds.join(',') })
+  if (limit) params.set('limit', String(limit))
+
+  return request(`/clothing-items/${encodeURIComponent(id)}/companions?${params}`, {
+    timeoutMs: COMPANION_TIMEOUT_MS,
+  })
 }
 
 // clothingItemId verilirse yalnızca o parçanın geçtiği kombinler döner

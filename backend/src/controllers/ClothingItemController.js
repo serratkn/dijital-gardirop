@@ -84,6 +84,29 @@ class ClothingItemController extends BaseController {
     }
   }
 
+  // AŞAMA 4 — Kombin Öner'in RETRIEVAL ucu. Bir başlangıç parçası verilir,
+  // istenen diğer kategorilerin her birinden en yakın adaylar döner.
+  //
+  // Bu uç KASITLI OLARAK "dürüst"tür: Chroma erişilemezse 503 döner, boş liste
+  // değil. Rastgele seçime düşme kararı istemcinindir (Kombin Öner sayfası
+  // hatayı yutup mevcut rastgele mantığa döner ve "akıllı seçim" rozetini
+  // GÖSTERMEZ). Uç sessizce boş dönseydi arayüz aradaki farkı bilemezdi.
+  async getCompanions(req, res) {
+    try {
+      if (!this.vectorService) {
+        return res.status(503).json({ error: 'Vektör veritabanı bu kurulumda etkin değil' })
+      }
+
+      const result = await this.vectorService.findCompanions(req.params.id, req.userId, {
+        categoryIds: req.query.categoryIds,
+        limit: this.#parseLimit(req.query.limit),
+      })
+      res.status(200).json(result)
+    } catch (error) {
+      this.handleError(error, res)
+    }
+  }
+
   // Sınır makul bir aralığa çekilir: `?limit=100000` Chroma'yı gereksiz
   // yere zorlar, `?limit=abc` ise NaN olarak sorguya gidip patlardı.
   #parseLimit(raw) {
