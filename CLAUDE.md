@@ -255,17 +255,19 @@ olduğu için iskelet oraya taşındı, kombin üretimi istemci tarafında anlı
   geri düşüş YOKTUR.** Bölüm açıkken kaydedilen kombine makyaj da dahil edilir,
   kapalıyken dört parça kaydedilir
 - **Kombinlerim** — kayıtlı kombinler; parçaları, tarihi, favori ve silme işlemleriyle
-- **Kıyafet Detay** — görüntüleme, favori, onaylı silme, fotoğraf yönetimi ve
-  **o parçanın geçtiği kombinlerin listesi**
+- **Kıyafet Detay** — görüntüleme, favori, onaylı silme, fotoğraf yönetimi,
+  **o parçanın geçtiği kombinlerin listesi** ve **"Buna Benzer Diğer Parçalar"**
+  (aynı kategoriden en yakın 4 komşu; benzer parça yoksa bölüm hiç görünmez)
 - **Otomatik AI analizi** — bir parçaya fotoğraf yüklendiğinde Gemini, **arka planda**
   (kullanıcı beklemeden) kategoriye özgü bir şemayla analiz eder; sonuç
   `clothing_items.ai_analysis` (JSONB) kolonuna yazılır ve Kıyafet Detay'daki
   **"Bu Parça Hakkında"** bölümünde gösterilir. Analiz başarısız olursa kolon NULL
   kalır, kıyafet ekleme akışı **hiç etkilenmez**
 - **Vektör veritabanı** — analiz tamamlanınca parçanın özeti Gemini embedding'ine
-  çevrilip ChromaDB'ye yazılır. İki okuma ucu var:
-  `GET /clothing-items/:id/companions` **Kombin Öner'i besler** (ürün akışı),
-  `GET /clothing-items/:id/similar` elle inceleme için duran doğrulama ucudur
+  çevrilip ChromaDB'ye yazılır. İki okuma ucu da artık ÜRÜN AKIŞINDA:
+  `GET /clothing-items/:id/companions` Kombin Öner'i besler (kategoriler arası),
+  `GET /clothing-items/:id/similar` Kıyafet Detay'daki "Buna Benzer Diğer
+  Parçalar" bölümünü besler (aynı kategori içinde)
 - **Kombin paylaşımı** — Kombin Öner'deki öneri ve Kombinlerim'deki her kombin,
   Instagram Story oranında (1080×1920) bir PNG olarak indirilebilir; görsel
   **daima açık mod** renklerindedir
@@ -305,7 +307,8 @@ olduğu için iskelet oraya taşındı, kombin üretimi istemci tarafında anlı
 | **Embedding modeli değişirse koleksiyon geçersiz olur** | Farklı modellerin vektörleri aynı uzayda değildir. Model değiştirildiğinde `create-embeddings.js --sifirla --uygula` çalıştırılmalıdır; bunu hatırlatan otomatik bir kontrol yok. |
 | **Makyaj önerisi durumdan (occasion) bağımsız** | Öneri yalnızca başlangıç parçasına olan vektör yakınlığına bakar; "Spor" ile "Özel Davet" aynı ürünü getirebilir. Aynı sınırlama kombinin kendisinde de var. |
 | **Makyaj önerisi tek ürün** | Bölüm en yakın TEK ürünü gösterir (havuz derinliği "Başka Öneri Göster" ile ilerler). Birden fazla ürünü aynı anda öneren bir "makyaj seti" akışı yok. |
-| **Kıyafet Detay'da "benzer parçalar" bölümü yok** | `/similar` yalnızca API'de duruyor; benzerlik arayüzde şimdilik SADECE Kombin Öner üzerinden görünür. |
+| **Benzer parçalar durumdan ve renk/stil ağırlığından bağımsız** | Sıralama yalnızca embedding yakınlığına bakar; "aynı renk olsun" ya da "farklı stil öner" gibi bir ağırlıklandırma yok. |
+| **Benzer parçalar yalnızca indekslenmiş parçalar arasında** | Analizi olmayan parça ne kaynak ne sonuç olabilir; o parçada bölüm hiç görünmez. Toplu doldurma `analyze-existing-items.js` + `create-embeddings.js` ile elle yapılır. |
 | **Test altyapısı yok** | Test framework'ü yoktur. Doğrulama: `npm run lint` + `backend/test-scripts/` + elle deneme. |
 
 ---
@@ -581,9 +584,21 @@ başına aday sayısıdır (varsayılan 5, en fazla 20).
 |---|---|---|
 | `GET` | `/clothing-items/:id/similar` | `limit` (varsayılan 5, en fazla 20) ve `categoryId` opsiyoneldir |
 
-**Bu bir DOĞRULAMA UCUDUR, ürün akışı değildir.** Kombin Öner `/companions`
-ucunu kullanır; bu uç embedding'lerin anlamlı olup olmadığını elle gözle
-görmek için duruyor.
+**Kıyafet Detay'daki "Buna Benzer Diğer Parçalar" bölümünün ucudur** —
+`categoryId` parçanın KENDİ kategorisi verilerek çağrılır. Aynı zamanda
+embedding'leri elle gözden geçirmek için de kullanılıyor (Aşama 3'teki rolü).
+
+**`/companions` ile karıştırmayın; ikisi ZIT işler yapar:** `/companions`
+kombin kurmak içindir ve başlangıç parçasının KENDİ kategorisini hedeflerden
+bilerek düşürür (kombin slotu başka bir kategoriye ait; hedef kalmazsa `400`).
+`/similar` ise aynı kategori içinde komşu arar. Bu yüzden "aynı kategoriden
+benzerler" için `/companions`'a `sameCategory` gibi bir parametre eklenmedi —
+o değişiklik, başka bir ucun zaten yaptığı iş için bilinçli bir kuralı
+tersine çevirmek olurdu.
+
+Yanıt satırları `season`, `is_clean` ve `is_favorite` de taşır (`/companions`
+ile aynı gerekçe): bu satırlar arayüzde **paylaşılan kıyafet kartına** besleniyor
+ve kart favori kalbini, "Kirli" rozetini bu alanlardan çiziyor.
 
 ```json
 {"id":"b25ab24e-…","indekslendi":true,
@@ -931,7 +946,7 @@ node test-scripts/test-outfit-rag.js
 node test-scripts/test-outfit-rag.js --birim
 node test-scripts/test-outfit-rag.js --cleanup
 
-# Vektör veritabanı — Gemini Aşama 3 (77 kontrol: 46 birim + 4 bağlantı + 27 uçtan uca).
+# Vektör veritabanı — Gemini Aşama 3 (82 kontrol: 46 birim + 4 bağlantı + 32 uçtan uca).
 # --birim: yalnızca birim bölümü (Chroma, anahtar ve kota GEREKTİRMEZ)
 # Bölüm 3 ai_analysis'i ELLE yazar (sentetik): "iki beyaz üst yakın çıkmalı"
 # iddiası ancak girdi kontrol edilirse deterministik sınanabilir.
@@ -1340,6 +1355,29 @@ uygulanır. Bunun sebebi sayfanın iki durumu ayırt etmek zorunda olmasıdır:
 **"o kategoride hiç parçan yok"** (gardırobu doldur) ile **"temiz parçan yok"**
 (çamaşır yıka) farklı mesajlar gösterir. Havuz baştan filtreli gelseydi bu ayrım kaybolurdu.
 
+**"Buna Benzer Diğer Parçalar" (Kıyafet Detay).** `AiAnalysisPanel` ile **aynı
+gerekçeyle** iki sütunlu ızgaranın altında, tam genişlikte durur: sağ sütun `md`
+üstünde yarım genişliktir ve dört kartlık bir şerit oraya sıkışırdı.
+
+- **Uç `/similar`'dır, `/companions` DEĞİL.** İkisi zıt işler yapar: `/companions`
+  başlangıç parçasının kendi kategorisini hedeflerden bilerek düşürür (kombin
+  slotu başka kategoriye ait), `/similar` ise aynı kategori içinde arar.
+  `sameCategory` gibi bir parametre eklemek, başka bir ucun zaten yaptığı iş
+  için bilinçli bir kuralı tersine çevirmek olurdu.
+- **HATA DURUMU YOK — her başarısızlık "bölümü gösterme"ye çevrilir.** İndekslenmemiş
+  parça, 503, zaman aşımı, boş sonuç: hepsi boş listeye düşer ve bölüm hiç render
+  edilmez (başlık da çıkmaz). Gerekçe: bu bir keşif eklentisi, sayfanın taşıdığı
+  bilgi değil — "benzer parçalara ulaşılamıyor" demek, kullanıcının hiç istemediği
+  bir şey için özür dilemek olurdu. (Kombinler bölümü bunun AKSİNE hata gösterir:
+  orada kullanıcı bir cevap bekliyordur.)
+- **Kart yüksekliği sabitlenir** (`SIMILAR_CARD_HEIGHT`). `toClothingItem`
+  masonry yüksekliğini id'den türetir — Gardırop ızgarası için doğru, ama YAN YANA
+  dizili bir şeritte farklı yükseklikler bozuk görünür.
+- Dar ekranda **yatay kaydırılabilir şerit**, `sm` üstünde dört sütunlu ızgara.
+  Mobilde dört kartı iki sütuna sıkıştırmak yerine kaydırmak fotoğraf oranını korur.
+- Efekt `item.categoryId`'ye bağlıdır: kategori bilinmeden aynı-kategori araması
+  yapılamaz, bu yüzden kayıt yüklenene kadar istek atılmaz.
+
 **AI analizi (`AiAnalysisPanel`).** Kıyafet Detay sayfasında iki sütunlu ızgaranın
 **ALTINDA, tam genişlikte** durur; sağ sütun `md` üstünde yarım genişliktir ve
 iki sütunlu bilgi kartları oraya sıkışırdı. `ai_analysis` boşsa bileşen `null`
@@ -1519,6 +1557,83 @@ fotoğraf sorunu teyit edildikten sonra üç yerden de kaldırılabilir.
 
 > Bundan sonraki her çalışma buraya tarihiyle işlenir: eklenen özellikler, düzeltilen
 > hatalar, alınan mimari kararlar. En yeni kayıt en üstte.
+
+### 2026-08-22 — Kıyafet Detay: "Buna Benzer Diğer Parçalar" bölümü
+- **Ne eklendi:** Kıyafet Detay'da, kombinler bölümünün altında, aynı kategoriden
+  en yakın **4** parçayı gösteren bir bölüm. Kartlar paylaşılan `ClothingCard`
+  bileşeni; tıklanınca o parçanın kendi detay sayfasına gidiliyor. Benzer parça
+  yoksa bölüm **hiç render edilmiyor** (başlık dahil).
+- **UÇ SEÇİMİ — `/companions` DEĞİL, mevcut `/similar` kullanıldı.** İstenen
+  "companions'a `sameCategory=true` ekle" yoluydu; ölçüp vazgeçildi çünkü ikisi
+  **zıt işler** yapıyor: `/companions` kombin kurmak için var ve başlangıç
+  parçasının KENDİ kategorisini hedeflerden **bilerek** düşürüyor (kombin slotu
+  başka bir kategoriye ait; hedef kalmazsa 400). Aynı-kategori araması ise
+  `/similar`'ın zaten tek işi — kendisini eliyor, kullanıcıyla filtreliyor,
+  Postgres'ten zenginleştiriyor, 503'ü dürüstçe bildiriyor.
+  `sameCategory` eklemek, başka bir ucun zaten yaptığı iş için bilinçli bir
+  kuralı tersine çevirmek olurdu. **Sonuç: sıfır yeni uç, sıfır yeni parametre.**
+- **Aşama 3'ten kalan "kullanılmayan doğrulama ucu" böylece ürün akışına bağlandı.**
+  "Eksikler" tablosundaki *"Kıyafet Detay'da benzer parçalar bölümü yok"* satırı
+  kapandı; artık iki vektör okuma ucu da gerçek bir ekranı besliyor.
+- **`/similar` yanıtına `season`, `is_clean`, `is_favorite` eklendi** —
+  `/companions` ile aynı gerekçe. Bu satırlar **paylaşılan kıyafet kartına**
+  besleniyor ve kart favori kalbini, "Kirli" rozetini bu alanlardan çiziyor;
+  eksik olsalardı favorilenmiş bir parça boş kalple, kirli bir parça rozetsiz
+  görünürdü. Yalnızca alan EKLENDİ, mevcut sözleşme değişmedi.
+- **HATA DURUMU YOK — her başarısızlık "bölümü gösterme"ye çevriliyor.**
+  İndekslenmemiş parça, ChromaDB 503, zaman aşımı, aynı kategoride başka parça
+  olmaması: hepsi boş listeye düşüyor ve bölüm hiç render edilmiyor.
+  Gerekçe: bu bir keşif eklentisi, sayfanın taşıdığı bilgi değil — "benzer
+  parçalara ulaşılamıyor" demek, kullanıcının hiç istemediği bir şey için özür
+  dilemek olurdu. **Kombinler bölümü bunun AKSİNE hata gösteriyor** ve bu ayrım
+  bilinçli: orada kullanıcı bir cevap bekliyor.
+- **Yerleşim `AiAnalysisPanel` ile aynı gerekçeye dayanıyor:** iki sütunlu
+  ızgaranın ALTINDA, tam genişlikte. Sağ sütun `md` üstünde yarım genişlikte ve
+  dört kartlık bir şerit oraya sıkışırdı.
+- **Kart yüksekliği sabitlendi** (`SIMILAR_CARD_HEIGHT = 'h-52'`). `toClothingItem`
+  masonry yüksekliğini id'den türetiyor — Gardırop ızgarası için doğru ama YAN YANA
+  dizili bir şeritte farklı yükseklikler bozuk görünürdü. Ölçüldü: dört kartın
+  görsel yüksekliği de genişliği de birebir eşit (208px / 254px).
+- Dar ekranda **yatay kaydırılabilir şerit**, `sm` üstünde dört sütunlu ızgara;
+  mobilde dört kartı iki sütuna sıkıştırmak yerine kaydırmak fotoğraf oranını
+  koruyor. 390px'te sayfada yatay taşma yok (şerit kendi içinde kayıyor).
+- İstemci tarafı zaman aşımı `fetchCompanions` ile paylaşıldı; sabit
+  `COMPANION_TIMEOUT_MS` → **`VECTOR_REQUEST_TIMEOUT_MS`** olarak yeniden
+  adlandırıldı (iki vektör okuma çağrısının da ortak özelliği: kullanıcı bekliyor
+  ve başarısızlık tolere edilebilir).
+- **Doğrulama — `test-vector.js` 77 → 82 kontrol.** Mevcut "iki beyaz üst"
+  fixture'ı zaten aynı-kategori senaryosunu kuruyordu; üstüne eklenenler:
+  kart alanlarının (`is_favorite`/`is_clean`/`season`) yanıtta olması ve gerçek
+  boolean dönmesi, fotoğraf/renk alanlarının varlığı, **aynı kategoride başka
+  parça yoksa 200 + BOŞ LİSTE dönmesi** (hata değil) ve parçanın kendi
+  kategorisinde bile sonuçlara düşmemesi.
+- **Doğrulama — gerçek tarayıcıda 34 + 15 kontrol (Playwright + sistem Chrome):**
+  bölümün görünmesi ve kombinler bölümünün ALTINDA olması, kendisinin listede
+  çıkmaması, karta tıklayınca hedef parçanın detayına gidilmesi ve orada bölümün
+  yine çalışması (karşılıklı benzerlik); **aynı kategoride tek parça olan
+  kıyafette (New balance 530) bölümün hiç görünmemesi**; **analizi olmayan
+  kıyafette (Bershka crop top) sessizce atlanması**; `/similar` 503'e
+  düşürüldüğünde ve ağ tamamen koptuğunda bölümün gizlenmesi ama sayfanın geri
+  kalanının ayakta kalması ve kullanıcıya hata gösterilmemesi; karanlık mod ve
+  390px'te yatay taşma olmaması; temiz konsol.
+- **ÇOK KARTLI DÜZEN ayrı doğrulandı:** gerçek gardıropta bir kategoride en fazla
+  2 indeksli parça olduğu için geçici bir test kullanıcısına 5 üst kuruldu
+  (sonda silindi). Dört kart tek satırda, eşit genişlik ve yükseklikte diziliyor;
+  390px'te şerit gerçekten kayıyor.
+- **BENZERLİK SIRALAMASI (kontrollü veri):** beyaz keten gömlek →
+  **beyaz pamuklu bluz 0.9584** > krem basic tişört 0.9418 > desenli yün kazak
+  0.8735 > siyah deri ceket 0.8506. İki beyaz üst açık ara en yakın, tam da
+  beklendiği gibi.
+- **GERÇEK GARDIROP VERİSİYLE:** Alt kategorisinde Koton beyaz keten şort ↔ H&M
+  siyah kumaş pantolon 0.826 (karşılıklı); Makyaj'da panorama maskara ↔
+  Maybelline lifter gloss 0.8454. Kategorisinde tek indeksli parça olanlar
+  (Üst, Ayakkabı, Çanta) boş liste döndürüyor → bölüm görünmüyor. Analizi
+  olmayanlar (Bershka crop top, Zara beyaz elbise) `indekslendi:false` →
+  bölüm görünmüyor.
+- Regresyon: `test-vector` 82/82, `test-outfit-rag` 69/69, `test-outfit-builder`
+  63/63, `test-all-endpoints` 72/72, `test-auth` 48/48, `test-stats` 60/60,
+  `test-item-outfits` 27/27, `test-clean-status` 26/26,
+  `test-ai-analysis --kotasiz` 53/53, lint + build temiz.
 
 ### 2026-08-22 — Kombin Öner: isteğe bağlı makyaj önerisi bölümü
 - **Ne eklendi:** Dört kombin kartının altında, **kapalı başlayan** bir bölüm.

@@ -205,9 +205,11 @@ export function changePassword(payload) {
   })
 }
 
-// Akıllı öneri çağrısının istemci tarafı zaman aşımı. Sunucu kendi tarafında
-// 3 sn'de vazgeçiyor; buradaki pay ağ ve zenginleştirme için.
-const COMPANION_TIMEOUT_MS = 4000
+// Vektör okuma uçlarının istemci tarafı zaman aşımı. İki çağrının da ortak
+// özelliği var: kullanıcı ekrana bakıp bekliyor ve BAŞARISIZLIK TOLERE
+// EDİLEBİLİR (sonuç yoksa bölüm gösterilmez / rastgele seçime düşülür).
+// Bu yüzden süresiz beklemektense vazgeçmek her zaman daha iyi.
+const VECTOR_REQUEST_TIMEOUT_MS = 4000
 
 // --- Kaynaklar (userId artık gönderilmez: sunucu token'dan okur) ---
 export function fetchCategories() {
@@ -250,7 +252,27 @@ export function fetchCompanions(id, { categoryIds, limit } = {}) {
   if (limit) params.set('limit', String(limit))
 
   return request(`/clothing-items/${encodeURIComponent(id)}/companions?${params}`, {
-    timeoutMs: COMPANION_TIMEOUT_MS,
+    timeoutMs: VECTOR_REQUEST_TIMEOUT_MS,
+  })
+}
+
+// Kıyafet Detay'daki "Buna Benzer Diğer Parçalar" bölümünün çağrısı.
+//
+// NEDEN /companions DEĞİL: /companions kombin kurmak için var ve başlangıç
+// parçasının KENDİ kategorisini hedeflerden bilerek düşürüyor (kombin slotu
+// başka bir kategoriye ait; hedef kalmazsa 400 döner). Burada istenen tam
+// tersi — aynı kategoriden komşular. /similar zaten tam olarak bunu yapıyor:
+// kendisini eler, kullanıcıyla filtreler, Postgres'ten zenginleştirir.
+//
+// ÇAĞIRAN HATAYI YUTMALIDIR: Chroma kapalıysa uç 503 döner ve bu bir kırılma
+// değil, "bölümü gösterme" işaretidir.
+export function fetchSimilarItems(id, { categoryId, limit } = {}) {
+  const params = new URLSearchParams()
+  if (categoryId !== undefined && categoryId !== null) params.set('categoryId', String(categoryId))
+  if (limit) params.set('limit', String(limit))
+
+  return request(`/clothing-items/${encodeURIComponent(id)}/similar?${params}`, {
+    timeoutMs: VECTOR_REQUEST_TIMEOUT_MS,
   })
 }
 

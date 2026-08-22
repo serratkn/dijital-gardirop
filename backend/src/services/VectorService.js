@@ -483,6 +483,14 @@ class VectorService {
           category_id: komsu.category_id,
           color: komsu.color,
           image_url: komsu.image_url,
+          // season / is_clean / is_favorite, findCompanions ile AYNI gerekçeyle
+          // dönüyor: bu satırlar arayüzde paylaşılan kıyafet kartına besleniyor
+          // ve kart, favori kalbini ve "Kirli" rozetini bu alanlardan çiziyor.
+          // Eksik olsalardı favorilenmiş bir parça boş kalple görünürdü.
+          // DEĞİŞKEN DURUM DAİMA POSTGRES'TEN gelir, Chroma metadata'sından değil.
+          season: komsu.season,
+          is_clean: komsu.is_clean,
+          is_favorite: komsu.is_favorite,
           // Kosinüs mesafesi 0 = birebir aynı. Benzerlik puanı okunabilir olsun
           // diye 1'den çıkarılıyor; ikisi de dönüyor çünkü mesafe ham ölçüdür.
           mesafe: row.distance,

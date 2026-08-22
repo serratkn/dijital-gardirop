@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { Sparkles, WashingMachine } from 'lucide-react'
 import AiAnalysisPanel from '../components/AiAnalysisPanel'
+import ClothingCard from '../components/ClothingCard'
 import Button from '../components/ui/Button'
 import Modal from '../components/ui/Modal'
 import PhotoPicker from '../components/ui/PhotoPicker'
@@ -11,6 +12,7 @@ import {
   fetchCategories,
   fetchClothingItem,
   fetchOutfits,
+  fetchSimilarItems,
   logImageOutcome,
   resolveImageUrl,
   toggleClothingItemCleanStatus,
@@ -18,6 +20,15 @@ import {
   uploadClothingItemImage,
 } from '../lib/api'
 import { toCategoryNameMap, toClothingItem } from '../lib/transformers'
+
+// "Buna Benzer Diğer Parçalar" bölümünde kaç kart gösterilecek. Dört, geniş
+// ekranda tek satırı tam dolduruyor; daha fazlası keşif değil liste olurdu.
+const SIMILAR_LIMIT = 4
+
+// Kartların masonry yüksekliği id'den türetilir (Gardırop ızgarası için doğru)
+// ama YAN YANA DİZİLİ bir şeritte farklı yükseklikler bozuk görünür. Bu bölümde
+// hepsi aynı yüksekliğe sabitleniyor.
+const SIMILAR_CARD_HEIGHT = 'h-52'
 
 // Otomatik AI analizi arka planda çalışır; sayfa bunu yoklayarak bekler.
 // Pencere backend'in EN KÖTÜ senaryosunu kapsar: 2 deneme x 30 sn Gemini
@@ -52,6 +63,9 @@ function ClothingDetail() {
   const [isOutfitsLoading, setIsOutfitsLoading] = useState(true)
   const [hasOutfitsError, setHasOutfitsError] = useState(false)
   const [isAnalysisPending, setIsAnalysisPending] = useState(false)
+  // Benzer parçalar. Hata durumu YOK: bu bölüm başarısız olursa sessizce
+  // hiç görünmez (aşağıdaki efekte bakın).
+  const [similarItems, setSimilarItems] = useState([])
 
   useEffect(() => {
     let isStale = false
@@ -171,6 +185,63 @@ function ClothingDetail() {
       isStale = true
     }
   }, [id])
+
+  // Benzer parçalar da AYRI bir efektte çekilir ve kendi hata durumu YOKTUR:
+  // her başarısızlık boş listeye düşer, bölüm de hiç render edilmez.
+  //
+  // Sessizliğin gerekçesi: bu bir keşif eklentisi, sayfanın taşıdığı bilgi
+  // değil. "Benzer parçalara ulaşılamıyor" demek, kullanıcının hiç istemediği
+  // bir şey için özür dilemek olurdu. Sessizce atlanan durumlar:
+  //   - parça henüz indekslenmemiş (indekslendi:false)
+  //   - ChromaDB erişilemiyor (503) ya da zaman aşımı
+  //   - aynı kategoride başka parça yok (boş liste)
+  useEffect(() => {
+    let isStale = false
+
+    async function loadSimilar() {
+      // Kategori bilinmeden AYNI KATEGORİ araması yapılamaz; kayıt yüklenene
+      // kadar bekle (categoryId, item ile birlikte gelir).
+      if (!item?.categoryId) {
+        setSimilarItems([])
+        return
+      }
+
+      try {
+        const result = await fetchSimilarItems(id, {
+          categoryId: item.categoryId,
+          limit: SIMILAR_LIMIT,
+        })
+        if (isStale) return
+
+        const rows = result?.indekslendi ? (result.benzerler ?? []) : []
+        const categoryRows = rows.length > 0 ? await fetchCategories() : []
+        if (isStale) return
+
+        const categoryNames = toCategoryNameMap(categoryRows)
+        setSimilarItems(
+          rows
+            // Kendisi zaten backend'de eleniyor; buradaki kontrol ucuz bir
+            // ikinci savunma (mesafesi daima 0 olan parça listeye düşmemeli).
+            .filter((row) => row.id !== id)
+            .map((row) => ({
+              ...toClothingItem(row, categoryNames),
+              imgHeight: SIMILAR_CARD_HEIGHT,
+            })),
+        )
+      } catch (error) {
+        if (isStale) return
+        // SESSİZ: bölüm hiç görünmez, kullanıcıya hata gösterilmez.
+        console.warn('Benzer parçalar alınamadı, bölüm gizleniyor:', error.message)
+        setSimilarItems([])
+      }
+    }
+
+    loadSimilar()
+
+    return () => {
+      isStale = true
+    }
+  }, [id, item?.categoryId])
 
   const handleToggleFavorite = async () => {
     if (isFavoritePending) return
@@ -529,6 +600,33 @@ function ClothingDetail() {
             sıkışırdı. ai_analysis boşsa bileşen null döner, hiçbir boşluk
             bırakmaz. */}
         <AiAnalysisPanel analysis={item.aiAnalysis} />
+
+        {/* "Buna Benzer Diğer Parçalar" — analiz paneliyle AYNI GEREKÇEYLE
+            ızgaranın altında, tam genişlikte: sağ sütun md üstünde yarım
+            genişliktir ve dört kartlık bir şerit oraya sıkışırdı.
+            Liste boşsa bölüm HİÇ render edilmez (başlık da çıkmaz). */}
+        {similarItems.length > 0 && (
+          <section className="mt-14 animate-fade-in" data-testid="benzer-parcalar">
+            <p className="text-xs font-medium uppercase tracking-[0.15em] text-ink/50">
+              Buna Benzer Diğer Parçalar
+            </p>
+            <h2 className="mt-2 font-display text-2xl italic text-ink">
+              Aynı kategoriden yakın parçalar
+            </h2>
+            <span className="mt-3 block h-px w-16 bg-dusty-rose" />
+
+            {/* Dar ekranda YATAY KAYDIRILABİLİR şerit, sm üstünde ızgara.
+                Mobilde dört kartı iki sütuna sıkıştırmak yerine kaydırmak,
+                kartların fotoğraf oranını koruyor. */}
+            <div className="-mx-6 mt-6 flex snap-x gap-5 overflow-x-auto px-6 pb-2 sm:mx-0 sm:grid sm:grid-cols-4 sm:gap-6 sm:overflow-visible sm:px-0">
+              {similarItems.map((similar) => (
+                <div key={similar.id} className="w-44 shrink-0 snap-start sm:w-auto">
+                  <ClothingCard item={similar} />
+                </div>
+              ))}
+            </div>
+          </section>
+        )}
       </div>
 
       <Modal isOpen={isConfirmOpen} onClose={() => !isDeleting && setIsConfirmOpen(false)}>

@@ -826,6 +826,43 @@ async function benzerlikTesti() {
     `${filtreli?.benzerler?.length} sonuç`,
   )
 
+  // AYNI KATEGORİ AKIŞI — Kıyafet Detay'daki "Buna Benzer Diğer Parçalar"
+  // bölümünü besleyen çağrı tam olarak budur (categoryId = parçanın kendi
+  // kategorisi). Bölüm paylaşılan kıyafet kartını kullandığı için satırlar
+  // kartın çizdiği alanları da taşımalı; eksik olsalardı favorilenmiş bir
+  // parça boş kalple, kirli bir parça rozetsiz görünürdü.
+  const kartAlanlari = filtreli?.benzerler?.[0] ?? {}
+  check(
+    'Kart alanları yanıtta: is_favorite / is_clean / season',
+    'is_favorite' in kartAlanlari && 'is_clean' in kartAlanlari && 'season' in kartAlanlari,
+    Object.keys(kartAlanlari).join(', '),
+  )
+  check(
+    'is_favorite ve is_clean gerçek boolean (kart bunlarla çiziyor)',
+    typeof kartAlanlari.is_favorite === 'boolean' && typeof kartAlanlari.is_clean === 'boolean',
+  )
+  check(
+    'Fotoğraf alanı da var (kart görseli)',
+    'image_url' in kartAlanlari && 'color' in kartAlanlari,
+  )
+
+  // Kategoride başka parça YOKSA boş liste döner — hata değil. Arayüz bunu
+  // "bölümü hiç gösterme" olarak yorumlar.
+  const { status: yalnizStatus, data: yalniz } = await call(
+    'GET',
+    `/clothing-items/${idler.siyah_bot}/similar?categoryId=${kategoriId.get('Ayakkabı')}`,
+    { token: auth.token },
+  )
+  check(
+    'Aynı kategoride başka parça yoksa BOŞ LİSTE (hata değil, 200)',
+    yalnizStatus === 200 && yalniz?.indekslendi === true && (yalniz?.benzerler ?? []).length === 0,
+    `${yalnizStatus}, ${yalniz?.benzerler?.length} sonuç`,
+  )
+  check(
+    'Parçanın kendisi kendi kategorisinde bile dönmüyor',
+    !(yalniz?.benzerler ?? []).some((row) => row.id === idler.siyah_bot),
+  )
+
   // limit
   const { data: limitli } = await call(
     'GET',
