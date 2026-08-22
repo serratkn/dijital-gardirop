@@ -43,7 +43,7 @@ Kökte üç bağımsız parça var; **monorepo aracı yok** — her biri kendi k
 |---|---|
 | `frontend/` | Vite + React 19 SPA |
 | `backend/` | Express + `pg` REST API |
-| `docker-compose.yml` | PostgreSQL 16 (yerel geliştirme) |
+| `docker-compose.yml` | PostgreSQL 16 + ChromaDB (yerel geliştirme) |
 
 Kökteki `package.json` yalnızca artık Capacitor bağımlılıkları içerir, script'i yoktur —
 **yok sayın**. Gerçek Capacitor yapılandırması `frontend/capacitor.config.json` içindedir
@@ -58,12 +58,19 @@ Lint: **oxlint** (depodaki tek otomatik kontrol).
 ### Backend
 
 Express 4, `pg` (PostgreSQL sürücüsü), `cors`, `dotenv`, `@google/genai`
-(Gemini — şimdilik yalnızca Aşama 1 test ucu). CommonJS (`require`).
+(Gemini: görsel analizi + embedding), `chromadb` (vektör veritabanı istemcisi),
+`bcrypt`, `jsonwebtoken`, `multer`. CommonJS (`require`).
 
 ### Veritabanı
 
 PostgreSQL 16, Docker Compose ile ayağa kalkar. Container adı: `dijitalgardirop-db-1`.
 Kalıcılık `postgres_data` adlı named volume ile sağlanır.
+
+**İKİNCİ BİR DEPO VAR: ChromaDB** (vektör veritabanı, Aşama 3). Aynı Compose
+dosyasında `chromadb` servisi olarak tanımlıdır (container: `dijitalgardirop-chromadb-1`,
+port `8000`, volume `chroma_data`). Kıyafet analizlerinin embedding'lerini tutar.
+**Postgres tek doğru kaynaktır**; Chroma türetilmiş veridir ve her zaman
+yeniden üretilebilir (`test-scripts/create-embeddings.js`).
 
 ### Mimari desenler
 
@@ -245,6 +252,10 @@ olduğu için iskelet oraya taşındı, kombin üretimi istemci tarafında anlı
   `clothing_items.ai_analysis` (JSONB) kolonuna yazılır ve Kıyafet Detay'daki
   **"Bu Parça Hakkında"** bölümünde gösterilir. Analiz başarısız olursa kolon NULL
   kalır, kıyafet ekleme akışı **hiç etkilenmez**
+- **Vektör veritabanı (altyapı)** — analiz tamamlanınca parçanın özeti Gemini
+  embedding'ine çevrilip ChromaDB'ye yazılır; `GET /clothing-items/:id/similar`
+  en yakın komşuları döndürür. **Henüz hiçbir ürün akışına bağlı değildir**
+  (Kombin Öner dokunulmadı) — bu bir doğrulama ucudur
 - **Kombin paylaşımı** — Kombin Öner'deki öneri ve Kombinlerim'deki her kombin,
   Instagram Story oranında (1080×1920) bir PNG olarak indirilebilir; görsel
   **daima açık mod** renklerindedir
@@ -278,7 +289,10 @@ olduğu için iskelet oraya taşındı, kombin üretimi istemci tarafında anlı
 | **Fotoğraf değişince analiz güncellenmez** | Maliyet koruması "dolu `ai_analysis` varsa tekrar analiz etme" der; fotoğraf değiştirilse bile eski analiz kalır. `ClothingAnalysisService.analyzeItem(id, { force: true })` yolu hazır ama **arayüzde tetikleyicisi yok**. |
 | **Analiz yalnızca fotoğraf yüklenince tetiklenir** | Bu özellikten önce eklenmiş parçalar analizsizdir; toplu doldurma `test-scripts/analyze-existing-items.js` ile elle yapılır. |
 | **`/gemini/test-analyze` hâlâ duruyor** | Aşama 1'den kalan teşhis ucudur; ürün akışı artık otomatik analizdir. Kaldırılmadı çünkü `test-gemini.js` bağlantı/anahtar yollarını bunun üzerinden doğruluyor. |
-| **Vektör veritabanı yok** | ChromaDB ve benzeri arama altyapısı Aşama 3'ün işidir; bu aşamada hiç dokunulmadı. |
+| **Benzerlik hiçbir ürün akışında kullanılmıyor** | Vektör altyapısı kuruldu ve veri akıyor ama `/similar` yalnızca bir doğrulama ucudur; Kombin Öner hâlâ istemci tarafında rastgele seçim yapıyor. Bağlama işi bir sonraki aşamanın. |
+| **Chroma ile Postgres arasında işlem bütünlüğü yok** | İki ayrı depo, dağıtık işlem yok. Kıyafet silinince vektörü de silinir ama bu çağrı başarısız olursa öksüz vektör kalır. `/similar` bunu okurken filtreler (silinmiş parça yanıta düşmez) ve `cleanup.js` öksüzleri toplu siler. |
+| **Embedding modeli değişirse koleksiyon geçersiz olur** | Farklı modellerin vektörleri aynı uzayda değildir. Model değiştirildiğinde `create-embeddings.js --sifirla --uygula` çalıştırılmalıdır; bunu hatırlatan otomatik bir kontrol yok. |
+| **Arayüzde benzerlik gösterimi yok** | `/similar` yalnızca API'de; Kıyafet Detay sayfasına "benzer parçalar" bölümü eklenmedi (bu aşamada istenmedi). |
 | **Test altyapısı yok** | Test framework'ü yoktur. Doğrulama: `npm run lint` + `backend/test-scripts/` + elle deneme. |
 
 ---
@@ -509,6 +523,38 @@ anahtar yok, anahtar geçersiz, kota doldu, model bulunamadı, zaman aşımı, J
 çözümlenemedi. Ham SDK hatası asla dışarı sızmaz — yığın izi ve anahtar parçası
 içerebilir.
 
+### Benzer parçalar (vektör veritabanı — Aşama 3)
+
+| Metod | Yol | Açıklama |
+|---|---|---|
+| `GET` | `/clothing-items/:id/similar` | `limit` (varsayılan 5, en fazla 20) ve `categoryId` opsiyoneldir |
+
+**Bu bir DOĞRULAMA UCUDUR, ürün akışı değildir.** Kombin Öner'e ya da başka bir
+ekrana bağlı değildir; embedding'lerin gerçekten anlamlı olup olmadığını gözle
+görmek için var.
+
+```json
+{"id":"b25ab24e-…","indekslendi":true,
+ "benzerler":[{"id":"07604e5b-…","name":"Colins siyah basic tişört","category_id":1,
+               "color":"Siyah","image_url":"/uploads/….png",
+               "mesafe":0.0896,"benzerlik":0.9104,"ozet":"Colins siyah basic tişört (Tişört). …"}]}
+```
+
+- **Henüz indekslenmemiş parça HATA DEĞİLDİR:** `{"indekslendi": false, "sebep": "...", "benzerler": []}`
+  döner (`analiz-yok` veya `embedding-henuz-olusturulmadi`). Analizi yeni bitmiş
+  ya da hiç fotoğrafı olmayan bir parça için 404 dönmek yanıltıcı olurdu.
+- **ChromaDB erişilemezse `503` döner**, boş liste değil. Sessizce boş dönmek
+  "benzer parçan yok" gibi YANLIŞ bir cevap olurdu. (Yazma yolu tam tersi:
+  sessizce atlanır — bkz. §8.)
+- **Sorgu daima `user_id` ile filtrelenir.** Filtresiz bir vektör sorgusu başka
+  kullanıcıların gardıroplarından sonuç döndürürdü; test bunu ayrıca doğrular.
+- Parçanın kendisi sonuçlardan **elenir** (kendine mesafesi daima 0'dır);
+  bu yüzden Chroma'dan bir fazla komşu istenir.
+- Sonuçlar **Postgres'ten zenginleştirilir** (ad, kategori, fotoğraf). Bu sırada
+  silinmiş parçalar düşer, yani Chroma'da bayat bir kayıt kalsa bile yanıta sızmaz.
+- `mesafe` kosinüs mesafesidir (0 = birebir aynı), `benzerlik` = `1 - mesafe`.
+  İkisi de dönüyor çünkü mesafe ham ölçüdür, benzerlik okunabilir olandır.
+
 ### Categories (salt okunur)
 
 | Metod | Yol | Açıklama |
@@ -597,6 +643,7 @@ istemcide hiçbir toplama yapılmaz.
 | `PATCH` | `/clothing-items/:id/clean-status` | Temiz/kirli durumunu tersine çevirir (atomik) |
 | `POST` | `/clothing-items/:id/image` | **multipart/form-data**, alan adı `image`. jpg/png/webp, en fazla 5 MB |
 | `DELETE` | `/clothing-items/:id/image` | Fotoğrafı kaldırır (`image_url` → `null`, dosya diskten silinir) |
+| `GET` | `/clothing-items/:id/similar?limit=&categoryId=` | **Aşama 3 doğrulama ucu** — vektör uzayındaki en yakın komşular |
 
 **Temiz/kirli (`isClean`).** Boolean dışında bir değer `400` döner; gevşek dönüşüm
 yapılmaz (`"false"` metni `true` olurdu). `POST`'ta belirtilmezse parça **temiz** sayılır.
@@ -667,9 +714,10 @@ filtrelendiği için, tüm parçaları silinmiş bir kombin kaybolmaz — `items
 ### Çalıştırma
 
 ```bash
-# 1) Veritabanı (depo kökünden)
-docker compose up -d                 # postgres 16, :5432
-docker compose down                  # durdur (postgres_data volume korunur)
+# 1) Veritabanları (depo kökünden)
+docker compose up -d                 # postgres 16 (:5432) + chromadb (:8000)
+docker compose ps                    # chromadb "healthy" olmalı
+docker compose down                  # durdur (postgres_data ve chroma_data volume'leri korunur)
 
 # 2) Backend (backend/ klasöründen)
 cp .env.example .env                 # zorunlu; .env olmadan hiçbir şey çalışmaz
@@ -823,6 +871,21 @@ node test-scripts/test-ai-analysis.js --birim
 node test-scripts/test-ai-analysis.js --kotasiz
 node test-scripts/test-ai-analysis.js --cleanup
 
+# Vektör veritabanı — Gemini Aşama 3 (76 kontrol: 45 birim + 4 bağlantı + 27 uçtan uca).
+# --birim: yalnızca birim bölümü (Chroma, anahtar ve kota GEREKTİRMEZ)
+# Bölüm 3 ai_analysis'i ELLE yazar (sentetik): "iki beyaz üst yakın çıkmalı"
+# iddiası ancak girdi kontrol edilirse deterministik sınanabilir.
+node test-scripts/test-vector.js
+node test-scripts/test-vector.js --birim
+node test-scripts/test-vector.js --cleanup
+
+# Analizi olan ama embedding'i olmayan parçalar için toplu embedding üretimi.
+# VARSAYILAN SALT OKUNURDUR. --sifirla koleksiyonu siler (model değişince gerekir).
+node test-scripts/create-embeddings.js                    # yalnızca listeler
+node test-scripts/create-embeddings.js --uygula
+node test-scripts/create-embeddings.js --uygula --limit 3
+node test-scripts/create-embeddings.js --sifirla --uygula
+
 # Analizi olmayan (bu özellikten önce eklenmiş) parçaları toplu analiz eder.
 # VARSAYILAN SALT OKUNURDUR: her çağrı gerçek para harcar.
 node test-scripts/analyze-existing-items.js              # yalnızca listeler
@@ -843,7 +906,9 @@ node test-scripts/cleanup.js --all --user <uuid>     # bir kullanıcının TÜM 
 `test-all-endpoints.js` mutlu yolun yanı sıra doğrulama hatalarını (400), bulunamayan
 kayıtları (404), benzersizlik ihlalini (409), soft delete davranışını ve `ON DELETE CASCADE`
 zincirini kontrol eder. `cleanup.js` API üzerinden değil doğrudan veritabanına bağlanır;
-test kullanıcıları `@example.com` deseniyle tanınır. Sunucu kapalıysa scriptler yığın izi
+test kullanıcıları `@example.com` deseniyle tanınır. **`cleanup.js` ayrıca ChromaDB'deki
+ÖKSÜZ VEKTÖRLERİ de siler** (Postgres'te karşılığı kalmayanlar) — doğrudan SQL ile
+silinen test kayıtları aksi hâlde vektör bırakırdı. Sunucu kapalıysa scriptler yığın izi
 yerine anlaşılır bir mesaj basıp `1` ile çıkar.
 
 **Not:** `backend/test-data.json` bir çalışma dosyasıdır; alan adları **camelCase** olmalıdır
@@ -978,6 +1043,74 @@ güncellensin diye; model emeklilikleri sık yaşanıyor (bkz. aşağıdaki uyar
 > `models?key=…` çıktısında `gemini-2.5-flash` görünüyor ama çağrıldığında
 > `404 — no longer available to new users` veriyor. Model değiştirirken listeye
 > bakmak yetmez, gerçekten **çağırarak** doğrulayın.
+
+**Vektör katmanı (Aşama 3).** `config/chroma.js` istemciyi kurar (database.js /
+gemini.js ile aynı rol), `VectorRepository` yalnızca ChromaDB ile konuşur ve
+**fırlatır**, `VectorService` iş mantığını taşır. Zincir depodaki desene birebir
+uyar; tek fark, "veritabanı" burada Postgres değil Chroma.
+
+`VectorService`'in **iki ayrı sözleşmesi** var ve bu bilinçlidir:
+
+- **YAZMA (`indexItem` / `indexItems` / `removeItem`): ASLA FIRLATMAZ.**
+  Embedding, kıyafet akışının parçası değil üstüne konan bir zenginleştirmedir.
+  Chroma kapalıysa, kota dolduysa veya ağ düştüyse kıyafet kaydı ve analizi
+  yerinde durur, kullanıcı hiçbir şey görmez.
+- **OKUMA (`findSimilar`): FIRLATIR.** Kullanıcı doğrudan "benzerleri göster"
+  demiştir; sessizce boş liste dönmek "benzer parça yok" gibi YANLIŞ bir cevap
+  olurdu. Erişilemeyen servis `503` ile bildirilir.
+
+Aynı ayrım GeminiService ↔ WeatherService arasında da var ve aynı ölçüte
+dayanıyor: **o anda cevap bekleyen bir kullanıcı var mı, yok mu.**
+
+Servisin dokunulmaması gereken kuralları (ClothingAnalysisService ile aynı aile):
+
+- **In-flight işareti İLK `await`'ten ÖNCE konur** — sonra konsaydı iki
+  eşzamanlı tetikleme de muhafızı geçerdi (Aşama 2'de bu hata yaşandı).
+- **Vektörü olan parça yeniden embed EDİLMEZ** (`force` hariç). Maliyet koruması.
+- **Chroma erişilemiyorsa embedding HİÇ ÜRETİLMEZ.** Kontrol sırası bilinçlidir:
+  önce "zaten var mı" diye Chroma'ya sorulur, sonra Gemini'ye gidilir. Ters
+  sırada olsaydı Chroma kapalıyken her denemede para harcanır ve sonuç
+  yazılamadan atılırdı.
+- **Kota hatasında soğuma başlar**, süresi Gemini'nin bildirdiği `retryDelay`
+  ile varsayılanın büyüğüdür; kota hatası yeniden DENENMEZ.
+- **Yalnızca GEÇİCİ hatalar yeniden denenir**, en fazla `MAX_ATTEMPTS = 2`.
+- **Eşzamanlılık semaforu BİLEREK YOK.** İki çağıranı da zaten sınırlı: analiz
+  akışından geldiğinde `ClothingAnalysisService`'in `MAX_CONCURRENT = 2`
+  semaforunun içindedir, toplu script ise N metni TEK istekte gönderir
+  (`indexItems`, `BATCH_SIZE = 20`).
+
+**Embedding metni ham JSON değil, CÜMLEdir** (`buildSummaryText`). Embedding
+modeli doğal dilde eğitilmiştir: `{"kesim_tipi":"Oversize"}` ile "Kesimi
+Oversize" aynı vektöre gitmez ve anahtar adları (`kesim_tipi`, `alt_kategori`)
+anlam taşımayan gürültü ekler. Metne kullanıcının kendi yazdığı ad ve marka da
+katılır — "Bershka crop top" bilgisi yalnızca orada var ve gerçek bir benzerlik
+sinyali. Üretilen metin Chroma'da `document` olarak da saklanır, yani neyin
+embed edildiği sonradan okunabilir.
+
+**Metadata yalnızca DEĞİŞMEYEN alanlardan seçilir** (`user_id`, `category_id`,
+`sema`, `embedding_modeli`, `olusturma`). `is_clean` veya `is_favorite` buraya
+konsaydı kullanıcı her toggle'da Chroma'yı da güncellemek zorunda kalırdı;
+güncellemeseydi filtre bayat veriyle çalışırdı. **Değişken durum her zaman
+Postgres'ten okunur.**
+
+**Chroma'nın kendi embedding fonksiyonu DEVRE DIŞI.** Koleksiyona, çağrıldığında
+hata fırlatan açık bir fonksiyon veriliyor (`config/chroma.js`); her yazma ve
+sorgu vektörü açıkça taşımak zorunda. Varsayılan bırakılsaydı istemci her
+koleksiyon açılışında "@chroma-core/default-embed kurun" uyarısı basıyordu ve
+bir gün gerçekten metinden embedding üretmeye kalkışabilirdi — o da bizim
+modelimizle uyumsuz vektör demekti.
+
+**Tetikleme yine CONTROLLER'da.** `ClothingAnalysisService` analizi yazdıktan
+SONRA `vectorService.indexItemInBackground(...)` çağırır ve **await etmez**;
+sıra önemlidir çünkü embedding'in kaynağı `ai_analysis` kolonudur. Silme ise
+`ClothingItemController.delete` içinde, `res` gönderildikten sonra tetiklenir.
+Her iki bağımlılık da **opsiyoneldir**: verilmezse akış eskisi gibi çalışır.
+
+**İki depo arasında işlem bütünlüğü YOKTUR.** Postgres tek doğru kaynaktır;
+Chroma türetilmiş veridir ve her zaman yeniden üretilebilir. Bu yüzden
+tutarsızlık bir hata değil, beklenen bir durumdur ve üç yerde karşılanır:
+`findSimilar` sonuçları Postgres'ten doğrular (silinmiş parça yanıta düşmez),
+`cleanup.js` öksüz vektörleri toplar, `create-embeddings.js` eksikleri doldurur.
 
 **Auth katmanı.** `server.js` tek bir `AuthService` ve ondan türetilen tek bir
 `authenticate` middleware kurar (token'ı imzalayan ve doğrulayan aynı örnek olmalı).
@@ -1228,6 +1361,126 @@ fotoğraf sorunu teyit edildikten sonra üç yerden de kaldırılabilir.
 
 > Bundan sonraki her çalışma buraya tarihiyle işlenir: eklenen özellikler, düzeltilen
 > hatalar, alınan mimari kararlar. En yeni kayıt en üstte.
+
+### 2026-08-21 — Gemini Entegrasyonu — Aşama 3: Vektör Veritabanı (ChromaDB)
+- **Kapsam: YALNIZCA ALTYAPI.** Analiz tamamlanınca parçanın özeti embedding'e
+  çevrilip ChromaDB'ye akıyor ve `GET /clothing-items/:id/similar` en yakın
+  komşuları döndürüyor. **Kombin Öner'e DOKUNULMADI** — öneri hâlâ istemci
+  tarafında rastgele seçim yapıyor; bağlama işi sonraki aşamanın.
+- **Docker Compose'a `chromadb` servisi eklendi** (`chromadb/chroma:1.5.9`,
+  `:8000`, `chroma_data` volume). **Sürüm SABİTLENDİ**: Docker Hub'daki
+  etiketlerin neredeyse tamamı `.dev` yapısı (günde birkaç kez yayımlanıyor);
+  1.5.9 en güncel kararlı sürüm. `latest` kullanılsaydı bir `docker compose pull`
+  sunucuyu habersizce başka bir sürüme taşır ve istemci uyumu sessizce bozulabilirdi.
+- **YAŞANAN HATA — healthcheck sürekli `unhealthy` kaldı.** İlk sürümde
+  `/bin/sh` + `/dev/tcp` kullanılmıştı; `/dev/tcp` bir **bash** özelliğidir ve
+  image'ın `sh`'i dash ("cannot create /dev/tcp/...: Directory nonexistent").
+  Image'da **curl, wget, nc ve python YOK** — tek HTTP aracı bash. `/bin/bash`
+  ile düzeltildi, container artık `healthy` raporluyor.
+- **`docker compose down && up -d` sonrası 9 vektörün korunduğu doğrulandı**
+  (named volume çalışıyor); iki servis de birlikte ayağa kalkıyor.
+- **`chromadb` npm 3.5.0 kuruldu.** Paket ESM ama `require` dışa aktarımı var,
+  CommonJS backend ile sorunsuz çalışıyor.
+- **EMBEDDING MODELİ ÖLÇÜMLE SEÇİLDİ — istenen `text-embedding-004` ARTIK YOK:**
+  çağrıldığında `404 ... is not supported for embedContent`. (Aşama 1'deki
+  model emekliliği hikâyesinin aynısı.) API'nin listesinde embedding destekleyen
+  üç model dönüyor: `gemini-embedding-001`, `gemini-embedding-2`,
+  `gemini-embedding-2-preview`. İlk ikisi gerçekten **çağrılarak** doğrulandı:
+  üçü de **3072 boyut**, ~300–500 ms. Varsayılan **`gemini-embedding-001`**
+  (GA ve en uzun süredir kararlı olan), `GEMINI_EMBEDDING_MODEL` ile değiştirilebilir.
+- **`taskType: SEMANTIC_SIMILARITY`.** Benzer parça araması "hangi belge sorguya
+  yakın" işi değil, iki parçanın BİRBİRİNE benzemesi işidir. Yazma ve sorgu
+  tarafı aynı görev tipini kullanmalıdır.
+- **Boyut indirgeme (`outputDimensionality`) KULLANILMADI.** 3072 float ≈ 12 KB;
+  yüzlerce parçalık kişisel bir gardırop için önemsiz. İndirgemek, Google'ın
+  yeniden normalizasyon şartı yüzünden sessiz bir hata kaynağı olurdu.
+- **Yeni katman zinciri `Vector*`:** `config/chroma.js` → `VectorRepository`
+  (yalnızca Chroma, **fırlatır**) → `VectorService` (iş mantığı). Depodaki
+  desene birebir uyar; tek fark "veritabanı"nın Postgres değil Chroma olması
+  (`WeatherRepository` ile aynı gerekçe).
+- **VectorService'in İKİ AYRI SÖZLEŞMESİ var ve bu bilinçli:**
+  *YAZMA asla fırlatmaz* (embedding bir zenginleştirmedir; Chroma kapalıysa
+  kıyafet ve analiz yerinde durur), *OKUMA fırlatır* (`findSimilar` 503 döner —
+  sessizce boş liste dönmek "benzer parçan yok" gibi YANLIŞ bir cevap olurdu).
+  Ölçüt aynı: o anda cevap bekleyen bir kullanıcı var mı, yok mu.
+- **Embedding metni HAM JSON DEĞİL, CÜMLE.** `buildSummaryText` ai_analysis'i
+  "Koton beyaz keten şort (Keten Şort). Alt kategorisinde bir parça. Baskın rengi
+  Beyaz. … Crop top ve Sandalet ile iyi gider." biçimine çevirir. Sebep: embedding
+  modeli doğal dilde eğitilmiştir; anahtar adları (`kesim_tipi`, `alt_kategori`)
+  anlam taşımayan gürültüdür. Kullanıcının kendi yazdığı ad ve marka da metne
+  katılır — "Bershka crop top" bilgisi yalnızca orada var.
+- **Küçük dil düzeltmesi:** ten tonu cümlesi "Sıcak ten **ten** tonuna uygun"
+  diye tekrarlıyordu (değerler zaten "Sıcak ten" biçiminde geliyor); "tonuna
+  uygun" olarak düzeltildi.
+- **KONTROL SIRASI MALİYET İÇİN ÖNEMLİ:** önce "bu parçanın vektörü var mı" diye
+  Chroma'ya sorulur, sonra Gemini'ye gidilir. Ters sırada olsaydı Chroma
+  kapalıyken her denemede gerçek para harcanır ve sonuç yazılamadan atılırdı.
+  Test bunu ayrıca doğruluyor.
+- **Metadata yalnızca DEĞİŞMEYEN alanlardan:** `user_id`, `category_id`, `sema`,
+  `embedding_modeli`, `olusturma`. `is_clean`/`is_favorite` konsaydı her toggle'da
+  Chroma'yı da güncellemek gerekirdi; güncellenmese filtre bayat veriyle çalışırdı.
+  **Değişken durum daima Postgres'ten okunur.**
+- **Chroma'nın kendi embedding fonksiyonu DEVRE DIŞI bırakıldı.** Koleksiyona,
+  çağrıldığında hata fırlatan açık bir fonksiyon veriliyor. Varsayılan
+  bırakılsaydı istemci her koleksiyon açılışında "@chroma-core/default-embed
+  kurun" uyarısı basıyordu (ölçüldü: koleksiyon başına 4 satır) ve bir gün
+  gerçekten metinden embedding üretmeye kalkışabilirdi — bizim modelimizle
+  uyumsuz vektör demekti.
+- **Tetikleme:** `ClothingAnalysisService` analizi KOLONA YAZDIKTAN SONRA
+  `indexItemInBackground` çağırır ve await etmez (sıra önemli: embedding'in
+  kaynağı `ai_analysis`). Silme `ClothingItemController.delete` içinde,
+  `res` gönderildikten sonra. Her iki bağımlılık da **opsiyonel**.
+- **`GET /clothing-items/:id/similar`** — doğrulama ucu. `limit` (varsayılan 5,
+  en fazla 20) ve `categoryId` opsiyonel. **Sorgu daima `user_id` ile filtrelenir**
+  (filtresiz bir vektör sorgusu başkalarının gardıroplarını döndürürdü); parçanın
+  kendisi elenir; sonuçlar Postgres'ten zenginleştirilir, böylece silinmiş bir
+  parça Chroma'da kalsa bile yanıta sızmaz. Henüz indekslenmemiş parça hata değil,
+  `{"indekslendi": false, "sebep": …}` ile bildirilir.
+- **İki depo arasında işlem bütünlüğü YOK ve olması da beklenmiyor.** Postgres tek
+  doğru kaynak, Chroma türetilmiş veri. Tutarsızlık üç yerde karşılanıyor:
+  `findSimilar` Postgres'ten doğruluyor, **`cleanup.js` artık öksüz vektörleri de
+  siliyor**, `create-embeddings.js` eksikleri dolduruyor.
+- **Yeni script `create-embeddings.js`:** analizi olup embedding'i olmayan
+  parçaları toplu doldurur. **Varsayılan SALT OKUNUR** (`analyze-existing-items.js`
+  kalıbı). N metni TEK istekte gönderir (`indexItems`, `BATCH_SIZE = 20`).
+  `--sifirla` koleksiyonu siler — embedding modeli değiştiğinde ZORUNLU, çünkü
+  farklı modellerin vektörleri aynı uzayda değildir.
+- **Doğrulama — `test-scripts/test-vector.js`, 76 kontrol:**
+  - *Birim (45) CHROMA VE ANAHTAR GEREKTİRMEZ* (`--birim`): embedding metninin
+    her alanı, makyaj şeması, eksik/boş analiz; ve asıl güvence — Chroma ya da
+    embedding API'si çöktüğünde **servisin fırlatmaması ve yarım veri yazmaması**;
+    maliyet koruması; `force`; in-flight muhafızı; kota soğuması; yeniden deneme;
+    `CHROMA_ENABLED=false`; **okuma yolunun 503 fırlatması**; ve **sorguda
+    kullanıcı filtresinin bulunması**.
+  - *Bağlantı (4):* container ayakta, Postgres ile birlikte çalışıyor, koleksiyon
+    açılıyor ve sayılabiliyor.
+  - *Gerçek embedding + benzerlik (27):* **kontrollü veriyle** — iki beyaz üst,
+    bir siyah bot, bir ruj. `ai_analysis` **elle yazılır** (Gemini'ye görsel
+    analizi yaptırılmaz): hem günlük `generateContent` kotasına bağlı kalmamak
+    hem de "iki beyaz üst yakın çıkmalı" iddiasını DETERMİNİSTİK sınamak için.
+    Embedding çağrıları gerçektir. **Sonuç: beyaz bluz 0.9555, ruj 0.7977,
+    bot 0.7973** — iki beyaz üst açık ara en yakın. Ayrıca kategori filtresi,
+    `limit`, bozuk `limit`, token'sız 401, başkasının parçası için 404,
+    **başka kullanıcının neredeyse aynı parçasının sonuçlara sızmaması** ve
+    kıyafet silinince vektörünün de silinmesi.
+  - *KRİTİK — Chroma erişilemezken (9):* script **ikinci bir sunucu açar**
+    (`:3198`, ölü Chroma portu) ve kıyafet akışının kırılmadığını kanıtlar:
+    sunucu açılıyor, kayıt/kıyafet 201, kayıt okunabiliyor, analiz kolonu
+    etkilenmiyor, süreç çökmüyor — ve `/similar` **503 ile açıkça** bildiriyor.
+- **YAŞANAN TEST HATASI (kendi varsayımım):** "makyaj ürünü en uzak çıkmalı"
+  diye bir kontrol yazmıştım; ruj 0.7977, bot 0.7973 çıktı — fark gürültü
+  seviyesinde ve böyle bir kural yok. Kontrol, gerçekten kararlı olan özellikle
+  değiştirildi: **ilgisiz parçaların hepsi benzer parçadan belirgin biçimde
+  (>0.1) uzak** (ölçülen ayrım ~0.16).
+- **Gerçek gardırop verisiyle de doğrulandı:** siyah tişört → siyah pantolon
+  (0.9104) > siyah çanta (0.8643) > beyaz şort (0.8492) > sneaker (0.8465) >
+  ruj (0.8041). Renk ve resmiyet kümelenmesi gözle görülür.
+- Regresyon: `test-all-endpoints` 72/72, `test-auth` 48/48, `test-stats` 60/60,
+  `test-item-outfits` 27/27, `test-clean-status` 26/26,
+  `test-ai-analysis --kotasiz` 53/53, lint + build temiz.
+  (`test-ai-analysis`'in gerçek analiz bölümü ve `test-gemini`'nin analiz bölümü
+  **günlük `generateContent` kotası dolu olduğu için** koşulmadı — embedding ucu
+  ayrı bir kotadan besleniyor ve sorunsuz çalıştı.)
 
 ### 2026-08-21 — Gemini Entegrasyonu — Aşama 2: Otomatik Kıyafet Analizi
 - **Ne eklendi:** Bir parçaya fotoğraf yüklendiğinde Gemini **arka planda**

@@ -42,10 +42,14 @@ const MAX_ATTEMPTS = 2
 const RETRY_DELAY_MS = 1500
 
 class ClothingAnalysisService {
-  constructor(clothingItemRepository, categoryRepository, geminiService) {
+  // vectorService OPSİYONELDİR (Aşama 3): verilmezse analiz eskisi gibi
+  // çalışır, yalnızca embedding üretilmez. Bağımlılığın opsiyonel olması
+  // testlerin vektör katmanı olmadan koşabilmesini de sağlıyor.
+  constructor(clothingItemRepository, categoryRepository, geminiService, vectorService = null) {
     this.clothingItemRepository = clothingItemRepository
     this.categoryRepository = categoryRepository
     this.geminiService = geminiService
+    this.vectorService = vectorService
 
     // Aynı parça için eşzamanlı iki analiz başlamasın: kullanıcı fotoğrafı
     // hızlıca iki kez yüklerse iki Gemini çağrısı ve iki yazma olurdu.
@@ -212,6 +216,18 @@ class ClothingAnalysisService {
       `AI analizi tamamlandı: ${itemId} (${categoryName ?? 'kategorisiz'}, ` +
         `şema=${analysis.sema}, ${Date.now() - startedAt} ms)`,
     )
+
+    // AŞAMA 3 — analiz başarıyla YAZILDIKTAN SONRA embedding üretilir.
+    // Sıra önemli: embedding'in kaynağı ai_analysis kolonudur, kolon
+    // yazılmadan indeksleme yapılsaydı VectorService kaydı "analiz yok"
+    // diye atlardı.
+    //
+    // await EDİLMEZ ve hatası bu fonksiyonun sonucunu ETKİLEMEZ: analiz
+    // tamamlanmıştır, embedding üretilememesi analizi başarısız yapmaz.
+    // VectorService da kendi içinde asla fırlatmaz — buradaki `catch`
+    // yalnızca son güvenlik ağıdır.
+    this.vectorService?.indexItemInBackground(itemId)
+
     return { durum: DURUM.TAMAMLANDI, analiz: analysis }
   }
 

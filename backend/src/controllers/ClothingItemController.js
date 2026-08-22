@@ -2,13 +2,15 @@ const BaseController = require('./BaseController')
 const { removeUploadedFile } = require('../config/upload')
 
 class ClothingItemController extends BaseController {
-  // clothingAnalysisService OPSİYONELDİR: verilmezse fotoğraf yükleme eskisi
-  // gibi çalışır, yalnızca otomatik analiz devreye girmez. Testlerin ve
-  // ileride bu davranışı kapatmak isteyen bir kurulumun işini kolaylaştırır.
-  constructor(clothingItemService, clothingAnalysisService = null) {
+  // clothingAnalysisService ve vectorService OPSİYONELDİR: verilmezse fotoğraf
+  // yükleme eskisi gibi çalışır, yalnızca otomatik analiz / embedding devreye
+  // girmez. Testlerin ve bu davranışı kapatmak isteyen bir kurulumun işini
+  // kolaylaştırır.
+  constructor(clothingItemService, clothingAnalysisService = null, vectorService = null) {
     super()
     this.clothingItemService = clothingItemService
     this.clothingAnalysisService = clothingAnalysisService
+    this.vectorService = vectorService
   }
 
   async getAll(req, res) {
@@ -52,9 +54,42 @@ class ClothingItemController extends BaseController {
     try {
       await this.clothingItemService.deleteItem(req.params.id, req.userId)
       res.status(204).send()
+
+      // Kıyafet gidince vektörü de gitmeli; kalsaydı benzer aramasında artık
+      // var olmayan bir parça dönerdi. Yanıttan SONRA ve await EDİLMEDEN:
+      // silme işlemi ChromaDB yüzünden yavaşlamamalı ya da başarısız olmamalı.
+      this.vectorService?.removeItem(req.params.id)
     } catch (error) {
       this.handleError(error, res)
     }
+  }
+
+  // AŞAMA 3 — DOĞRULAMA UCU. Bir kıyafetin vektör uzayındaki en yakın
+  // komşularını döndürür. Henüz hiçbir ürün akışına (Kombin Öner dahil)
+  // bağlı DEĞİLDİR; embedding'lerin gerçekten anlamlı olup olmadığını
+  // gözle görmek için var.
+  async getSimilar(req, res) {
+    try {
+      if (!this.vectorService) {
+        return res.status(503).json({ error: 'Vektör veritabanı bu kurulumda etkin değil' })
+      }
+
+      const result = await this.vectorService.findSimilar(req.params.id, req.userId, {
+        limit: this.#parseLimit(req.query.limit),
+        categoryId: req.query.categoryId ?? null,
+      })
+      res.status(200).json(result)
+    } catch (error) {
+      this.handleError(error, res)
+    }
+  }
+
+  // Sınır makul bir aralığa çekilir: `?limit=100000` Chroma'yı gereksiz
+  // yere zorlar, `?limit=abc` ise NaN olarak sorguya gidip patlardı.
+  #parseLimit(raw) {
+    const value = Number(raw)
+    if (!Number.isFinite(value) || value < 1) return 5
+    return Math.min(Math.floor(value), 20)
   }
 
   async toggleFavorite(req, res) {

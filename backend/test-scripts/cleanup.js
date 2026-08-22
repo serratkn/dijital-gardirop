@@ -13,6 +13,8 @@ const path = require('node:path')
 require('dotenv').config({ path: path.join(__dirname, '..', '.env') })
 
 const pool = require('../src/config/database')
+const { isEnabled: isChromaEnabled } = require('../src/config/chroma')
+const VectorRepository = require('../src/repositories/VectorRepository')
 
 // Test scriptlerinin ürettiği kayıtlar bu kalıplarla adlandırılır.
 const TEST_NAME_PATTERNS = [
@@ -111,8 +113,57 @@ async function main() {
     )
   }
 
+  // ChromaDB (Aşama 3) AYRI BİR DEPODUR: Postgres'ten silinen bir kıyafetin
+  // vektörü kendiliğinden gitmez. Uygulama akışında silme ucu bunu yapıyor
+  // ama doğrudan SQL ile silinen test kayıtları öksüz vektör bırakır — bu da
+  // benzer aramasında artık var olmayan bir parçanın dönmesi demektir.
+  await temizleOksuzVektorler()
+
   console.log('\nTemizlik tamamlandı.')
   await pool.end()
+}
+
+// Chroma'da olup Postgres'te (artık) olmayan vektörleri siler.
+async function temizleOksuzVektorler() {
+  if (!isChromaEnabled()) return
+
+  const repo = new VectorRepository()
+
+  try {
+    await repo.heartbeat()
+  } catch {
+    console.log('\nChromaDB yanıt vermiyor — vektör temizliği atlandı.')
+    return
+  }
+
+  try {
+    const collection = await repo.getCollection()
+    // include: [] → yalnızca id'ler gelir; embedding'leri çekmek gereksiz
+    // ağ trafiği olurdu (parça başına 3072 float).
+    const hepsi = await collection.get({ include: [] })
+    const vektorIdleri = hepsi?.ids ?? []
+    if (vektorIdleri.length === 0) return
+
+    const { rows } = await pool.query(
+      'SELECT id FROM clothing_items WHERE id = ANY($1::uuid[]) AND is_deleted = false',
+      [vektorIdleri],
+    )
+    const yasayanlar = new Set(rows.map((row) => row.id))
+    const oksuzler = vektorIdleri.filter((id) => !yasayanlar.has(id))
+
+    if (oksuzler.length === 0) {
+      console.log(`\nChromaDB: ${vektorIdleri.length} vektör, öksüz yok.`)
+      return
+    }
+
+    await repo.deleteItems(oksuzler)
+    console.log(
+      `\nChromaDB: ${oksuzler.length} öksüz vektör silindi (${vektorIdleri.length} taranmıştı).`,
+    )
+  } catch (error) {
+    // Temizlik bir kolaylık aracıdır; Chroma yüzünden çökmemeli.
+    console.log(`\nVektör temizliği yapılamadı: ${error.message}`)
+  }
 }
 
 main().catch((error) => {

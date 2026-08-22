@@ -5,25 +5,40 @@ const { uploadImage, MAX_FILE_SIZE } = require('../config/upload')
 const ClothingItemRepository = require('../repositories/ClothingItemRepository')
 const CategoryRepository = require('../repositories/CategoryRepository')
 const ClothingItemService = require('../services/ClothingItemService')
+const VectorRepository = require('../repositories/VectorRepository')
 const ClothingAnalysisService = require('../services/ClothingAnalysisService')
+const VectorService = require('../services/VectorService')
 const GeminiService = require('../services/GeminiService')
 const ClothingItemController = require('../controllers/ClothingItemController')
 
 const clothingItemRepository = new ClothingItemRepository(pool)
 const clothingItemService = new ClothingItemService(clothingItemRepository)
 
+const geminiService = new GeminiService()
+
+// Vektör veritabanı (Aşama 3). Yazma yolu asla fırlatmaz; bağlanması fotoğraf
+// yükleme akışının davranışını değiştirmez.
+const vectorService = new VectorService(
+  new VectorRepository(),
+  clothingItemRepository,
+  geminiService,
+)
+
 // Otomatik Gemini analizi (Aşama 2). Kategori adı prompt'u belirlediği için
 // CategoryRepository de bağlanır. Analiz servisi ASLA fırlatmaz; bağlanması
 // fotoğraf yükleme akışının davranışını değiştirmez.
+// vectorService dördüncü bağımlılık: analiz tamamlanınca embedding de üretilir.
 const clothingAnalysisService = new ClothingAnalysisService(
   clothingItemRepository,
   new CategoryRepository(pool),
-  new GeminiService(),
+  geminiService,
+  vectorService,
 )
 
 const clothingItemController = new ClothingItemController(
   clothingItemService,
   clothingAnalysisService,
+  vectorService,
 )
 
 const router = Router()
@@ -65,6 +80,10 @@ router.post('/clothing-items/:id/image', handleUpload, (req, res) =>
 )
 router.delete('/clothing-items/:id/image', (req, res) =>
   clothingItemController.deleteImage(req, res),
+)
+// AŞAMA 3 doğrulama ucu — henüz hiçbir ürün akışına bağlı değil.
+router.get('/clothing-items/:id/similar', (req, res) =>
+  clothingItemController.getSimilar(req, res),
 )
 
 module.exports = router

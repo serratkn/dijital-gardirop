@@ -24,6 +24,30 @@ const { GoogleGenAI } = require('@google/genai')
 // kıyafet fotoğrafıyla denendi ve tutarlı Türkçe etiketler üretti.
 const DEFAULT_MODEL = 'gemini-3.6-flash'
 
+// EMBEDDING MODELİ (Aşama 3 — vektör veritabanı). Analiz modelinden AYRI:
+// biri görselden metin üretir, diğeri metinden vektör.
+//
+// SEÇİM YİNE ÖLÇÜMLE YAPILDI — istenen `text-embedding-004` ARTIK YOK:
+// çağrıldığında 404 ("not found for API version v1beta, or is not supported
+// for embedContent"). Model listesinde embedding destekleyen üç model dönüyor:
+// gemini-embedding-001, gemini-embedding-2, gemini-embedding-2-preview.
+// Üçü de 3072 boyutlu vektör üretiyor; 001 ve 2 gerçekten çağrılarak
+// doğrulandı (~300–500 ms).
+//
+// Varsayılan `gemini-embedding-001`: GA ve en uzun süredir kararlı olan.
+//
+// > MODELİ DEĞİŞTİRMEK KOLEKSİYONU GEÇERSİZ KILAR. Farklı modellerin vektörleri
+// > aynı uzayda DEĞİLDİR; karışık koleksiyonda mesafeler anlamsızlaşır. Model
+// > değişirse tüm embedding'ler silinip yeniden üretilmelidir
+// > (test-scripts/create-embeddings.js --sifirla).
+const DEFAULT_EMBEDDING_MODEL = 'gemini-embedding-001'
+
+// Benzer parça araması bir "hangi belge sorguya yakın" işi değil, iki parçanın
+// BİRBİRİNE benzemesi işidir; Gemini bunun için ayrı bir görev tipi sunuyor ve
+// sonuçları buna göre uzayda konumlandırıyor. Yazma ve sorgu tarafında AYNI
+// değer kullanılmalıdır, yoksa vektörler kıyaslanabilir olmaz.
+const EMBEDDING_TASK_TYPE = 'SEMANTIC_SIMILARITY'
+
 // Dış servise yapılan istek SINIRSIZ BEKLEYEMEZ (WeatherService ile aynı kural):
 // takılan bir istek isteği tutan HTTP bağlantısını da askıda bırakırdı.
 // Görsel analizi metin üretiminden yavaştır, bu yüzden hava durumundaki
@@ -72,10 +96,17 @@ function getModel() {
   return process.env.GEMINI_MODEL?.trim() || DEFAULT_MODEL
 }
 
+function getEmbeddingModel() {
+  return process.env.GEMINI_EMBEDDING_MODEL?.trim() || DEFAULT_EMBEDDING_MODEL
+}
+
 module.exports = {
   DEFAULT_MODEL,
+  DEFAULT_EMBEDDING_MODEL,
+  EMBEDDING_TASK_TYPE,
   REQUEST_TIMEOUT_MS,
   isConfigured,
   getClient,
   getModel,
+  getEmbeddingModel,
 }

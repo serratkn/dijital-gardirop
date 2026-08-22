@@ -11,5 +11,41 @@ services:
     volumes:
       - postgres_data:/var/lib/postgresql/data
 
+  # Vektör veritabanı (Gemini Aşama 3). Kıyafet analizlerinin embedding'lerini
+  # tutar; benzer parça araması buradan yapılır.
+  #
+  # SÜRÜM SABİTLENDİ: chromadb/chroma'nın Docker Hub'daki etiketlerinin büyük
+  # çoğunluğu `.dev` yapısıdır (günde birkaç kez yayımlanıyor). 1.5.9 en güncel
+  # KARARLI sürümdür. `latest` kullanılsaydı bir sonraki `docker compose pull`
+  # sunucuyu habersizce başka bir sürüme taşırdı ve istemci (chromadb npm 3.5.0)
+  # ile API uyumu sessizce bozulabilirdi.
+  chromadb:
+    image: chromadb/chroma:1.5.9
+    restart: unless-stopped
+    environment:
+      # Veri diskte kalsın: container yeniden yaratıldığında embedding'ler
+      # yeniden üretilmek zorunda kalmasın (her üretim Gemini kotası harcar).
+      IS_PERSISTENT: "TRUE"
+      PERSIST_DIRECTORY: /data
+      ANONYMIZED_TELEMETRY: "FALSE"
+    ports:
+      - "8000:8000"
+    volumes:
+      - chroma_data:/data
+    healthcheck:
+      # Chroma 1.x API'si /api/v2 altındadır (v1 kaldırıldı); istemci de v2
+      # konuşur. Bu uç kimlik doğrulama istemez.
+      #
+      # /bin/bash ZORUNLU, /bin/sh DEĞİL: image'da curl, wget, nc ve python
+      # YOK — tek HTTP aracı bash'in /dev/tcp özelliği. Image'ın /bin/sh'i
+      # dash olduğu için ilk denemede healthcheck sürekli unhealthy kaldı
+      # ("cannot create /dev/tcp/...: Directory nonexistent").
+      test: ["CMD", "/bin/bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/8000 && printf 'GET /api/v2/heartbeat HTTP/1.0\\r\\n\\r\\n' >&3 && head -1 <&3 | grep -q 200"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
 volumes:
   postgres_data:
+  chroma_data:

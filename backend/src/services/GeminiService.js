@@ -1,5 +1,12 @@
 const { ValidationError, ServiceUnavailableError } = require('../utils/errors')
-const { REQUEST_TIMEOUT_MS, getClient, getModel, isConfigured } = require('../config/gemini')
+const {
+  EMBEDDING_TASK_TYPE,
+  REQUEST_TIMEOUT_MS,
+  getClient,
+  getEmbeddingModel,
+  getModel,
+  isConfigured,
+} = require('../config/gemini')
 
 // AŞAMA 1 — bağlantıyı kanıtlayan test ucunun kullandığı basit prompt.
 // AŞAMA 2 (otomatik analiz) buildPromptForCategory() ile kategoriye özgü
@@ -232,6 +239,62 @@ class GeminiService {
       gardirop_kategorisi: categoryName ?? null,
       veri: this.#normalizeToSchema(this.#parseJson(text), schemaKey),
     }
+  }
+
+  // AŞAMA 3 — metinleri embedding vektörlerine çevirir (vektör veritabanı için).
+  // Analiz metodlarından farklı olarak GÖRSEL DEĞİL METİN alır ve farklı bir
+  // model kullanır; ortak olan tek şey istemci ve hata çevirisidir.
+  //
+  // TOPLU çağrı destekleniyor: bir dizi metin tek istekte gönderilir. Toplu
+  // embedding üretiminde (create-embeddings.js) bu, N ayrı istek yerine tek
+  // istek demektir.
+  async createEmbeddings(texts) {
+    const list = Array.isArray(texts) ? texts : [texts]
+    const temizler = list.map((text) => String(text ?? '').trim()).filter(Boolean)
+
+    if (temizler.length === 0) {
+      throw new ValidationError('Embedding için metin gönderilmedi')
+    }
+
+    if (!isConfigured()) {
+      throw new ServiceUnavailableError(
+        'Gemini API anahtarı tanımlı değil. backend/.env içine GEMINI_API_KEY ekleyin.',
+      )
+    }
+
+    const client = getClient()
+    const model = getEmbeddingModel()
+
+    let response
+    try {
+      response = await client.models.embedContent({
+        model,
+        contents: temizler,
+        config: {
+          // Yazma ve sorgu tarafı AYNI görev tipini kullanmalıdır.
+          taskType: EMBEDDING_TASK_TYPE,
+          abortSignal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+        },
+      })
+    } catch (error) {
+      console.error('Gemini embedding isteği başarısız:', error.message)
+
+      const friendly = new ServiceUnavailableError(this.#toFriendlyMessage(error))
+      friendly.isRateLimited = this.#isRateLimited(error)
+      friendly.isRetryable = this.#isRetryable(error)
+      friendly.retryAfterMs = this.#retryAfterMs(error)
+      throw friendly
+    }
+
+    const vectors = (response?.embeddings ?? []).map((item) => item?.values)
+
+    // Eksik/bozuk vektör sessizce geçilmemeli: Chroma'ya yarım veri yazmak,
+    // sonradan teşhisi zor bir "benzerlik hep saçma" hatasına dönerdi.
+    if (vectors.length !== temizler.length || vectors.some((v) => !Array.isArray(v) || !v.length)) {
+      throw new ServiceUnavailableError('Gemini beklenen sayıda embedding döndürmedi')
+    }
+
+    return { model, vectors }
   }
 
   // Modelin çıktısını şemaya oturtur. Anahtar SIRASI şemadan gelir.
