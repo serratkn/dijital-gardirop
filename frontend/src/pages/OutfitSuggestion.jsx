@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useLocation } from 'react-router-dom'
-import { Brush, CloudSun, Sparkles } from 'lucide-react'
+import { Brush, Check, CloudSun, Sparkles } from 'lucide-react'
 import PageHeader from '../components/ui/PageHeader'
 import FilterPills from '../components/ui/FilterPills'
 import EmptyState from '../components/ui/EmptyState'
@@ -13,12 +13,14 @@ import {
   fetchClothingItems,
   fetchCompanions,
   fetchMe,
+  fetchSkinToneAnalysis,
   fetchWeather,
 } from '../lib/api'
 import { toCategoryIdMap, toCategoryNameMap, toClothingItems } from '../lib/transformers'
 import { OCCASIONS, OCCASION_STATE_KEY } from '../lib/occasions'
 import { seasonsForWeather } from '../lib/seasons'
 import { cityLocative } from '../lib/cities'
+import { matchesSkinTone } from '../lib/skinTone'
 import {
   CANDIDATE_CATEGORIES,
   OUTFIT_CATEGORIES,
@@ -47,6 +49,9 @@ function OutfitSuggestion() {
   const [items, setItems] = useState([])
   const [categoryIds, setCategoryIds] = useState(() => new Map())
   const [weather, setWeather] = useState(null)
+  // Kullanıcının ten tonu (varsa). YALNIZCA BİLGİLENDİRİCİ bir işaret için
+  // kullanılır; kombin mantığına hiç karışmaz.
+  const [skinTone, setSkinTone] = useState(null)
   const [isLoading, setIsLoading] = useState(true)
   const [hasError, setHasError] = useState(false)
 
@@ -110,6 +115,18 @@ function OutfitSuggestion() {
             console.error('Hava durumu alınamadı:', error)
             setWeather(null)
           }
+        }
+        // Ten tonu da İSTEĞE BAĞLI bir zenginleştirmedir (hava durumuyla aynı
+        // ilke): kendi try/catch'i var ve hatası hasError'a DÖNÜŞMEZ. Analizi
+        // olmayan kullanıcıda null döner ve hiçbir işaret gösterilmez.
+        try {
+          const tenTonu = await fetchSkinToneAnalysis()
+          if (isStale) return
+          setSkinTone(tenTonu?.analiz?.veri?.ten_tonu ?? null)
+        } catch (error) {
+          if (isStale) return
+          console.error('Ten tonu alınamadı:', error)
+          setSkinTone(null)
         }
       } catch (error) {
         if (isStale) return
@@ -515,11 +532,23 @@ function OutfitSuggestion() {
 
                         <div className="mt-4 grid grid-cols-2 gap-6 sm:grid-cols-4">
                           {suggestionItems.map((item) => (
-                            <ClothingCard
-                              key={item.id}
-                              item={item}
-                              onCleanChange={handleCleanChange}
-                            />
+                            <div key={item.id}>
+                              <ClothingCard item={item} onCleanChange={handleCleanChange} />
+                              {/* SADECE BİLGİ. Bu işaret hiçbir parçayı elemez,
+                                  sıralamayı değiştirmez; kullanıcının ten tonu
+                                  analizi yoksa hiç görünmez. Kartın kendisine
+                                  değil ALTINA konuyor: ClothingCard paylaşılan
+                                  bir bileşen ve Gardırop'ta bu bilgi anlamsız. */}
+                              {matchesSkinTone(item, skinTone) && (
+                                <p
+                                  className="mt-2 flex items-center gap-1 text-[11px] font-medium uppercase tracking-[0.1em] text-accent-ink"
+                                  data-testid="ten-tonu-isareti"
+                                >
+                                  <Check size={11} strokeWidth={2.25} />
+                                  Ten tonuna uygun
+                                </p>
+                              )}
+                            </div>
                           ))}
                         </div>
 

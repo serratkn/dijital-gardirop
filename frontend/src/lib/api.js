@@ -147,26 +147,28 @@ export function logImageOutcome(context, src, outcome) {
   )
 }
 
+// Dosya yükleyen tüm çağrıların ortak yolu.
+//
 // FormData gönderirken Content-Type ELLE ayarlanmaz: tarayıcının multipart
-// sınır (boundary) değerini kendisi eklemesi gerekir.
-export async function uploadClothingItemImage(id, file) {
-  const formData = new FormData()
-  formData.append('image', file)
-
+// sınır (boundary) değerini kendisi eklemesi gerekir — bu yüzden JSON gönderen
+// `request` yerine ayrı bir yol var.
+async function requestMultipart(
+  endpoint,
+  formData,
+  { timeoutMs, errorPrefix = 'Fotoğraf yüklenemedi' } = {},
+) {
   const token = getToken()
-  const response = await fetch(
-    `${API_BASE_URL}/clothing-items/${encodeURIComponent(id)}/image`,
-    {
-      method: 'POST',
-      headers: token ? { Authorization: `Bearer ${token}` } : undefined,
-      body: formData,
-    },
-  )
+  const response = await fetch(`${API_BASE_URL}${endpoint}`, {
+    method: 'POST',
+    headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+    body: formData,
+    signal: timeoutMs ? AbortSignal.timeout(timeoutMs) : undefined,
+  })
 
   if (!response.ok) {
     if (response.status === 401) notifyUnauthorized()
 
-    let message = `Fotoğraf yüklenemedi (${response.status})`
+    let message = `${errorPrefix} (${response.status})`
     try {
       const data = await response.json()
       if (data?.error) message = data.error
@@ -177,6 +179,13 @@ export async function uploadClothingItemImage(id, file) {
   }
 
   return response.json()
+}
+
+export function uploadClothingItemImage(id, file) {
+  const formData = new FormData()
+  formData.append('image', file)
+
+  return requestMultipart(`/clothing-items/${encodeURIComponent(id)}/image`, formData)
 }
 
 export function deleteClothingItemImage(id) {
@@ -245,6 +254,9 @@ export function toggleClothingItemCleanStatus(id) {
 // Yani bu sınır normal işleyişte hiç devreye girmez, yalnızca gerçekten
 // takılmış bir istek için son çıkıştır.
 const REANALYZE_TIMEOUT_MS = 90000
+
+// Ten tonu analizi de senkron ve aynı Gemini sınırlarına tabi.
+const SKIN_TONE_TIMEOUT_MS = 90000
 
 export function reanalyzeClothingItem(id) {
   return request(`/clothing-items/${encodeURIComponent(id)}/analyze`, {
@@ -332,6 +344,33 @@ export function updateUser(id, payload) {
 // istemcide ek bir hesaplama/dönüştürme yapılmaz.
 export function fetchWardrobeStats(userId) {
   return request(`/users/${encodeURIComponent(userId)}/stats`)
+}
+
+// --- Ten tonu analizi (isteğe bağlı özellik) ---
+//
+// Selfie HASSAS VERİDİR: bu uçlar yalnızca oturum sahibinin kendi kaydını
+// döndürür (sunucu kimliği token'dan okur, yolda ":id" yoktur) ve analiz
+// başka hiçbir akışta — paylaşım görseli dahil — kullanılmaz.
+
+// Analizi yoksa { analiz: null, foto_url: null } döner; bu bir HATA DEĞİLDİR.
+export function fetchSkinToneAnalysis() {
+  return request('/users/skin-tone-analysis')
+}
+
+// Selfie yükler ve SENKRON olarak analiz eder. Zaman aşımı, sunucunun kendi
+// en kötü senaryosunun (2 deneme x 30 sn) üstünde tutuldu; erken kesilseydi
+// sunucu analizi yazmaya devam eder, arayüz "olmadı" derdi.
+export function uploadSkinToneSelfie(file) {
+  const body = new FormData()
+  body.append('image', file)
+
+  return requestMultipart('/users/skin-tone-analysis', body, {
+    timeoutMs: SKIN_TONE_TIMEOUT_MS,
+  })
+}
+
+export function deleteSkinToneAnalysis() {
+  return request('/users/skin-tone-analysis', { method: 'DELETE' })
 }
 
 export function fetchStylePreferences() {

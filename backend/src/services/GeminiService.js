@@ -16,6 +16,43 @@ const ANALYZE_PROMPT =
   'Bu bir kıyafet fotoğrafı. Kısaca şu bilgileri JSON formatında döndür: ' +
   '{ kategori, renk, stil }'
 
+// TEN TONU ANALİZİ — kullanıcının selfie'sinden ten tonu ve ona yakışan
+// renkler. Kıyafet analizinden AYRI bir şema: girdi kıyafet değil insan.
+//
+// `yuz_tespit_edildi` alanı ŞEMANIN PARÇASI ve bilinçli: fotoğraf bulanıksa,
+// yüz yoksa ya da ışık ten rengini okumaya elvermiyorsa modelin UYDURMASINI
+// değil bunu SÖYLEMESİNİ istiyoruz. Servis bu bayrağı görünce hiçbir şey
+// kaydetmeden kullanıcıya "daha net bir fotoğraf dene" der — teknik bir hata
+// olarak değil, anlaşılır bir yönlendirme olarak.
+const SKIN_TONE_PROMPT = `Bu bir kişinin selfie fotoğrafı. Cilt alt tonunu (undertone) analiz et.
+
+Yalnızca şu JSON'u döndür, başka hiçbir metin ekleme:
+{
+  "yuz_tespit_edildi": true veya false — fotoğrafta ten rengi güvenilir biçimde okunabilen bir yüz var mı,
+  "sorun": yuz_tespit_edildi false ise kısa sebep (örn. "Fotoğraf bulanık", "Yüz görünmüyor", "Işık yetersiz"); değilse null,
+  "ten_tonu": "Sıcak" veya "Soğuk" veya "Nötr" — tam olarak bu üç değerden biri,
+  "ten_rengi_tanimi": ten renginin kısa tanımı (örn. "Açık buğday teni"),
+  "uyumlu_renkler": bu ten tonuna en çok yakışan 6-8 renk adı (kısa, tek-iki kelime),
+  "uyumsuz_renkler": kaçınılması gereken 3-4 renk adı,
+  "uyumlu_metal_tonlari": "Altın" ve/veya "Gümüş" — hangisi yakışıyorsa,
+  "genel_tavsiye": 1-2 cümlelik kısa öneri
+}
+
+Kurallar:
+- Yüz tespit edilemezse yuz_tespit_edildi false yap ve DİĞER ALANLARI BOŞ BIRAK; tahmin yürütme.
+- Renk adları kısa ve gündelik olsun (örn. "Mercan", "Zeytin Yeşili"), açıklama cümlesi yazma.
+- Kişinin görünüşü hakkında ten tonu dışında yorum yapma.`
+
+// Ten tonu şeması: geçerli değerler sabit. Model başka bir şey döndürürse
+// (örn. "Ilık") alan null'a düşer — arayüzde uydurma bir ton göstermektense
+// eksik göstermek doğru.
+const TEN_TONLARI = new Set(['Sıcak', 'Soğuk', 'Nötr'])
+
+// Ten tonu listeleri kıyafet şemasından DAHA UZUN olabilir: prompt 6-8 uyumlu
+// renk istiyor. Kıyafet şemasının 4'lük sınırı buraya uygulanmamalı.
+const MAX_TEN_RENK_SAYISI = 8
+const METAL_TONLARI = new Set(['Altın', 'Gümüş'])
+
 // --- AŞAMA 2: kategoriye göre değişen analiz şemaları ---
 //
 // Alanlar [anahtar, tip, ipucu] üçlüsüdür. Sıra, prompt'taki örnek JSON'ın
@@ -147,7 +184,11 @@ function metniNormalize(value, maxLength) {
   return trimmed.slice(0, maxLength)
 }
 
-function listeyiNormalize(value) {
+// maxItems çağırana bırakıldı: kıyafet şemasının 4 öğelik sınırı orada
+// bilinçli (kartlar kısa etiket listesi gösteriyor), ama ten tonu analizi
+// 6-8 uyumlu renk istiyor — ortak sabit kullanılsaydı model doğru sayıda
+// renk döndürse bile yanıt SESSİZCE 4'e kırpılırdı (bu hata bir kez yaşandı).
+function listeyiNormalize(value, maxItems = MAX_LIST_ITEMS) {
   // Tek bir metin geldiyse tek öğeli listeye çevrilir (tersi yukarıda).
   const items = Array.isArray(value) ? value : [value]
 
@@ -155,7 +196,7 @@ function listeyiNormalize(value) {
   return items
     .map((item) => metniNormalize(item, MAX_TEXT_LENGTH))
     .filter(Boolean)
-    .slice(0, MAX_LIST_ITEMS)
+    .slice(0, maxItems)
 }
 
 class GeminiService {
@@ -238,6 +279,63 @@ class GeminiService {
       analiz_tarihi: new Date().toISOString(),
       gardirop_kategorisi: categoryName ?? null,
       veri: this.#normalizeToSchema(this.#parseJson(text), schemaKey),
+    }
+  }
+
+  // TEN TONU ANALİZİ. Kıyafet analiziyle aynı altyapıyı kullanır (#generate:
+  // zaman aşımı, hata çevirisi, anahtar kontrolü) ama TAMAMEN AYRI bir şemaya
+  // oturur — girdi bir kıyafet değil, kullanıcının kendisi.
+  //
+  // FIRLATIR (analyzeClothingItem gibi): burada kullanıcı ekrana bakıp
+  // bekliyor, sessizce boş dönmek yanlış olurdu. Çağıran (SkinToneService)
+  // hatayı HTTP durumuna çevirir.
+  //
+  // Yüz tespit edilemediğinde HATA FIRLATILMAZ: `yuz_tespit_edildi: false`
+  // ile döner. Bu bir sistem arızası değil, kullanıcının daha iyi bir
+  // fotoğraf çekmesi gereken normal bir durum.
+  async analyzeSkinTone(file) {
+    const { text, model } = await this.#generate(file, SKIN_TONE_PROMPT)
+    const parsed = this.#parseJson(text)
+    const kaynak = parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {}
+
+    // Model bayrağı hiç döndürmediyse (alanı unuttuysa) ten tonunun okunup
+    // okunmadığına VERİYE BAKARAK karar veriyoruz: ten_tonu geçerliyse yüz
+    // tespit edilmiş sayılır. Aksi hâlde tek eksik alan yüzünden geçerli bir
+    // analizi çöpe atardık.
+    const tenTonu = metniNormalize(kaynak.ten_tonu, MAX_TEXT_LENGTH)
+    const gecerliTon = tenTonu && TEN_TONLARI.has(tenTonu) ? tenTonu : null
+    const yuzTespitEdildi =
+      typeof kaynak.yuz_tespit_edildi === 'boolean'
+        ? kaynak.yuz_tespit_edildi && Boolean(gecerliTon)
+        : Boolean(gecerliTon)
+
+    if (!yuzTespitEdildi) {
+      return {
+        model,
+        yuz_tespit_edildi: false,
+        sorun: metniNormalize(kaynak.sorun, MAX_TEXT_LENGTH),
+        veri: null,
+      }
+    }
+
+    return {
+      model,
+      yuz_tespit_edildi: true,
+      sorun: null,
+      analiz_tarihi: new Date().toISOString(),
+      // Anahtar sırası burada tanımlıdır ama JSONB bunu KORUMAZ; gösterim
+      // sırası arayüzde ayrıca belirlenir (SkinTonePanel > ALAN_SIRASI).
+      veri: {
+        ten_tonu: gecerliTon,
+        ten_rengi_tanimi: metniNormalize(kaynak.ten_rengi_tanimi, MAX_TEXT_LENGTH),
+        uyumlu_renkler: listeyiNormalize(kaynak.uyumlu_renkler, MAX_TEN_RENK_SAYISI),
+        uyumsuz_renkler: listeyiNormalize(kaynak.uyumsuz_renkler, MAX_TEN_RENK_SAYISI),
+        // Yalnızca bilinen iki metal tonu kabul edilir.
+        uyumlu_metal_tonlari: listeyiNormalize(kaynak.uyumlu_metal_tonlari, 2).filter((deger) =>
+          METAL_TONLARI.has(deger),
+        ),
+        genel_tavsiye: metniNormalize(kaynak.genel_tavsiye, MAX_DESCRIPTION_LENGTH),
+      },
     }
   }
 
@@ -473,3 +571,6 @@ class GeminiService {
 module.exports = GeminiService
 module.exports.SEMALAR = SEMALAR
 module.exports.KATEGORI_SEMASI = KATEGORI_SEMASI
+module.exports.SKIN_TONE_PROMPT = SKIN_TONE_PROMPT
+module.exports.TEN_TONLARI = TEN_TONLARI
+module.exports.MAX_TEN_RENK_SAYISI = MAX_TEN_RENK_SAYISI

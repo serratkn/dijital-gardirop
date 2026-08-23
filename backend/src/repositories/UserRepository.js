@@ -112,6 +112,40 @@ class UserRepository {
     }
   }
 
+  // --- Ten tonu analizi ---
+  //
+  // Bu iki kolon SAFE_COLUMNS'A BİLEREK EKLENMEDİ. Selfie yolu hassas veridir
+  // ve analiz nesnesi de büyükçedir; /auth/me, /users/:id gibi HER kullanıcı
+  // yanıtında taşınmalarının bir sebebi yok. Yalnızca kendi ucundan okunurlar.
+  async findSkinTone(userId) {
+    try {
+      const result = await this.pool.query(
+        'SELECT id, skin_tone_analysis, skin_tone_photo_url FROM users WHERE id = $1',
+        [userId],
+      )
+      return result.rows[0] || null
+    } catch (error) {
+      console.error('UserRepository.findSkinTone hatası:', error.message)
+      throw error
+    }
+  }
+
+  async updateSkinTone(userId, { analysis, photoUrl }) {
+    try {
+      const result = await this.pool.query(
+        `UPDATE users
+         SET skin_tone_analysis = $1, skin_tone_photo_url = $2, updated_at = NOW()
+         WHERE id = $3
+         RETURNING id, skin_tone_analysis, skin_tone_photo_url`,
+        [analysis, photoUrl, userId],
+      )
+      return result.rows[0] || null
+    } catch (error) {
+      console.error('UserRepository.updateSkinTone hatası:', error.message)
+      throw error
+    }
+  }
+
   async delete(id) {
     try {
       const result = await this.pool.query(

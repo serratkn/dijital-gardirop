@@ -32,3 +32,57 @@ export const DEFAULT_COLOR = CLOTHING_COLORS[0].name
 export function getColorSwatch(name) {
   return CLOTHING_COLORS.find((color) => color.name === name) ?? null
 }
+
+// Gemini'nin ten tonu analizinde ürettiği renk adları SERBEST METİNDİR ve
+// CLOTHING_COLORS paletiyle sınırlı değildir ("Mercan", "Zeytin Yeşili",
+// "Kiremit"...). Kullanıcıya renk DAİRESİ gösterebilmek için bu adları da
+// tanıyan ek bir sözlük tutuluyor.
+//
+// Palet DEĞİL, yalnızca gösterim yardımcısı: kıyafet kaydına bu renkler
+// yazılmaz, hiçbir seçicide görünmezler.
+const AI_RENK_HEX = {
+  Mercan: '#f08070',
+  Şeftali: '#ffb997',
+  Somon: '#fa8072',
+  Zeytin: '#808000',
+  'Zeytin Yeşili': '#7c8b46',
+  Kiremit: '#b7410e',
+  'Kiremit Rengi': '#b7410e',
+  Taba: '#a0522d',
+  Toprak: '#9c6b४4'.replace('४', '4'),
+  'Buz Mavisi': '#cfe8f3',
+  'Bebek Mavisi': '#a7c7e7',
+  'Petrol Mavisi': '#1f4e5f',
+  Eflatun: '#9b6bb5',
+  Fuşya: '#e0218a',
+  'Soğuk Pembe': '#f2a2c0',
+  'Canlı Pembe': '#ff5c93',
+  'Soğuk Gri': '#9aa3ab',
+  'Sıcak Sarı': '#f2c14e',
+  Hardal: '#d4a017',
+  'Nane Yeşili': '#a8e0c0',
+  Zümrüt: '#2e8b57',
+  'Zümrüt Yeşili': '#2e8b57',
+  Şarap: '#722f37',
+  Vişne: '#8b1a2b',
+  Antrasit: '#3b3b3b',
+  Fildişi: '#f5f0e1',
+  Ekru: '#efe4d0',
+  Kavuniçi: '#ff8c42',
+  Lavanta: '#c3a8e1',
+  Gümüşi: '#c0c0c0',
+  Bronz: '#cd7f32',
+  Bakır: '#b87333',
+}
+
+// Renk adından gösterilecek hex. Önce kıyafet paleti, sonra AI sözlüğü,
+// bulunamazsa null (çağıran daireyi çizmez, düz etiket gösterir).
+export function resolveColorHex(name) {
+  const temiz = String(name ?? '').trim()
+  if (!temiz) return null
+
+  const paletten = getColorSwatch(temiz)
+  if (paletten?.hex) return paletten.hex
+
+  return AI_RENK_HEX[temiz] ?? null
+}

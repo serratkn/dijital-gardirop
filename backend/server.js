@@ -13,6 +13,7 @@ const createAuthRoutes = require('./src/routes/authRoutes')
 const healthRoutes = require('./src/routes/healthRoutes')
 const categoryRoutes = require('./src/routes/categoryRoutes')
 const userRoutes = require('./src/routes/userRoutes')
+const skinToneRoutes = require('./src/routes/skinToneRoutes')
 const statsRoutes = require('./src/routes/statsRoutes')
 const stylePreferenceRoutes = require('./src/routes/stylePreferenceRoutes')
 const clothingItemRoutes = require('./src/routes/clothingItemRoutes')
@@ -43,6 +44,11 @@ app.use('/api', createAuthRoutes(authService, authenticate))
 // Buradan sonraki her istek geçerli bir Bearer token ister ve
 // controller'lar kullanıcı kimliğini yalnızca req.userId'den okur.
 app.use('/api', authenticate, categoryRoutes)
+// SIRA ÖNEMLİ: skinToneRoutes, userRoutes'TAN ÖNCE gelmelidir.
+// userRoutes `GET /users/:id` tanımlıyor; sonra mount edilseydi Express
+// "/users/skin-tone-analysis" yolundaki metni bir id sanıp o handler'a
+// düşürürdü (ve UUID doğrulaması 404/400 verirdi).
+app.use('/api', authenticate, skinToneRoutes)
 app.use('/api', authenticate, userRoutes)
 app.use('/api', authenticate, statsRoutes)
 app.use('/api', authenticate, stylePreferenceRoutes)

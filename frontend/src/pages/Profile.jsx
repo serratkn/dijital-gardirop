@@ -3,6 +3,7 @@ import { Link, useNavigate } from 'react-router-dom'
 import { UserCog, KeyRound, Crown, Palette, Bell, HelpCircle, ChevronRight, LogOut } from 'lucide-react'
 import Button from '../components/ui/Button'
 import WardrobeStats from '../components/WardrobeStats'
+import SkinToneSection from '../components/SkinToneSection'
 import ThemeToggle from '../components/ui/ThemeToggle'
 import { fetchMe } from '../lib/api'
 import { clearToken } from '../lib/auth'
@@ -90,6 +91,8 @@ function Profile({ onLoggedOut }) {
           </div>
 
           <WardrobeStats />
+
+          <SkinToneSection />
 
           <div className="rounded-2xl border border-dusty-rose/40 bg-dusty-rose/10 p-6">
             <div className="flex items-start justify-between gap-4">

@@ -29,6 +29,7 @@ kombin önerileri üreten bir stil platformudur.
 | Ana sayfa istatistikleri ve son eklenenler | Gerçek API'ye bağlı |
 | İlk açılış onboarding akışı + tarz anketi | localStorage |
 | Profil / hesap yönetimi ekranları | localStorage |
+| Ten tonu analizi (selfie → uyumlu renkler) | Gerçek API'ye bağlı, **isteğe bağlı** |
 | Mobil uygulama (Android, Capacitor) | Kurulu |
 
 ---
@@ -278,6 +279,13 @@ olduğu için iskelet oraya taşındı, kombin üretimi istemci tarafında anlı
 - **Onboarding** — kullanıcıyı `POST /api/users` ile oluşturur, tarz anketini
   `PUT /api/style-preferences` ile kaydeder; e-posta çakışmasında (409) anlamlı mesaj gösterir
 - **Profil > Hesap Bilgilerim / Tarz Tercihlerim** — veritabanından okur ve günceller
+- **Ten tonu analizi (isteğe bağlı)** — Profil > "Ten Tonu Analizim". Kullanıcı bir
+  selfie yükler, Gemini ten tonunu (Sıcak/Soğuk/Nötr), yakışan 6-8 rengi, kaçınılacak
+  renkleri ve metal tonunu döndürür; sonuç renk daireleriyle gösterilir. Yeniden
+  analiz ve silme mümkün. **Yüz tespit edilemezse hiçbir şey kaydedilmez**, kullanıcı
+  "daha net bir fotoğrafla tekrar dene" yönlendirmesi alır. Analiz varsa Kombin
+  Öner'de uyumlu parçaların altında küçük bir **"✓ Ten tonuna uygun"** işareti çıkar
+  (yalnızca bilgi; kombin mantığına karışmaz)
 - **Profil > Gardırop İstatistiklerim** — kategori dağılımı, en çok kullanılan renk,
   en çok oluşturulan kombin durumu, favori sayısı ve temiz/kirli oranı; tamamı
   `GET /users/:id/stats` ile veritabanında hesaplanır
@@ -311,6 +319,9 @@ olduğu için iskelet oraya taşındı, kombin üretimi istemci tarafında anlı
 | **Makyaj önerisi tek ürün** | Bölüm en yakın TEK ürünü gösterir (havuz derinliği "Başka Öneri Göster" ile ilerler). Birden fazla ürünü aynı anda öneren bir "makyaj seti" akışı yok. |
 | **Benzer parçalar durumdan ve renk/stil ağırlığından bağımsız** | Sıralama yalnızca embedding yakınlığına bakar; "aynı renk olsun" ya da "farklı stil öner" gibi bir ağırlıklandırma yok. |
 | **Benzer parçalar yalnızca indekslenmiş parçalar arasında** | Analizi olmayan parça ne kaynak ne sonuç olabilir; o parçada bölüm hiç görünmez. Toplu doldurma `analyze-existing-items.js` + `create-embeddings.js` ile elle yapılır. |
+| **Selfie'ler `/uploads`'tan token'sız servis ediliyor** | Kıyafet fotoğraflarıyla AYNI mekanizma: dosya adı tahmin edilemez UUID, yol yalnızca sahibine dönüyor. Ama bir selfie için bu, bir tişört fotoğrafından daha zayıf bir güvence — adres bir kez sızarsa (ekran görüntüsü, tarayıcı geçmişi) kimlik doğrulaması yok. Gerçekten korumak için ayrı bir dizin + token'lı stream ucu gerekir; `<img>` başlık gönderemediği için istemci blob'a çevirmeli. |
+| **Ten tonu analizi GERÇEK selfie ile denenmedi** | Elde gerçek bir selfie olmadığı için doğrulama sentetik bir portre çizimiyle yapıldı (Gemini bunu kabul etti ve çizilen sıcak paleti doğru okudu: "Sıcak / Açık buğday teni"). Gerçek bir fotoğrafta sonucun kalitesi ölçülmedi. |
+| **Kullanıcı silinince fotoğrafları diskte kalıyor** | `ON DELETE CASCADE` veritabanı satırlarını siler ama `uploads/` altındaki dosyalara dokunmaz; test kullanıcıları arkasında öksüz dosya bırakıyor. `cleanup.js` bunları toplamaz (yalnızca Chroma öksüzlerini toplar), elle temizlik gerekir. |
 | **Test altyapısı yok** | Test framework'ü yoktur. Doğrulama: `npm run lint` + `backend/test-scripts/` + elle deneme. |
 
 ---
@@ -330,6 +341,8 @@ olduğu için iskelet oraya taşındı, kombin üretimi istemci tarafında anlı
 | `age` | INTEGER | |
 | `city` | VARCHAR(100) | Hava durumu için; **opsiyonel**, boşsa hava durumu hiç sorgulanmaz |
 | `password_hash` | VARCHAR(255) | **API yanıtlarında asla dönmez** |
+| `skin_tone_analysis` | JSONB | Gemini ten tonu analizi. **NULL = kullanıcı selfie yüklemedi** (özellik isteğe bağlı). `SAFE_COLUMNS` DIŞINDA |
+| `skin_tone_photo_url` | VARCHAR(500) | Selfie yolu (göreli). **HASSAS** — yalnızca sahibine, yalnızca kendi ucundan döner. `SAFE_COLUMNS` DIŞINDA |
 | `subscription_tier` | VARCHAR(20) | `'free'` — `free` \| `premium` |
 | `created_at` / `updated_at` | TIMESTAMP | `NOW()` |
 
@@ -670,6 +683,9 @@ ve kart favori kalbini, "Kirli" rozetini bu alanlardan çiziyor.
 | `PUT` | `/users/:id` | `{ name, email*, age, city, subscriptionTier }` |
 | `DELETE` | `/users/:id` | → `204`; tercih/kıyafet/kombinleri CASCADE ile siler |
 | `GET` | `/users/:id/stats` | Gardırop istatistik özeti (bkz. aşağısı) |
+| `GET` | `/users/skin-tone-analysis` | Ten tonu analizi (yoksa `null`) |
+| `POST` | `/users/skin-tone-analysis` | **multipart/form-data**, alan adı `image`. Selfie yükler ve analiz eder (senkron) |
+| `DELETE` | `/users/skin-tone-analysis` | Analizi ve selfie'yi kaldırır |
 
 `city` opsiyoneldir; boş/boşluk değer `NULL`'a düşer. **`PUT` tam değiştirmedir** —
 gönderilmeyen `city` (`name`, `age` gibi) `NULL` olur. Bu, `clothing-items`'taki
@@ -679,6 +695,44 @@ gönderilmeyen `city` (`name`, `age` gibi) `NULL` olur. Bu, `clothing-items`'tak
 `email` zorunlu, küçük harfe çevrilir ve biçimi doğrulanır; tekrarı `409` döner.
 `age` verilirse 0–120 arası tam sayı olmalıdır. `subscriptionTier` yalnızca
 `free` veya `premium`. **Yanıtta `password_hash` bulunmaz.**
+
+### Ten Tonu Analizi
+
+| Metod | Yol | Açıklama |
+|---|---|---|
+| `GET` | `/users/skin-tone-analysis` | Kullanıcının analizi; yoksa `{ "analiz": null, "foto_url": null }` |
+| `POST` | `/users/skin-tone-analysis` | Selfie yükler, Gemini'ye analiz ettirir, kaydeder |
+| `DELETE` | `/users/skin-tone-analysis` | Analizi ve selfie'yi siler |
+
+```json
+{"analiz":{"model":"gemini-3.6-flash","analiz_tarihi":"2026-08-23T…Z",
+  "veri":{"ten_tonu":"Sıcak","ten_rengi_tanimi":"Açık buğday teni",
+          "uyumlu_renkler":["Mercan","Şeftali","Zeytin Yeşili","Kiremit Rengi","Krem","Taba","Sıcak Sarı"],
+          "uyumsuz_renkler":["Buz Mavisi","Soğuk Gri","Neon Pembe"],
+          "uyumlu_metal_tonlari":["Altın"],
+          "genel_tavsiye":"Sıcak ve toprak tonlarını tercih ederek…"}},
+ "foto_url":"/uploads/69ec8377-….png"}
+```
+
+- **YOLDA `:id` YOKTUR — kimlik daima `req.userId`'den okunur.** Bilinçli:
+  selfie hassas veri ve "başkasının analizine bakma" ihtimalini yol seviyesinde
+  tamamen ortadan kaldırmak, her seferinde sahiplik karşılaştırmasından güvenli.
+- **`skinToneRoutes`, `userRoutes`'TAN ÖNCE mount edilmelidir** (`server.js`).
+  Sonra gelseydi `GET /users/:id` "skin-tone-analysis" metnini bir id sanıp
+  o handler'a düşürürdü. Test bunu ayrıca doğruluyor.
+- **Analiz yoksa `200` + `null` döner, `404` DEĞİL.** Özellik isteğe bağlıdır;
+  "henüz yapmadın" bir hata değildir.
+- **YÜZ TESPİT EDİLEMEZSE `400` + YÖNLENDİRİCİ MESAJ** ("Yüz görünmüyor.
+  Yüzünüzün net göründüğü, iyi aydınlatılmış bir fotoğrafla tekrar deneyin.").
+  Bu bir sistem arızası değil; Gemini'den `yuz_tespit_edildi: false` gelir,
+  hiçbir şey kaydedilmez ve yüklenen dosya geri alınır.
+- **HATA HÂLİNDE ESKİ ANALİZ VE ESKİ SELFIE KORUNUR.** Eski fotoğraf yalnızca
+  YENİ analiz veritabanına başarıyla yazıldıktan SONRA silinir — sıra tersine
+  olsaydı yazma patladığında kullanıcı ikisini birden kaybederdi.
+- **Çift tıklama ikinci Gemini çağrısı yapmaz:** kullanıcı başına in-flight
+  muhafızı var, ikinci istek `409` döner (ve o isteğin dosyası geri alınır).
+- Dosya kısıtları fotoğraf yüklemeyle aynı (jpg/png/webp, en fazla 5 MB) ve
+  dosya adı rastgele UUID'dir.
 
 ### Wardrobe Stats
 
@@ -997,6 +1051,13 @@ node test-scripts/analyze-existing-items.js              # yalnızca listeler
 node test-scripts/analyze-existing-items.js --uygula
 node test-scripts/analyze-existing-items.js --uygula --limit 3
 
+# Ten tonu analizi (43 kontrol: 33 birim + 7 uçtan uca + 3 gerçek Gemini).
+# --birim: yalnızca birim bölümü (sunucu ve anahtar GEREKTİRMEZ)
+# --kotasiz: gerçek Gemini bölümünü atlar
+node test-scripts/test-skin-tone.js
+node test-scripts/test-skin-tone.js --birim
+node test-scripts/test-skin-tone.js --kotasiz
+
 # Gemini Aşama 1 (20 kontrol). Birinci bölüm GEÇERLİ ANAHTAR OLMADAN da çalışır
 # (eksik/geçersiz anahtar yolları); analiz bölümü anahtar ve görsel ister.
 node test-scripts/test-gemini.js
@@ -1011,7 +1072,8 @@ node test-scripts/cleanup.js --all --user <uuid>     # bir kullanıcının TÜM 
 **Frontend'de de tek bir test scripti var** (`frontend/` klasöründen çalıştırılır):
 
 ```bash
-# Kombin kurma mantığı + makyaj önerisi — saf fonksiyon testleri (63 kontrol).
+# Kombin kurma mantığı + makyaj önerisi + ten tonu işareti — saf fonksiyon
+# testleri (73 kontrol).
 # SUNUCU, CHROMA VE ANAHTAR GEREKTİRMEZ: lib/outfitBuilder.js React'tan ve ağ
 # katmanından bağımsız olduğu için doğrudan node ile koşuyor. Asıl güvence:
 # vektör adaylarının temiz/kirli ve hava durumu filtrelerini ATLAYAMAMASI.
@@ -1164,6 +1226,23 @@ güncellensin diye; model emeklilikleri sık yaşanıyor (bkz. aşağıdaki uyar
 > `models?key=…` çıktısında `gemini-2.5-flash` görünüyor ama çağrıldığında
 > `404 — no longer available to new users` veriyor. Model değiştirirken listeye
 > bakmak yetmez, gerçekten **çağırarak** doğrulayın.
+
+**Ten tonu katmanı.** `UserRepository` (yeni iki metod) → `SkinToneService` →
+`SkinToneController` → `skinToneRoutes`. Zincir deponun desenine uyar; iki
+ayırt edici kuralı var:
+
+- **FIRLATIR** — `ClothingAnalysisService`'in tam TERSİ. Ölçüt yine aynı:
+  orada analiz kıyafet akışının üstüne konan bir zenginleştirmeydi ve kimse
+  beklemiyordu; burada kullanıcı selfie'sini yükleyip ekrana bakıyor, tek
+  beklediği şey bu sonuç. Sessizce boş dönmek yanlış olurdu.
+- **DOSYA YAŞAM DÖNGÜSÜ hata yollarında da doğru olmalı.** Gemini patlarsa,
+  yüz bulunamazsa, veritabanı yazması düşerse YENİ dosya geri alınır; ESKİ
+  dosya yalnızca yeni analiz başarıyla yazıldıktan SONRA silinir.
+
+`skin_tone_*` kolonları `UserRepository.SAFE_COLUMNS`'a **bilerek eklenmedi**:
+`/auth/me` ve `/users/:id` her yerde çağrılıyor, hassas selfie yolunu ve
+büyükçe analiz nesnesini oralarda taşımanın bir sebebi yok. Yalnızca kendi
+ucundan okunurlar; test bu sızıntıyı ayrıca kontrol eder.
 
 **Vektör katmanı (Aşama 3).** `config/chroma.js` istemciyi kurar (database.js /
 gemini.js ile aynı rol), `VectorRepository` yalnızca ChromaDB ile konuşur ve
@@ -1414,6 +1493,36 @@ gerekçeyle** iki sütunlu ızgaranın altında, tam genişlikte durur: sağ sü
 - Efekt `item.categoryId`'ye bağlıdır: kategori bilinmeden aynı-kategori araması
   yapılamaz, bu yüzden kayıt yüklenene kadar istek atılmaz.
 
+**Ten tonu (`SkinToneSection` + `SkinTonePanel`).** Bölüm Profil sayfasında,
+`WardrobeStats`'in altında; kendi yükleme/hata durumunu sürer, hatası sayfanın
+geri kalanını etkilemez.
+
+- **Fotoğraf seçilir seçilmez analiz başlar** — ayrı bir "Analiz Et" düğmesi
+  fazladan bir adım olurdu, kullanıcı zaten bunun için seçti.
+- **Hata hâlinde seçilen dosya TEMİZLENİR.** Aksi hâlde `PhotoPicker` başarısız
+  fotoğrafın önizlemesinde takılı kalıyor ve kullanıcı yenisini seçemiyordu —
+  oysa mesaj tam da "başka bir fotoğrafla tekrar dene" diyor (bu hata tarayıcı
+  testinde yakalandı).
+- **Renk daireleri `lib/colors.js > resolveColorHex` ile çizilir.** Gemini
+  serbest metin üretiyor ("Mercan", "Zeytin Yeşili") ve bunlar `CLOTHING_COLORS`
+  paletinde yok; ek bir AI-renk sözlüğü tutuluyor. Tanınmayan renk sessizce
+  dairesiz düz etikete düşer — uydurma bir renk göstermektense adını yazmak doğru.
+  Bu sözlük bir PALET DEĞİLDİR: kıyafet kaydına bu renkler yazılmaz.
+- **GİZLİLİK: selfie yalnızca bu bölümde, sahibine gösterilir.** Paylaşım
+  görseline, kombin kartlarına ya da başka bir listeye girmez; test bunu
+  Kombin Öner sayfasının HTML'inde arayarak doğrular.
+
+**"✓ Ten tonuna uygun" işareti (`lib/skinTone.js > matchesSkinTone`).** Kombin
+Öner'de, eşleşen kartın ALTINDA. Kartın kendisine konmadı çünkü `ClothingCard`
+paylaşılan bir bileşen ve bu bilgi Gardırop'ta anlamsız.
+
+**YALNIZCA BİLGİLENDİRİCİDİR:** hiçbir parçayı elemez, sıralamayı değiştirmez,
+öneriyi etkilemez — test bunu ayrıca doğrular. Karşılaştırma "içeren" mantığıyla
+yapılır çünkü iki taraf farklı biçimde yazıyor (kullanıcı `"Sıcak"`, kıyafet
+`["Sıcak ten", "Tüm Ten Tonları"]`); "tüm/her ten" gibi ifadeler her tona uyar.
+Türkçe küçültme (`toLocaleLowerCase('tr-TR')`) şart: varsayılan `toLowerCase`
+`"SICAK"` → `"sicak"` üretir ve eşleşme kaçardı.
+
 **AI analizi (`AiAnalysisPanel`).** Kıyafet Detay sayfasında iki sütunlu ızgaranın
 **ALTINDA, tam genişlikte** durur; sağ sütun `md` üstünde yarım genişliktir ve
 iki sütunlu bilgi kartları oraya sıkışırdı. `ai_analysis` boşsa bileşen `null`
@@ -1606,6 +1715,124 @@ fotoğraf sorunu teyit edildikten sonra üç yerden de kaldırılabilir.
 
 > Bundan sonraki her çalışma buraya tarihiyle işlenir: eklenen özellikler, düzeltilen
 > hatalar, alınan mimari kararlar. En yeni kayıt en üstte.
+
+### 2026-08-23 — Gemini Entegrasyonu — Ten Tonu Analizi
+- **Ne eklendi:** Kullanıcı Profil > "Ten Tonu Analizim" bölümünden bir selfie
+  yükler; Gemini ten tonunu (Sıcak/Soğuk/Nötr), yakışan 6-8 rengi, kaçınılacak
+  renkleri, metal tonunu ve kısa bir tavsiyeyi döndürür. Sonuç renk daireleriyle
+  gösterilir; yeniden analiz ve silme mümkün.
+- **Migration `006_add_skin_tone.sql`:** `users.skin_tone_analysis` (JSONB) ve
+  `users.skin_tone_photo_url` (VARCHAR(500)). İkisi de **nullable ve
+  varsayılansız** — özellik TAMAMEN İSTEĞE BAĞLI, NULL "henüz yapmadı" demektir
+  ve hiçbir akışı bloklamaz.
+- **Yeni uçlar** (`GET` / `POST` / `DELETE` `/api/users/skin-tone-analysis`),
+  yeni katman zinciri `SkinTone*` (repository metodları → service → controller
+  → routes). SENKRON: kullanıcı ekranda bekliyor.
+- **YOLDA `:id` YOK — kimlik daima `req.userId`'den.** Bilinçli: selfie hassas
+  veri ve "başkasının analizine bakma" ihtimalini yol seviyesinde tamamen
+  ortadan kaldırmak, her istekte sahiplik karşılaştırmasından güvenli.
+- **ROUTE SIRASI TUZAĞI:** `skinToneRoutes`, `userRoutes`'TAN ÖNCE mount
+  edilmelidir. Sonra gelseydi `GET /users/:id` "skin-tone-analysis" metnini bir
+  id sanıp o handler'a düşürürdü. `server.js`'te yorumlandı, test doğruluyor.
+- **SÖZLEŞME: SkinToneService FIRLATIR** — `ClothingAnalysisService`'in tam
+  tersi, ölçüt yine aynı: orada analiz kıyafet akışının üstüne konan bir
+  zenginleştirmeydi ve kimse beklemiyordu; burada kullanıcı selfie'sini yükleyip
+  sonucu bekliyor.
+- **YÜZ TESPİT EDİLEMEZSE HATA DEĞİL, YÖNLENDİRME.** Prompt'ta
+  `yuz_tespit_edildi` alanı ŞEMANIN PARÇASI: fotoğraf bulanıksa ya da yüz yoksa
+  modelin UYDURMASINI değil bunu SÖYLEMESİNİ istiyoruz ("tahmin yürütme").
+  Servis bunu görünce hiçbir şey kaydetmeden `400` + *"Yüz görünmüyor.
+  Yüzünüzün net göründüğü, iyi aydınlatılmış bir fotoğrafla tekrar deneyin."*
+  döner. Gerçek Gemini ile doğrulandı: yüz içermeyen bir kıyafet fotoğrafı
+  (gövde/kol teni görünüyor ama yüz yok) tam olarak bu yola düştü.
+- **DOSYA YAŞAM DÖNGÜSÜ hata yollarında da doğru.** Gemini patlarsa, yüz
+  bulunamazsa, veritabanı yazması düşerse YENİ dosya geri alınır (öksüz selfie
+  kalmaz); ESKİ selfie yalnızca yeni analiz başarıyla YAZILDIKTAN SONRA silinir
+  — sıra tersine olsaydı yazma patladığında kullanıcı ikisini birden kaybederdi.
+- **Çift tıklama ikinci Gemini çağrısı yapmaz:** kullanıcı başına in-flight
+  muhafızı (`409`), ve o isteğin dosyası da geri alınır. İşaret İLK await'ten
+  ÖNCE konuyor (Aşama 2'de yaşanan hatanın aynısını tekrarlamamak için).
+- **YAKALANAN HATA — uyumlu renkler 4'e kırpılıyordu.** İlk gerçek çağrıda
+  prompt 6-8 renk isterken yanıt 4 renkle döndü: `listeyiNormalize` kıyafet
+  şemasının `MAX_LIST_ITEMS = 4` sınırını paylaşıyordu ve model doğru sayıda
+  renk döndürse bile SESSİZCE kırpıyordu. Fonksiyona `maxItems` parametresi
+  eklendi; ten tonu 8'e kadar renk taşıyor, kıyafet şemasının 4'lük sınırı
+  (kartlar kısa etiket listesi gösteriyor) aynen korundu.
+- **YAKALANAN HATA — ilk gerçek çağrı 30 sn'de zaman aşımına düştü.** Ölçülen
+  dalgalanma modelin bilinen davranışı (Aşama 2'de de yaşanmıştı) ve serviste
+  yeniden deneme yoktu. `ClothingAnalysisService` ile aynı disiplinde sınırlı
+  yeniden deneme eklendi (`MAX_ATTEMPTS = 2`, yalnızca GEÇİCİ hatalar; kota ve
+  geçersiz anahtar hiç denenmez). Sonraki koşular 23-29 sn'de başarılı.
+- **YAKALANAN HATA (arayüz) — başarısız denemeden sonra fotoğraf seçici
+  kilitleniyordu.** Seçilen dosya hata yolunda temizlenmediği için `PhotoPicker`
+  başarısız fotoğrafın önizlemesinde takılı kalıyor, kullanıcı yenisini
+  seçemiyordu — oysa mesaj tam da "başka bir fotoğrafla tekrar dene" diyor.
+  Tarayıcı testi yakaladı; hata yolunda `secilenDosya` sıfırlanıyor.
+- **GİZLİLİK:**
+  - `skin_tone_*` kolonları `UserRepository.SAFE_COLUMNS`'a **bilerek eklenmedi**:
+    `/auth/me` ve `/users/:id` her yerde çağrılıyor, hassas selfie yolunu orada
+    taşımanın sebebi yok. Test bu sızıntıyı ayrıca kontrol ediyor.
+  - Selfie **paylaşım görseline, kombin kartlarına, hiçbir listeye girmiyor**;
+    test bunu Kombin Öner sayfasının HTML'inde arayarak doğruluyor.
+  - **"Analizi Sil"** düğmesi var: hassas veri için silebilmek pazarlık konusu değil.
+  - **Kalan risk `/uploads` statik servisi:** dosya adı tahmin edilemez UUID ve
+    yol yalnızca sahibine dönüyor (kıyafet fotoğraflarıyla aynı mekanizma) ama
+    bir selfie için bu daha zayıf bir güvence. "Eksikler" tablosuna işlendi.
+- **ENTEGRASYON — "✓ Ten tonuna uygun" işareti.** Kombin Öner'de, eşleşen kartın
+  ALTINDA (kartın kendisine konmadı: `ClothingCard` paylaşılan bir bileşen ve bu
+  bilgi Gardırop'ta anlamsız). **YALNIZCA BİLGİLENDİRİCİ:** hiçbir parçayı
+  elemez, sıralamayı değiştirmez, öneriyi etkilemez — test bunu ayrıca kanıtlıyor.
+  Ten tonu çağrısının kendi try/catch'i var ve hatası sayfayı etkilemez
+  (hava durumuyla aynı ilke).
+- **Karşılaştırma "içeren" mantığıyla** çünkü iki taraf farklı yazıyor: kullanıcı
+  `"Sıcak"`, kıyafet `["Sıcak ten", "Tüm Ten Tonları"]`. "tüm/her ten" ifadeleri
+  her tona uyar. **Türkçe küçültme şart** (`toLocaleLowerCase('tr-TR')`):
+  varsayılan `toLowerCase` `"SICAK"` → `"sicak"` üretir ve eşleşme kaçardı.
+- **Renk daireleri için `lib/colors.js > resolveColorHex` eklendi.** Gemini
+  serbest metin üretiyor ("Mercan", "Zeytin Yeşili", "Kiremit Rengi") ve bunlar
+  `CLOTHING_COLORS` paletinde yok; ek bir AI-renk sözlüğü tutuluyor. Tanınmayan
+  renk sessizce dairesiz düz etikete düşer. Bu sözlük bir PALET DEĞİLDİR —
+  kıyafet kaydına bu renkler yazılmaz, hiçbir seçicide görünmez.
+- **`api.js`'te `requestMultipart` ayıklandı:** dosya yükleyen iki çağrı
+  (kıyafet fotoğrafı + selfie) aynı yolu paylaşıyor; ikincisi zaman aşımı da
+  taşıyor (90 sn, sunucunun kendi en kötü senaryosunun üstünde).
+- **Doğrulama — `backend/test-scripts/test-skin-tone.js`, 43 kontrol:**
+  - *Birim (33) SUNUCU VE ANAHTAR GEREKTİRMEZ* (`--birim`): şema/prompt
+    kontrolleri; başarılı analizin kaydı; **yüz bulunamayınca hiçbir şey
+    yazılmaması ve dosyanın geri alınması**; **Gemini hatasında eski analizin
+    ve eski selfie'nin korunması**; geçici hatanın denenip kalıcı hatanın
+    denenmemesi; eşzamanlı ikinci isteğin 409 ile tek çağrıya inmesi; eski
+    selfie'nin yalnızca başarılı yazmadan sonra silinmesi; silme; dosyasız istek.
+  - *HTTP (7):* 401, analizi olmayan kullanıcıda 200 + null, **yolun
+    `/users/:id` ile çakışmaması**, dosyasız/görsel olmayan dosya 400 ve
+    **`/auth/me` ile `/users/:id` yanıtlarında skin_tone alanlarının OLMAMASI**.
+  - *Gerçek Gemini (3):* yüz içermeyen gerçek fotoğrafta 400 + yönlendirme
+    (500 değil), öksüz dosya kalmaması, kaydın bozulmaması.
+- **Doğrulama — gerçek tarayıcıda 43 kontrol (Playwright + sistem Chrome),
+  geçici test kullanıcısıyla:** davet ekranı ve "isteğe bağlı" notu; **analiz
+  yokken Ana Sayfa / Gardırop / Kombin Öner'in normal çalışması**; hata yolunda
+  nazik yönlendirme + davet ekranının kullanılabilir kalması + veritabanına
+  yazılmaması; **gerçek Gemini ile başarılı analiz**, 8 renk dairesi, selfie
+  önizlemesi, gizlilik notu, kaynak dipnotu, yenilemede korunma; gizlilik
+  kontrolleri; **ten tonu işaretinin uyumlu parçada çıkması ve analizi olmayan
+  kullanıcıda HİÇ çıkmaması**; silme; karanlık mod ve 390px'te taşma olmaması;
+  temiz konsol.
+- **Doğrulama — `frontend/test-scripts/test-outfit-builder.mjs` 63 → 73 kontrol:**
+  `matchesSkinTone` (eşleşme, "Tüm Ten Tonları", Türkçe büyük harf, analizsiz
+  parça, kullanıcının tonu yokken hiç işaret olmaması) ve **ten tonu bilgisinin
+  kombin kurulumunu ETKİLEMEDİĞİ**.
+- **GERÇEK GEMİNİ SONUCU** (sentetik portre, çizilen palet: sıcak/açık buğday):
+  *"Sıcak / Açık buğday teni"*, uyumlu → Mercan, Şeftali, Zeytin Yeşili, Taba,
+  Krem, Kiremit Rengi, Hardal Sarı; uzak dur → Buz Mavisi, Soğuk Gri, Neon
+  Pembe; metal → Altın. Model çizilen tonu doğru okudu, genel bir cevap vermedi.
+  **Gerçek bir selfie ile denenmedi** (elde yok) — "Eksikler"e işlendi.
+- Regresyon: `test-all-endpoints` 72/72, `test-auth` 48/48, `test-stats` 60/60,
+  `test-item-outfits` 27/27, `test-clean-status` 26/26, `test-vector` 82/82,
+  `test-outfit-rag` 69/69, `test-ai-analysis --kotasiz` 67/67,
+  `test-outfit-builder` 73/73, lint + build temiz.
+- **Temizlik:** test kullanıcıları ve sentetik analiz silindi; kullanıcı
+  silmenin diskte öksüz fotoğraf bıraktığı görüldü (önceden beri var olan
+  davranış) — 20 öksüz dosya toplandı ve "Eksikler"e işlendi.
 
 ### 2026-08-22 — Kıyafet Detay: "Yeniden Analiz Et" düğmesi
 - **Ne eklendi:** AI analiz panelinin altında ince outline bir düğme. Tıklanınca

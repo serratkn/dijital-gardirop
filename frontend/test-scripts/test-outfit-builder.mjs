@@ -21,6 +21,7 @@ import {
   pickSeedItem,
   variantDepth,
 } from '../src/lib/outfitBuilder.js'
+import { matchesSkinTone } from '../src/lib/skinTone.js'
 
 let passed = 0
 let failed = 0
@@ -437,6 +438,48 @@ console.log('\n10) isSameOutfit')
   check('Aynı sıradaki aynı parçalar eşit', isSameOutfit([a, b], [a, b]))
   check('Farklı sıra eşit değil', !isSameOutfit([a, b], [b, a]))
   check('Farklı uzunluk eşit değil', !isSameOutfit([a], [a, b]))
+}
+
+// ---------------------------------------------------------------
+console.log('\n11) matchesSkinTone — ten tonu işareti (yalnızca bilgilendirici)')
+
+{
+  const parcaTon = (tonlar) => ({ aiAnalysis: { veri: { uyumluluk: { ten_tonu: tonlar } } } })
+
+  check('Kullanıcı tonu parçanınkiyle eşleşiyor', matchesSkinTone(parcaTon(['Sıcak ten']), 'Sıcak'))
+  check('Eşleşmeyen ton işaret almıyor', !matchesSkinTone(parcaTon(['Sıcak ten']), 'Soğuk'))
+  check(
+    '"Tüm Ten Tonları" HER tona uyuyor',
+    matchesSkinTone(parcaTon(['Tüm Ten Tonları']), 'Soğuk') &&
+      matchesSkinTone(parcaTon(['Tüm Ten Tonları']), 'Sıcak'),
+  )
+  check(
+    'Türkçe büyük harf doğru küçültülüyor (SICAK -> sıcak)',
+    matchesSkinTone(parcaTon(['SICAK TEN']), 'Sıcak'),
+  )
+  check('Listedeki herhangi bir eşleşme yeterli', matchesSkinTone(parcaTon(['Buğday', 'Nötr ten']), 'Nötr'))
+  check('Analizi olmayan parça işaret almıyor', !matchesSkinTone(parca(), 'Sıcak'))
+  check('Boş uyumluluk listesi işaret almıyor', !matchesSkinTone(parcaTon([]), 'Sıcak'))
+  check(
+    'Kullanıcının ten tonu yoksa HİÇBİR parça işaret almıyor',
+    !matchesSkinTone(parcaTon(['Tüm Ten Tonları']), null) &&
+      !matchesSkinTone(parcaTon(['Sıcak ten']), ''),
+  )
+  check('Alakasız değerler eşleşmiyor', !matchesSkinTone(parcaTon(['Açık Ten', 'Buğday']), 'Soğuk'))
+
+  // KOMBİN MANTIĞINA KARIŞMADIĞININ kanıtı: işaret hesabı kombini değiştirmiyor.
+  const seed = parca({ name: 'seed', category: 'Üst' })
+  const alt = parca({ name: 'alt', category: 'Alt' })
+  const oncesi = buildOutfitFromCandidates({
+    seedItem: seed,
+    candidatesByCategory: new Map([['Alt', [alt]]]),
+    cleanItems: [seed, alt],
+    seasons: null,
+  })
+  check(
+    'Ten tonu bilgisi kombin kurulumunu ETKİLEMİYOR (saf gösterim katmanı)',
+    oncesi.items.length === 2 && oncesi.vectorCount === 1,
+  )
 }
 
 console.log(`\n${'='.repeat(46)}`)
