@@ -3,6 +3,7 @@ import { Link, useNavigate, useParams } from 'react-router-dom'
 import { RefreshCw, Sparkles, WashingMachine } from 'lucide-react'
 import AiAnalysisPanel from '../components/AiAnalysisPanel'
 import ClothingCard from '../components/ClothingCard'
+import QuickAddModal from '../components/QuickAddModal'
 import Button from '../components/ui/Button'
 import Modal from '../components/ui/Modal'
 import PhotoPicker from '../components/ui/PhotoPicker'
@@ -56,6 +57,7 @@ function ClothingDetail() {
   const [isCleanPending, setIsCleanPending] = useState(false)
   const [isConfirmOpen, setIsConfirmOpen] = useState(false)
   const [isDeleting, setIsDeleting] = useState(false)
+  const [isEditOpen, setIsEditOpen] = useState(false)
   const [actionError, setActionError] = useState('')
   const [isPhotoEditing, setIsPhotoEditing] = useState(false)
   const [isPhotoBusy, setIsPhotoBusy] = useState(false)
@@ -380,6 +382,26 @@ function ClothingDetail() {
     }
   }
 
+  // QuickAddModal düzenleme modunda kaydettikten sonra çağrılır. Kaydı
+  // YENİDEN OKUYORUZ (PATCH'lerin yaptığı gibi kısmi state yaması değil):
+  // PUT tüm metin alanlarını birden değiştirebilir (kategori değişince ikon
+  // ve "category" adı da değişir), o yüzden en güvenlisi sunucudaki gerçek
+  // hâli tekrar çekmek. Fotoğraf bu akışın parçası olmadığı için imageUrl
+  // etkilenmez — backend zaten PUT'ta image_url'e dokunmuyor.
+  const handleItemEdited = async () => {
+    try {
+      const [categoryRows, itemRow] = await Promise.all([fetchCategories(), fetchClothingItem(id)])
+      const updated = toClothingItem(itemRow, toCategoryNameMap(categoryRows))
+      setItem(updated)
+      setIsFavorite(updated.isFavorite)
+      setIsClean(updated.isClean ?? true)
+    } catch (error) {
+      // Kayıt zaten güncellendi (PUT 200 döndü); yalnızca EKRANI tazeleme
+      // başarısız oldu. Sayfa eski veriyle kalır, kritik bir hata değil.
+      console.error('Güncel kıyafet bilgisi alınamadı:', error)
+    }
+  }
+
   if (isLoading) {
     return (
       <div className="min-h-screen bg-ivory">
@@ -625,13 +647,22 @@ function ClothingDetail() {
 
             {actionError && <p className="mt-4 text-sm text-burgundy">{actionError}</p>}
 
-            <button
-              type="button"
-              onClick={() => setIsConfirmOpen(true)}
-              className="mt-10 text-xs text-burgundy/60 transition-colors hover:text-burgundy"
-            >
-              Sil
-            </button>
+            <div className="mt-10 flex items-center gap-5">
+              <button
+                type="button"
+                onClick={() => setIsEditOpen(true)}
+                className="text-xs text-ink/60 transition-colors hover:text-accent-ink"
+              >
+                Düzenle
+              </button>
+              <button
+                type="button"
+                onClick={() => setIsConfirmOpen(true)}
+                className="text-xs text-burgundy/60 transition-colors hover:text-burgundy"
+              >
+                Sil
+              </button>
+            </div>
           </div>
         </div>
 
@@ -725,6 +756,15 @@ function ClothingDetail() {
           </section>
         )}
       </div>
+
+      {/* Düzenleme modu: item verilince QuickAddModal PhotoPicker'ı GİZLER
+          (fotoğraf ayrı bir akış) ve PUT'a gider. onSaved kaydı yeniden okur. */}
+      <QuickAddModal
+        isOpen={isEditOpen}
+        onClose={() => setIsEditOpen(false)}
+        onSaved={handleItemEdited}
+        item={item}
+      />
 
       <Modal isOpen={isConfirmOpen} onClose={() => !isDeleting && setIsConfirmOpen(false)}>
         <h2 className="font-display text-2xl italic text-ink">Bu parçayı sil</h2>

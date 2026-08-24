@@ -68,11 +68,18 @@ class ClothingItemService {
     }
 
     try {
-      // isClean gönderilmediyse mevcut değer korunur. true'ya düşmek, herhangi bir
-      // düzenlemenin kirli bir parçayı sessizce temiz yapması anlamına gelirdi.
       return await this.clothingItemRepository.update(id, {
         ...data,
+        // isClean gönderilmediyse mevcut değer korunur. true'ya düşmek, herhangi bir
+        // düzenlemenin kirli bir parçayı sessizce temiz yapması anlamına gelirdi.
         isClean: this.#normalizeIsClean(data.isClean, existingItem.is_clean),
+        // imageUrl BU UÇTAN ASLA DEĞİŞMEZ. Fotoğraf yönetimi ayrı, adanmış
+        // uçların işi (POST/DELETE .../image); bu uç yalnızca metin alanlarını
+        // günceller. undefined/null bırakılsaydı repository'nin SQL'i
+        // image_url'i NULL'a düşürürdü — BU HATA GERÇEKTEN YAŞANDI (gerçek
+        // bir kıyafetin fotoğrafı bu yüzden bir kez kayboldu, elle geri
+        // yüklendi) ve bu satır tam olarak onu önlüyor.
+        imageUrl: existingItem.image_url,
       })
     } catch (error) {
       throw translateForeignKeyError(error)

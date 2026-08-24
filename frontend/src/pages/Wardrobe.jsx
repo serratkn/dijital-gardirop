@@ -234,7 +234,7 @@ function Wardrobe() {
       <QuickAddModal
         isOpen={isAddModalOpen}
         onClose={() => setIsAddModalOpen(false)}
-        onCreated={() => loadWardrobe({ showSkeleton: false })}
+        onSaved={() => loadWardrobe({ showSkeleton: false })}
       />
     </div>
   )

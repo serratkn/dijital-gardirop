@@ -1,9 +1,14 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useLayoutEffect, useState } from 'react'
 import Modal from './ui/Modal'
 import Button from './ui/Button'
 import ColorPicker from './ui/ColorPicker'
 import PhotoPicker from './ui/PhotoPicker'
-import { createClothingItem, fetchCategories, uploadClothingItemImage } from '../lib/api'
+import {
+  createClothingItem,
+  fetchCategories,
+  updateClothingItem,
+  uploadClothingItemImage,
+} from '../lib/api'
 import { DEFAULT_COLOR } from '../lib/colors'
 import { DEFAULT_SEASON, SEASONS } from '../lib/seasons'
 
@@ -14,7 +19,16 @@ const fieldInput =
 // clothing_items.name kolonu VARCHAR(200)
 const NAME_MAX_LENGTH = 200
 
-function QuickAddModal({ isOpen, onClose, onCreated }) {
+// `item` verilirse DÜZENLEME MODU: mevcut değerlerle dolu açılır, kaydetme
+// PUT'a gider ve FOTOĞRAF SEÇİCİ HİÇ RENDER EDİLMEZ — fotoğraf yönetimi ayrı,
+// adanmış bir akıştır (Kıyafet Detay'daki "Fotoğrafı Değiştir"). Bu modal
+// düzenleme modunda ne fotoğraf yükler ne de image_url'e dokunur; backend
+// zaten PUT'ta image_url'i asla değiştirmiyor (bkz. ClothingItemService), ama
+// aynı disiplin burada da korunuyor — modal iki farklı fotoğraf mekanizmasını
+// karıştırmıyor.
+function QuickAddModal({ isOpen, onClose, onSaved, item = null }) {
+  const isEditMode = Boolean(item)
+
   const [categories, setCategories] = useState([])
   const [name, setName] = useState('')
   const [categoryId, setCategoryId] = useState('')
@@ -53,19 +67,40 @@ function QuickAddModal({ isOpen, onClose, onCreated }) {
     }
   }, [isOpen])
 
-  const resetForm = () => {
-    setName('')
-    setColor(DEFAULT_COLOR)
-    setPhotoFile(null)
-    setIsClean(true)
-    setSeason(DEFAULT_SEASON)
+  // Form her AÇILIŞTA yeniden tohumlanır (Modal kapalıyken de bileşen
+  // mount'ta kalır — Modal içeriği koşullu render eder, QuickAddModal'ın
+  // kendisi değil; bu yüzden state, bir sonraki açılışa kadar olduğu gibi
+  // durur ve BURADA elle sıfırlanmalı). `item` varsa onun değerleriyle,
+  // yoksa boş/varsayılan create-mode değerleriyle doldurulur.
+  //
+  // useLAYOUTEffect BİLEREK: normal useEffect boyamadan SONRA çalışır, yani
+  // düzenleme modunda kirli bir parça açıldığında bir kare boyunca "Temiz"
+  // basılıymış gibi GÖRÜNÜR (isClean'in ilk değeri useState(true)'dur), sonra
+  // "Kirli"ye döner — kısa ama gerçek bir görsel çakma (flash of wrong
+  // content). useLayoutEffect DOM güncellemesinden hemen sonra, tarayıcı
+  // boyamadan ÖNCE çalışır; kullanıcı yanlış durumu hiç görmez.
+  useLayoutEffect(() => {
+    if (!isOpen) return
+
+    if (item) {
+      setName(item.name ?? '')
+      setCategoryId(item.categoryId ? String(item.categoryId) : '')
+      setColor(item.color || DEFAULT_COLOR)
+      setSeason(item.season || DEFAULT_SEASON)
+      setIsClean(item.isClean ?? true)
+    } else {
+      setName('')
+      setColor(DEFAULT_COLOR)
+      setPhotoFile(null)
+      setIsClean(true)
+      setSeason(DEFAULT_SEASON)
+    }
     setErrorMessage('')
     setSavingLabel('')
-  }
+  }, [isOpen, item])
 
   const handleClose = () => {
     if (isSaving) return
-    resetForm()
     onClose()
   }
 
@@ -83,6 +118,35 @@ function QuickAddModal({ isOpen, onClose, onCreated }) {
 
     setIsSaving(true)
     setErrorMessage('')
+
+    if (isEditMode) {
+      setSavingLabel('Güncelleniyor...')
+      try {
+        // imageUrl BİLEREK gönderilmiyor: backend yalnızca gönderilen
+        // alanları günceller değil, TAM bu alan kümesini bekler ama
+        // image_url'e her koşulda dokunmaz (mevcut fotoğrafı korur).
+        await updateClothingItem(item.id, {
+          categoryId: Number(categoryId),
+          name: name.trim(),
+          color,
+          season,
+          isClean,
+        })
+      } catch (error) {
+        console.error('Parça güncellenemedi:', error)
+        setErrorMessage(error.message)
+        setIsSaving(false)
+        setSavingLabel('')
+        return
+      }
+
+      await onSaved?.()
+      onClose()
+      setIsSaving(false)
+      setSavingLabel('')
+      return
+    }
+
     setSavingLabel('Kaydediliyor...')
 
     let created
@@ -110,7 +174,7 @@ function QuickAddModal({ isOpen, onClose, onCreated }) {
         await uploadClothingItemImage(created.id, photoFile)
       } catch (error) {
         console.error('Fotoğraf yüklenemedi:', error)
-        await onCreated?.()
+        await onSaved?.()
         setIsSaving(false)
         setSavingLabel('')
         setPhotoFile(null)
@@ -121,24 +185,27 @@ function QuickAddModal({ isOpen, onClose, onCreated }) {
       }
     }
 
-    resetForm()
     // Listeyi tazeleme sorumluluğu üst bileşene ait.
-    await onCreated?.()
+    await onSaved?.()
     onClose()
     setIsSaving(false)
   }
 
   return (
     <Modal isOpen={isOpen} onClose={handleClose}>
-      <h2 className="font-display text-3xl italic text-ink">Yeni Parça</h2>
+      <h2 className="font-display text-3xl italic text-ink">
+        {isEditMode ? 'Parçayı Düzenle' : 'Yeni Parça'}
+      </h2>
 
       <form onSubmit={handleSave} className="mt-6 space-y-5">
-        <PhotoPicker
-          file={photoFile}
-          onSelect={setPhotoFile}
-          onClear={() => setPhotoFile(null)}
-          disabled={isSaving}
-        />
+        {!isEditMode && (
+          <PhotoPicker
+            file={photoFile}
+            onSelect={setPhotoFile}
+            onClear={() => setPhotoFile(null)}
+            disabled={isSaving}
+          />
+        )}
 
         <div>
           <label className={fieldLabel}>Parça Adı</label>
@@ -238,7 +305,11 @@ function QuickAddModal({ isOpen, onClose, onCreated }) {
             İptal
           </Button>
           <Button type="submit" variant="primary" disabled={isSaving} className="flex-1">
-            {isSaving ? savingLabel || 'Kaydediliyor...' : 'Kaydet'}
+            {isSaving
+              ? savingLabel || (isEditMode ? 'Güncelleniyor...' : 'Kaydediliyor...')
+              : isEditMode
+                ? 'Güncelle'
+                : 'Kaydet'}
           </Button>
         </div>
       </form>

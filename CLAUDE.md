@@ -260,8 +260,10 @@ olduğu için iskelet oraya taşındı, kombin üretimi istemci tarafında anlı
 - **Kombinlerim** — kayıtlı kombinler; parçaları, tarihi, favori, **"Bugün Giydim"**
   (`times_worn` sayacını atomik artırır) ve silme işlemleriyle
 - **Kıyafet Detay** — görüntüleme, favori, onaylı silme, fotoğraf yönetimi,
-  **o parçanın geçtiği kombinlerin listesi** ve **"Buna Benzer Diğer Parçalar"**
-  (aynı kategoriden en yakın 4 komşu; benzer parça yoksa bölüm hiç görünmez)
+  **düzenleme** (isim/kategori/renk/sezon/temiz-kirli; fotoğraf bu akışın DIŞINDA,
+  ayrı bir mekanizma), **o parçanın geçtiği kombinlerin listesi** ve
+  **"Buna Benzer Diğer Parçalar"** (aynı kategoriden en yakın 4 komşu; benzer
+  parça yoksa bölüm hiç görünmez)
 - **Otomatik AI analizi** — bir parçaya fotoğraf yüklendiğinde Gemini, **arka planda**
   (kullanıcı beklemeden) kategoriye özgü bir şemayla analiz eder; sonuç
   `clothing_items.ai_analysis` (JSONB) kolonuna yazılır ve Kıyafet Detay'daki
@@ -305,7 +307,6 @@ olduğu için iskelet oraya taşındı, kombin üretimi istemci tarafında anlı
 | **Token yenileme yok** | Tek bir access token (varsayılan 7 gün) kullanılır; refresh token yoktur, süre dolunca yeniden giriş gerekir. |
 | **Fotoğraflar yerel diskte** | `backend/uploads/` altında tutulur; çok sunuculu bir kurulumda paylaşılan depolamaya (S3 vb.) taşınması gerekir. Dosyalar `/uploads` yolundan **token'sız** servis edilir — ad tahmin edilemez UUID olduğu için kabul edilebilir sayıldı. |
 | **Fotoğraf boyutlandırma yok** | Yüklenen görsel olduğu gibi saklanır; küçük resim (thumbnail) üretilmez. Native tarafta Capacitor `width: 1600` ile ön küçültme yapar, web'de böyle bir sınır yoktur. |
-| **Kıyafet düzenleme yok** | `PUT /api/clothing-items/:id` ucu hazır ama arayüzde düzenleme akışı yok — QuickAddModal'ı "düzenleme modu"na taşımak gerekir; bu tek başına bir form/akış değişikliği olduğu için ayrı bir çalışma olarak bırakıldı. |
 | **Bildirimler / Yardım & Destek** | "Yakında" sayfalarıdır, işlevleri yoktur. |
 | **Paylaşım indirmesi mobilde denenmedi** | Görsel üretimi platformdan bağımsızdır ama indirme `<a download>` ile yapılır; Android WebView'de çalışmazsa Capacitor Filesystem/Share eklentisine geçilmelidir. Hata hâlinde kullanıcıya mesaj gösterilir, uygulama çökmez. |
 | **Gemini ücretsiz kotası günde 20 istek** | Ölçüldü (`GenerateRequestsPerDayPerProjectPerModel-FreeTier`, limit 20, `gemini-3.6-flash`). Kota dolduğunda analiz sessizce atlanır ve parça analizsiz kalır; **kendiliğinden yeniden deneyen bir mekanizma yoktur** — `analyze-existing-items.js --uygula` ertesi gün elle çalıştırılır. Gerçek kullanım ücretli plan ister. |
@@ -785,7 +786,7 @@ istemcide hiçbir toplama yapılmaz.
 | `GET` | `/clothing-items?userId=*&categoryId=` | `categoryId` opsiyonel filtre; `created_at DESC` sıralı |
 | `GET` | `/clothing-items/:id` | Silinmişse `404` |
 | `POST` | `/clothing-items` | `{ userId*, categoryId*, name*, color, brand, season, imageUrl, isClean }` → `201` |
-| `PUT` | `/clothing-items/:id` | `{ categoryId*, name*, color, brand, season, imageUrl, isClean }` |
+| `PUT` | `/clothing-items/:id` | `{ categoryId*, name*, color, brand, season, isClean }` — **fotoğraf bu ucun işi değildir** |
 | `DELETE` | `/clothing-items/:id` | **Soft delete** → `204` |
 | `PATCH` | `/clothing-items/:id/favorite` | Favori durumunu tersine çevirir (atomik) |
 | `PATCH` | `/clothing-items/:id/clean-status` | Temiz/kirli durumunu tersine çevirir (atomik) |
@@ -799,6 +800,18 @@ istemcide hiçbir toplama yapılmaz.
 yapılmaz (`"false"` metni `true` olurdu). `POST`'ta belirtilmezse parça **temiz** sayılır.
 `PUT`'ta belirtilmezse **mevcut değer korunur** — aksi hâlde herhangi bir düzenleme kirli
 bir parçayı sessizce temiz yapardı.
+
+**`PUT` FOTOĞRAFA ASLA DOKUNMAZ — payload'da `imageUrl` gönderilse bile.**
+`ClothingItemService.updateItem` gelen veriden bağımsız olarak `image_url`'i
+her zaman `existingItem.image_url` ile YENİDEN YAZAR. Fotoğraf yönetimi tamamen
+ayrı, adanmış uçların işidir (`POST`/`DELETE .../image`). **YAKALANAN HATA:**
+kıyafet düzenleme özelliği eklenirken bu koruma YOKTU; `repository.update`'in
+SQL'i `image_url = $6` ile TAM DEĞİŞTİRME yapıyordu ve frontend'in düzenleme
+formu `imageUrl` alanı GÖNDERMEDİĞİ için gerçek bir kıyafetin fotoğrafı bu
+yüzden bir kez NULL'a düştü (elle geri yüklendi, veri kaybı olmadı). `isClean`
+için zaten var olan "gönderilmezse koru" deseni `imageUrl`'e de uygulandı —
+farkla ki `isClean` isteğe bağlı korunur, `imageUrl` KOŞULSUZ korunur (bu uçtan
+hiçbir şekilde değiştirilemez, `null` göndermek bile işe yaramaz).
 
 **Fotoğraf yükleme.** Dosyalar `backend/uploads/` altına **rastgele UUID** adıyla yazılır
 (orijinal ad kullanılmaz: path traversal ve çakışma riski). `image_url` kolonunda **göreli
@@ -986,7 +999,8 @@ cd backend
 # BAŞKASININ verisine erişememesi.
 node test-scripts/test-auth.js
 
-# Tüm uçları uçtan uca doğrular (72 kontrol); kendi hesabını açıp sonunda siler.
+# Tüm uçları uçtan uca doğrular (77 kontrol); kendi hesabını açıp sonunda siler.
+# PUT /clothing-items/:id için sahiplik (404) ve image_url KORUMA testleri dahil.
 node test-scripts/test-all-endpoints.js
 
 # Auth öncesinden kalan, şifresi olmayan hesapları yönetir (varsayılan: salt okunur liste)
@@ -1387,6 +1401,32 @@ sayaç anında +1 olur, sunucudan gelen gerçek `times_worn` ile değiştirilir,
 olursa geri alınır. Artış **idempotent DEĞİLDİR** — her tıklama ayrı bir "giyme"
 kaydı sayılır, bilerek (backend zaten atomik `times_worn = times_worn + 1` yapıyor).
 
+**Kıyafet düzenleme (`QuickAddModal` iki modlu).** Yeni bir bileşen yazmak yerine
+mevcut `QuickAddModal` genişletildi: opsiyonel `item` prop'u verilirse DÜZENLEME
+MODU'na geçer — başlık "Parçayı Düzenle", buton "Güncelle", mevcut değerlerle
+ön-doldurulur, **`PhotoPicker` hiç render edilmez** ve kaydetme `updateClothingItem`
+(PUT) çağırır; `item` verilmezse eskisi gibi "Yeni Parça" oluşturma modunda çalışır.
+Tek form/tek dosya — iki ayrı bileşen açmaya gerek kalmadı. `onCreated` prop'u
+`onSaved` olarak yeniden adlandırıldı (her iki modda da "kayıt başarılı" anlamına
+geldiği için nötr bir isim gerekiyordu).
+
+**Form her açılışta `useLayoutEffect` ile yeniden tohumlanır, `useEffect` İLE DEĞİL.**
+Modal, `Modal` bileşeninin `isOpen` kontrolüyle koşullu render edildiği için (kendisi
+değil) React state açılışlar arasında KORUNUR ve elle sıfırlanması gerekir. İlk
+sürümde bu `useEffect` ile yapılmıştı ve **gerçek bir görsel çakma (flash) hatası**
+yarattı: `isClean`'in başlangıç değeri `useState(true)`, `useEffect` ise boyamadan
+SONRA çalıştığı için kirli bir parça düzenlenirken bir kare boyunca "Temiz" pili
+YANLIŞLIKLA basılı görünüyordu, sonra "Kirli"ye dönüyordu. `useLayoutEffect` DOM
+güncellemesinden hemen sonra, tarayıcı boyamadan ÖNCE çalıştığı için bu çakma
+tamamen ortadan kalktı. Doğrulama piksel seviyesinde yapıldı: `getComputedStyle`
+ile her iki pilin `backgroundColor`'ı okunup `aria-pressed` ile karşılaştırıldı.
+
+**Sahiplik ve fotoğraf koruması BACKEND'DE sağlanır, frontend'de TEKRARLANMAZ.**
+Modal, `updateClothingItem`'a `imageUrl` alanını hiç göndermez (backend zaten
+onu koşulsuz görmezden geliyor) ve sahiplik kontrolünü tekrar sormaz — `PUT`
+başkasının kaydı için `404` döndürürse hata mesajı olduğu gibi kullanıcıya
+gösterilir, modal açık kalır.
+
 **Dönüştürücü:** `src/lib/transformers.js` snake_case → camelCase çevirisini ve
 `category_id` → kategori **adı** eşlemesini yapar (ikon eşlemesi ada göre çalışır).
 Masonry yüksekliği id'den deterministik türetilir.
@@ -1754,6 +1794,82 @@ fotoğraf sorunu teyit edildikten sonra üç yerden de kaldırılabilir.
 
 > Bundan sonraki her çalışma buraya tarihiyle işlenir: eklenen özellikler, düzeltilen
 > hatalar, alınan mimari kararlar. En yeni kayıt en üstte.
+
+### 2026-08-24 — Kıyafet Düzenleme (Edit) Özelliği
+- **Ne eklendi:** Kullanıcı, mevcut bir kıyafetin isim/kategori/renk/sezon/
+  temiz-kirli durumunu düzenleyebiliyor. Kıyafet Detay'da "Düzenle" düğmesi
+  (mevcut "Sil" düğmesiyle aynı bölgede, aynı ince metin-link stili);
+  tıklanınca mevcut değerlerle dolu bir modal açılıyor, kaydedince Kıyafet
+  Detay, Gardırop ve Kombin Öner ANINDA güncel veriyi gösteriyor.
+- **Backend ZATEN HAZIRDI** — `PUT /api/clothing-items/:id` (`ClothingItemService.
+  updateItem`, sahiplik kontrolüyle 404) Aşama 6'dan beri vardı, arayüzde
+  hiç bağlantısı yoktu. Bu çalışma yeni bir uç EKLEMEDİ, mevcut ucu bağladı —
+  ama bunu yaparken kritik bir hata bulup düzeltti (aşağıya bakın).
+- **YAKALANAN HATA (gerçek veri kaybına yol açtı) — `PUT` fotoğrafı SİLİYORDU.**
+  `ClothingItemRepository.update`'in SQL'i `image_url = $6` ile TAM DEĞİŞTİRME
+  yapıyor; `data.imageUrl` payload'da yoksa `undefined` oluyor ve Postgres bunu
+  `NULL` olarak yazıyordu. Düzenleme formu (task'ın kendisi bilerek istediği
+  gibi) fotoğrafı HİÇ göndermiyor — yani ucu ilk kez gerçek bir düzenleme
+  isteğiyle denediğimde **gerçek bir kıyafetin fotoğrafı anında NULL'a düştü**.
+  Dosya diskte durduğu için veri kaybı olmadı (elle geri yüklendi), ama bu tam
+  olarak talimatın "Fotoğraf değişikliği bu akışın parçası OLMASIN" diye
+  bilerek uyardığı senaryoydu. **Düzeltme:** `ClothingItemService.updateItem`
+  artık `imageUrl`'i payload'dan HİÇ okumuyor, `existingItem.image_url`'i
+  KOŞULSUZ olarak geri yazıyor — `isClean`'in "gönderilmezse koru" deseninden
+  bir adım daha katı: `isClean` isteğe bağlı korunur, `imageUrl` bu uçtan
+  **hiçbir şekilde** değiştirilemez (fotoğraf yönetimi tamamen ayrı uçların işi).
+- **`ai_analysis` KASITLI OLARAK dokunulmuyor.** İsim/kategori değişince analiz
+  eski bilgiyle tutarsız kalabilir (örn. "Beyaz Gömlek" olarak analiz edilmiş
+  bir parça "Siyah Pantolon" olarak yeniden adlandırılırsa analiz hâlâ eski
+  görseli anlatır) ama bu OTOMATİK silinmiyor/güncellenmiyor — kullanıcı
+  isterse zaten "Yeniden Analiz Et" düğmesini kullanabilir. Bilinçli bir
+  tutarsızlık penceresi, talimatın istediği gibi.
+- **Frontend: yeni bileşen yazılmadı, `QuickAddModal` İKİ MODLU hâle getirildi.**
+  Opsiyonel `item` prop'u verilirse düzenleme modu: başlık "Parçayı Düzenle",
+  buton "Güncelle", alanlar mevcut değerlerle dolu, **`PhotoPicker` hiç render
+  edilmez** (fotoğraf bu akışın dışında) ve kaydetme `updateClothingItem` (PUT)
+  çağırır. `item` verilmezse eskisi gibi "Yeni Parça" oluşturma modu.
+  `onCreated` prop'u `onSaved` olarak yeniden adlandırıldı (her iki modda da
+  "kayıt başarılı" anlamına geliyor).
+- **YAKALANAN HATA (arayüz, veri kaybı değil ama gerçek) — kirli bir parça
+  düzenlenirken bir kare boyunca "Temiz" YANLIŞLIKLA basılı görünüyordu.**
+  Form seyahat (seeding) mantığı `useEffect` ile yazılmıştı; `isClean`'in
+  başlangıç değeri `useState(true)` ve `useEffect` DOM boyandıktan SONRA
+  çalıştığı için modal İLK karede yanlış durumu gösterip HEMEN ARDINDAN
+  düzeltiyordu — kısa ama gerçek bir "flash of wrong content". **Düzeltme:**
+  seeding `useLayoutEffect`'e taşındı (DOM güncellemesinden hemen sonra,
+  tarayıcı boyamadan ÖNCE çalışır); kullanıcı yanlış durumu hiç görmüyor.
+  Bu, üç ayrı repro script'i ve piksel-seviyeli `getComputedStyle` ölçümüyle
+  doğrulandı (aria-pressed ile arka plan rengi birbirini doğruluyor).
+- **Doğrulama — `test-scripts/test-all-endpoints.js` 72 → 77 kontrol:**
+  `season` alanının da güncellendiği; `PUT` name/categoryId eksikken `400`;
+  **`PUT`'ta `imageUrl` gönderilmezse fotoğrafın SİLİNMEMESİ** (asıl regresyon
+  kontrolü — doğrudan SQL ile sahte bir yol yazılıp `PUT` sonrası korunduğu
+  doğrulanıyor, gerçek bir Gemini çağrısı gerektirmeden); **başka bir
+  kullanıcının bu parçayı düzenleyememesi (404)**, geçici bir ikinci hesapla.
+- **Doğrulama — gerçek tarayıcıda 27 + 4 kontrol (Playwright + sistem Chrome),
+  geçici test kullanıcısı ve GERÇEK bir kopyalanmış fotoğrafla (Gemini
+  tetiklenmeden):** "Düzenle" düğmesinin "Sil" ile aynı bölgede olması; modal
+  ön-doldurması (isim/kategori); **fotoğraf seçicinin düzenleme modunda HİÇ
+  render edilmemesi**; boş isimle kaydetmenin engellenmesi (modal açık kalıyor);
+  gerçek bir düzenlemenin isim/kategori/renk/sezon/temiz-kirli'yi hem ekranda
+  hem veritabanında güncellemesi; **fotoğrafın KORUNMASI**; Gardırop
+  listesinin YENİ ismi göstermesi (eskisi hiç çıkmıyor); başkasının `PUT`
+  isteğinin `404` ile reddedilmesi; 390px'te modalın taşmaması; **yeniden
+  açılan modalın Kirli durumunu ve kategoriyi doğru göstermesi** (piksel
+  ölçümüyle: `Kirli` arka planı tam `rgb(122,59,59)`, `Temiz` tam saydam).
+  Ayrı bir koşuda: düzenlemeden ÖNCE Kombin Öner'in eski ismi kullanabildiği,
+  düzenlemeden SONRA aynı sekmede yeni açılan önerilerin **anında** yeni ismi
+  kullandığı ve eski ismin bir daha hiç çıkmadığı doğrulandı.
+- Regresyon: `test-all-endpoints` 77/77, `test-auth` 48/48, `test-stats` 60/60,
+  `test-item-outfits` 27/27, `test-clean-status` 26/26, `test-file-cleanup` 9/9,
+  `test-skin-tone --kotasiz` 40/40, `test-vector` 82/82, `test-outfit-rag` 69/69,
+  `test-ai-analysis --kotasiz` 67/67, `test-outfit-builder` 73/73, lint + build
+  temiz.
+- **Temizlik:** düzenleme testi sırasında yanlışlıkla NULL'a düşürülen gerçek
+  bir kıyafetin fotoğrafı elle geri yüklendi (dosya diskte durduğu için veri
+  kaybı olmadı); ayrıca demo hesapta önceki bir oturumdan kalma sentetik bir
+  ten tonu analizi/selfie fark edilip uygulamanın kendi silme ucundan temizlendi.
 
 ### 2026-08-24 — Bilinen Eksikliklerin Temizlenmesi
 - **Kapsam:** CLAUDE.md'nin "Eksikler" tablosundan, küçük ve izole olan dört

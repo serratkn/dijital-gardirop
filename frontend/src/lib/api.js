@@ -237,6 +237,15 @@ export function createClothingItem(payload) {
   return request('/clothing-items', { method: 'POST', body: payload })
 }
 
+// Metin alanlarını günceller (isim, kategori, renk, sezon, temiz/kirli).
+// FOTOĞRAF BU UCUN İŞİ DEĞİLDİR — backend zaten image_url'e dokunmuyor
+// (ClothingItemService.updateItem mevcut fotoğrafı korur), burada da payload'a
+// hiç eklenmiyor. Fotoğraf değişikliği ayrı uçlardan yönetilir
+// (uploadClothingItemImage / deleteClothingItemImage, "Fotoğrafı Değiştir" akışı).
+export function updateClothingItem(id, payload) {
+  return request(`/clothing-items/${encodeURIComponent(id)}`, { method: 'PUT', body: payload })
+}
+
 export function toggleClothingItemFavorite(id) {
   return request(`/clothing-items/${encodeURIComponent(id)}/favorite`, { method: 'PATCH' })
 }

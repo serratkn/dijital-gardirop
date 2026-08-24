@@ -10,6 +10,13 @@
 const path = require('node:path')
 require('dotenv').config({ path: path.join(__dirname, '..', '.env') })
 
+// Yalnızca TEK bir kontrol için gerekiyor: PUT /clothing-items/:id'nin
+// image_url'e dokunmadığını doğrulamak, HTTP üzerinden fotoğraf yüklemeden
+// (bu, gerçek bir Gemini analizini tetikler — bu dosyanın kapsamı DEĞİL)
+// yapılmalı. Doğrudan SQL ile sahte bir yol yazılır, PUT sonrası KORUNDUĞU
+// kontrol edilir.
+const pool = require('../src/config/database')
+
 const BASE_URL = `http://localhost:${process.env.PORT || 3001}/api`
 
 let passed = 0
@@ -217,9 +224,61 @@ async function main() {
     categoryId: 1,
     name: 'Test Parça Güncellenmiş',
     color: 'Siyah',
+    season: 'Kış',
   })
   check('PUT → 200', updatedItem.status === 200)
   check('alanlar güncellendi', updatedItem.data?.name === 'Test Parça Güncellenmiş')
+  check('season güncellendi', updatedItem.data?.season === 'Kış')
+
+  check(
+    'PUT name eksik → 400',
+    (await call('PUT', `/clothing-items/${item1.data.id}`, { categoryId: 1 })).status === 400,
+  )
+  check(
+    'PUT categoryId eksik → 400',
+    (await call('PUT', `/clothing-items/${item1.data.id}`, { name: 'x' })).status === 400,
+  )
+
+  // KRİTİK — bu kontrol gerçek bir hatayı yakalıyor: Düzenleme (edit) özelliği
+  // eklenirken updateItem'ın `image_url`'i payload'da GÖNDERİLMEDİĞİ için
+  // NULL'a düşürdüğü fark edildi (repository.update tam-değiştir semantiğinde
+  // ve `imageUrl` alanı undefined kalıyordu). Bir kullanıcının gerçek bir
+  // fotoğrafı bu yüzden bir kez silindi. Düzenleme ucu (bu PUT) SADECE metin
+  // alanlarını günceller; fotoğraf yönetimi ayrı, adanmış uçların işidir
+  // (POST/DELETE .../image, "Fotoğrafı Değiştir" akışı).
+  await pool.query('UPDATE clothing_items SET image_url = $1 WHERE id = $2', [
+    '/uploads/sahte-foto-koruma-testi.png',
+    item1.data.id,
+  ])
+  const putSonrasiFoto = await call('PUT', `/clothing-items/${item1.data.id}`, {
+    categoryId: 1,
+    name: 'Fotoğraf korunmalı',
+    color: 'Yeşil',
+  })
+  check(
+    'PUT içinde imageUrl gönderilmezse fotoğraf SİLİNMİYOR (regresyon)',
+    putSonrasiFoto.data?.image_url === '/uploads/sahte-foto-koruma-testi.png',
+    putSonrasiFoto.data?.image_url,
+  )
+
+  // Sahiplik: BAŞKA bir kullanıcı bu parçayı düzenleyemez. Kaydın varlığını
+  // ele vermemek için 403 değil 404 dönüyor (depodaki genel kural).
+  const digerHesap = await call('POST', '/auth/register', {
+    name: 'Diğer Kullanıcı',
+    email: uniqueEmail(),
+    password: 'test12345',
+    age: 30,
+  })
+  const asilToken = authToken
+  authToken = digerHesap.data.token
+  const yabanciPut = await call('PUT', `/clothing-items/${item1.data.id}`, {
+    categoryId: 1,
+    name: 'Ele geçirme denemesi',
+    color: 'Kırmızı',
+  })
+  check('Başkasının parçasını düzenlemek 404 döndürüyor', yabanciPut.status === 404)
+  await call('DELETE', `/users/${digerHesap.data.user.id}`)
+  authToken = asilToken
 
   const fav1 = await call('PATCH', `/clothing-items/${item1.data.id}/favorite`)
   check('PATCH favorite → true', fav1.data?.is_favorite === true)
@@ -320,12 +379,14 @@ async function main() {
   if (failed > 0) process.exitCode = 1
 }
 
-main().catch((error) => {
-  if (error.cause?.code === 'ECONNREFUSED') {
-    console.error(`\nHATA: ${BASE_URL} adresine bağlanılamadı.`)
-    console.error('Sunucu çalışmıyor olabilir — backend/ klasöründe "npm run dev" ile başlatın.')
-  } else {
-    console.error('\nHATA:', error.message)
-  }
-  process.exitCode = 1
-})
+main()
+  .catch((error) => {
+    if (error.cause?.code === 'ECONNREFUSED') {
+      console.error(`\nHATA: ${BASE_URL} adresine bağlanılamadı.`)
+      console.error('Sunucu çalışmıyor olabilir — backend/ klasöründe "npm run dev" ile başlatın.')
+    } else {
+      console.error('\nHATA:', error.message)
+    }
+    process.exitCode = 1
+  })
+  .finally(() => pool.end())
