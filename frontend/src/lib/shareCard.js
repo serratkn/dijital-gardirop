@@ -1,4 +1,5 @@
 import { toBlob } from 'html-to-image'
+import { Capacitor } from '@capacitor/core'
 import { resolveImageUrl } from './api'
 
 // Kombini Instagram Story oranında (9:16) bir PNG'ye çeviren yardımcılar.
@@ -126,10 +127,17 @@ export function buildFileName(occasion) {
   return `dijital-gardirop-${slug || 'kombin'}-${today}.png`
 }
 
-// Tarayıcıda indirme. Android WebView'de <a download> desteklenmeyebilir;
-// o durumda hata fırlatılır ve çağıran nazik bir mesaj gösterir (mobil için
-// Capacitor Filesystem/Share yolu ikinci öncelik olarak açık bırakıldı).
-export function downloadBlob(blob, fileName) {
+// Platforma göre ikiye ayrılır: web'de İNDİRME (<a download>), Android'de
+// PAYLAŞIM (native share sheet). İkisi de "blob'u kullanıcıya teslim et" işini
+// yapar ama farklı mekanizmalarla — Android WebView'de <a download> GÜVENİLİR
+// DEĞİLDİR (bazı sürümlerde sessizce hiçbir şey olmaz), bu yüzden orada
+// tarayıcı indirmesi yerine Capacitor Filesystem + Share'e geçilir.
+export async function downloadBlob(blob, fileName) {
+  if (Capacitor.isNativePlatform()) {
+    await shareBlobNative(blob, fileName)
+    return
+  }
+
   const url = URL.createObjectURL(blob)
   try {
     const link = document.createElement('a')
@@ -145,5 +153,80 @@ export function downloadBlob(blob, fileName) {
   } finally {
     // Hemen iptal edilirse indirme yarıda kalabilir; bir tur bekletiliyor.
     setTimeout(() => URL.revokeObjectURL(url), 10000)
+  }
+}
+
+// Filesystem.writeFile encoding VERİLMEZSE base64 bekler (Capacitor'ın kendi
+// belgelenmiş kuralı: "If you do not provide encoding and use non-base64
+// data, an error will be thrown"). FileReader'ın ürettiği data: URI'nin
+// virgülden SONRASI zaten ham base64'tür.
+function blobToBase64(blob) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onloadend = () => {
+      const result = typeof reader.result === 'string' ? reader.result : ''
+      const base64 = result.slice(result.indexOf(',') + 1)
+      if (!base64) {
+        reject(new Error('Görsel okunamadı'))
+        return
+      }
+      resolve(base64)
+    }
+    reader.onerror = () => reject(new Error('Görsel okunamadı'))
+    reader.readAsDataURL(blob)
+  })
+}
+
+// Android: görseli cihazın ÖNBELLEK (cache) klasörüne yazıp native paylaşım
+// menüsünü açar — kullanıcı orada "Galeriye Kaydet" (Google Fotoğraflar gibi
+// bir hedef üzerinden), "WhatsApp'ta Paylaş" vb. seçenekler arasından seçer.
+//
+// `Directory.Cache` BİLİNÇLİ seçildi: uygulamaya ÖZEL bir alandır (diğer
+// uygulamalar doğrudan göremez), bu yüzden @capacitor/filesystem BURADA
+// hiçbir çalışma zamanı izni İSTEMEZ — eklentinin kendi kodu yalnızca
+// `Directory.Documents` / `Directory.ExternalStorage` gibi PAYLAŞILAN
+// (public) dizinlere yazarken izin ister. `AndroidManifest.xml`'e bu yüzden
+// YENİ BİR DEPOLAMA İZNİ EKLENMEDİ — eklenseydi gereksiz ve modern Android'in
+// scoped storage modeliyle tutarsız olurdu. Paylaşım hedefi dosyayı zaten var
+// olan `FileProvider` yapılandırması (`@capacitor/camera`'nın kurduğu
+// `file_paths.xml`, `cache-path path="."` ile tüm önbellek dizinini kapsıyor)
+// üzerinden `content://` olarak alır; "nereye kaydedileceği" kararı tamamen
+// seçilen hedef uygulamaya aittir.
+async function shareBlobNative(blob, fileName) {
+  const { Filesystem, Directory } = await import('@capacitor/filesystem')
+  const { Share } = await import('@capacitor/share')
+
+  let uri
+  try {
+    const base64 = await blobToBase64(blob)
+    const result = await Filesystem.writeFile({
+      path: fileName,
+      data: base64,
+      directory: Directory.Cache,
+    })
+    uri = result.uri
+  } catch (error) {
+    const message = String(error?.message ?? error)
+    // Teorik olarak Directory.Cache izin istemez, ama bir OEM tuhaflığı ya da
+    // disk dolu gibi bir durumda da kullanıcı çökme yerine anlaşılır bir mesaj
+    // görsün (photoPicker.js'teki aynı ayrım: izin reddi ayrı bir mesaj alır).
+    if (/denied|permission/i.test(message)) {
+      throw new Error('Depolama izni verilmedi. Ayarlar > Uygulamalar üzerinden izin verebilirsin.')
+    }
+    throw new Error('Görsel cihaza kaydedilemedi. Tekrar deneyebilirsin.')
+  }
+
+  try {
+    await Share.share({
+      title: 'Kombini Paylaş',
+      url: uri,
+      dialogTitle: 'Kombini Paylaş',
+    })
+  } catch (error) {
+    const message = String(error?.message ?? error)
+    // Kullanıcı paylaşım menüsünü kapattı — bu bir HATA DEĞİL (Android
+    // tarafında RESULT_CANCELED "Share canceled" olarak reddedilir).
+    if (/cancel/i.test(message)) return
+    throw new Error('Paylaşım açılamadı. Tekrar deneyebilirsin.')
   }
 }

@@ -49,14 +49,18 @@ function ShareButton({ occasion, items, createdAt, categoryNames, className = ''
 
       if (!cardRef.current) throw new Error('Paylaşım kartı hazırlanamadı')
 
-      // 3) PNG'ye çevir ve indir
+      // 3) PNG'ye çevir, indir (web) ya da paylaş (Android) — downloadBlob
+      // platforma göre dallanır (bkz. lib/shareCard.js).
       const blob = await renderCardToBlob(cardRef.current)
-      downloadBlob(blob, buildFileName(occasion))
+      await downloadBlob(blob, buildFileName(occasion))
     } catch (caught) {
-      // Sayfa ASLA çökmemeli: görsel üretimi tarayıcıya bağlıdır ve
-      // desteklenmediği ortamlar olabilir.
+      // Sayfa ASLA çökmemeli: görsel üretimi/paylaşımı platforma bağlıdır ve
+      // desteklenmediği ortamlar olabilir. downloadBlob zaten anlaşılır
+      // Türkçe mesajlarla fırlatıyor (izin reddi, kaydetme/paylaşım hatası);
+      // burada olduğu gibi gösteriliyor, yalnızca mesajsız kalan durumlar
+      // için genel bir yedek var.
       console.error('Kombin görseli oluşturulamadı:', caught)
-      setError('Görsel oluşturulamadı. Tarayıcın bu özelliği desteklemiyor olabilir.')
+      setError(caught?.message || 'Görsel oluşturulamadı. Tekrar deneyebilirsin.')
     } finally {
       setCardItems(null)
       setIsBusy(false)

@@ -53,7 +53,9 @@ Kökteki `package.json` yalnızca artık Capacitor bağımlılıkları içerir, 
 ### Frontend
 
 React 19, Vite 8, Tailwind v4, react-router-dom 7, lucide-react (ikonlar),
-html-to-image (kombin paylaşım görseli), Capacitor 8 (Android paketleme).
+html-to-image (kombin paylaşım görseli), Capacitor 8 (Android paketleme),
+`@capacitor/camera` (fotoğraf çekme), `@capacitor/filesystem` + `@capacitor/share`
+(Android'de kombin paylaşım görselini native paylaşım menüsüyle paylaşma).
 Lint: **oxlint** (depodaki tek otomatik kontrol).
 
 ### Backend
@@ -308,7 +310,7 @@ olduğu için iskelet oraya taşındı, kombin üretimi istemci tarafında anlı
 | **Fotoğraflar yerel diskte** | `backend/uploads/` altında tutulur; çok sunuculu bir kurulumda paylaşılan depolamaya (S3 vb.) taşınması gerekir. Dosyalar `/uploads` yolundan **token'sız** servis edilir — ad tahmin edilemez UUID olduğu için kabul edilebilir sayıldı. |
 | **Fotoğraf boyutlandırma yok** | Yüklenen görsel olduğu gibi saklanır; küçük resim (thumbnail) üretilmez. Native tarafta Capacitor `width: 1600` ile ön küçültme yapar, web'de böyle bir sınır yoktur. |
 | **Bildirimler / Yardım & Destek** | "Yakında" sayfalarıdır, işlevleri yoktur. |
-| **Paylaşım indirmesi mobilde denenmedi** | Görsel üretimi platformdan bağımsızdır ama indirme `<a download>` ile yapılır; Android WebView'de çalışmazsa Capacitor Filesystem/Share eklentisine geçilmelidir. Hata hâlinde kullanıcıya mesaj gösterilir, uygulama çökmez. |
+| **Android paylaşım akışı gerçek cihaz/emülatörde henüz DENENMEDİ** | Kod tarafı tamamlandı: `downloadBlob` artık `Capacitor.isNativePlatform()` ile dallanıyor, Android'de Filesystem + Share ile native paylaşım menüsünü açıyor (bkz. §8). Bu makinede yerel `./gradlew` çağrısı, ortamdaki JDK sürümleriyle (26 ve Android Studio JBR 25) Gradle 8.14.3 uyumsuzluğu yüzünden çalışmıyor (`Unsupported class file major version`) — bu, koddan bağımsız bir ortam sorunu. Doğrulama şu ana kadar yalnızca **kaynak kod seviyesinde** yapıldı (Capacitor'ın `SharePlugin`/`FilesystemPlugin` Android kaynağı okunarak `Directory.Cache` + mevcut `FileProvider` yapılandırmasının doğru çalışacağı doğrulandı) ve **web regresyonuyla** (`<a download>` yolunun bozulmadığı kanıtlandı). Gerçek bir Android Studio/emülatör çalıştırması hâlâ gerekiyor. |
 | **Gemini ücretsiz kotası günde 20 istek** | Ölçüldü (`GenerateRequestsPerDayPerProjectPerModel-FreeTier`, limit 20, `gemini-3.6-flash`). Kota dolduğunda analiz sessizce atlanır ve parça analizsiz kalır; **kendiliğinden yeniden deneyen bir mekanizma yoktur** — `analyze-existing-items.js --uygula` ertesi gün elle çalıştırılır. Gerçek kullanım ücretli plan ister. |
 | **Fotoğraf değişince analiz KENDİLİĞİNDEN güncellenmez** | Maliyet koruması "dolu `ai_analysis` varsa tekrar analiz etme" der. Artık **elle tetiklenebiliyor**: Kıyafet Detay'daki "Yeniden Analiz Et" düğmesi (`POST /clothing-items/:id/analyze`) ve fotoğraf değiştirildiğinde çıkan hatırlatma. Otomatik yapılmıyor çünkü her çağrı gerçek para harcıyor. |
 | **`/gemini/test-analyze` hâlâ duruyor** | Aşama 1'den kalan teşhis ucudur; ürün akışı artık otomatik analizdir. Kaldırılmadı çünkü `test-gemini.js` bağlantı/anahtar yollarını bunun üzerinden doğruluyor. |
@@ -950,6 +952,17 @@ npx cap run android
 
 **Backend'in host makinede çalışıyor olması gerekir** (`backend/` içinde `npm run dev`)
 ve veritabanı ayakta olmalıdır (`docker compose up -d`).
+
+**Bu makinede `./gradlew` DOĞRUDAN çalışmıyor — JDK/Gradle sürüm uyuşmazlığı.**
+Proje Gradle 8.14.3'e sabit (`gradle-wrapper.properties`); bu sürüm makinedeki
+JDK'ların HİÇBİRİYLE çalışmıyor: sistem `java` (PATH) JDK 26, Android Studio'nun
+kendi JBR'si JDK 25 — ikisi de Groovy ayarlar dosyasını derlerken
+`Unsupported class file major version 69/70` ile patlıyor. Bu, kod
+değişikliğinden bağımsız bir ORTAM sorunu (bu depoda JDK 17/21 kurulu değil).
+Android Studio üzerinden build/run yaparken IDE kendi **Gradle JDK** ayarını
+kullanabilir (Settings → Build Tools → Gradle → Gradle JDK); komut satırından
+`./gradlew` çağırmadan önce oranın da uyumlu bir JDK'ya (17 ya da 21) işaret
+ettiğinden emin olun, aksi hâlde Android Studio içinden de aynı hata alınır.
 
 **En sık düşülen tuzak — `localhost` emülatörde çalışmaz.** Android emülatörü kendi sanal
 cihazıdır; `localhost` host makineyi değil **emülatörün kendisini** işaret eder. Host
@@ -1767,6 +1780,44 @@ sütundur; parça sayısı **tekse son parça iki sütuna yayılır**, yoksa sa�
 hücre kalırdı. Parçalar giyim sırasına (`Üst → Elbise → Alt → Ayakkabı → Çanta`)
 göre dizilir, API sırasına göre değil.
 
+**`downloadBlob` PLATFORM BAZLI dallanır** (`Capacitor.isNativePlatform()`):
+web'de eskisi gibi `<a download>`, Android'de `@capacitor/filesystem` +
+`@capacitor/share` ile native paylaşım menüsü. Ayrım bilinçli: Android
+WebView'de `<a download>` **güvenilir değildir** (bazı sürümlerde sessizce
+hiçbir şey olmaz — kullanıcı boşuna bekler), oysa native `Intent.ACTION_SEND`
+her zaman çalışır ve kullanıcıya "Galeriye Kaydet" (Google Fotoğraflar gibi
+bir hedef üzerinden), "WhatsApp'ta Paylaş" gibi seçenekler sunar.
+
+- **`Directory.Cache` BİLİNÇLİ seçim — YENİ BİR DEPOLAMA İZNİ EKLENMEDİ.**
+  `@capacitor/filesystem`'in kendi kaynağı yalnızca **paylaşılan** (public)
+  dizinlere (`Directory.Documents`, `Directory.ExternalStorage`) yazarken
+  çalışma zamanı izni istiyor; `Directory.Cache` uygulamaya özel bir alandır
+  ve hiçbir izin tetiklemez. `AndroidManifest.xml`'e bu yüzden yeni bir
+  `<uses-permission>` **eklenmedi** — eklenseydi gereksiz olurdu ve modern
+  Android'in scoped storage modeliyle tutarsız düşerdi.
+- **Paylaşım için FileProvider zaten HAZIRDI.** `@capacitor/camera` kurulurken
+  eklenen `androidx.core.content.FileProvider` (`AndroidManifest.xml`) ve
+  `file_paths.xml`'deki `cache-path path="."` girdisi UYGULAMANIN TÜM önbellek
+  dizinini zaten kapsıyor — `@capacitor/share`'in Android kaynağı
+  (`SharePlugin.java`) paylaşılan dosyayı **aynı** `FileProvider` authority'siyle
+  (`${applicationId}.fileprovider`) `content://` URI'ye çeviriyor. Bu yüzden
+  manifest'te FileProvider tarafında da hiçbir değişiklik gerekmedi.
+- **İki ayrı hata sınıfı ayrı mesajlara çevrilir** (`photoPicker.js`'teki
+  izin-reddi/iptal ayrımıyla aynı disiplin): `Filesystem.writeFile` başarısız
+  olursa "Görsel cihaza kaydedilemedi" (izin metni içeriyorsa ayrı bir "izin
+  verilmedi" mesajı — teorik olarak Cache dizini izin istemez ama bir OEM
+  tuhaflığına karşı savunma amaçlı); `Share.share()` kullanıcı tarafından
+  İPTAL edilirse (Android `RESULT_CANCELED` → "Share canceled") bu bir HATA
+  SAYILMAZ, sessizce dönülür — kullanıcı paylaşmamayı seçebilir.
+- **`ShareButton`'daki `catch` artık `caught.message`'ı DOĞRUDAN gösteriyor**
+  (öncesinde sabit tek bir mesaj vardı). `downloadBlob`'un fırlattığı her
+  mesaj zaten kullanıcıya gösterilebilir Türkçe metindir; sabit mesaj yalnızca
+  mesajsız kalan beklenmedik durumlar için yedek olarak kaldı.
+- **`@capacitor/filesystem` ve `@capacitor/share` DİNAMİK import edilir**
+  (`photoPicker.js`'teki Camera deseniyle aynı): web derlemesinde bu native
+  modüller ayrı chunk'lara düşer ve hiç yüklenmez — `npm run build` çıktısında
+  `web-*.js` adlı küçük ek chunk'lar bunun kanıtıdır.
+
 **Kalıcı durum:** `src/lib/onboarding.js` `dg_` önekli localStorage anahtarlarının
 tek sahibidir (onboarding bayrağı, `dg_user_id`, kullanıcı profili, anket cevapları).
 **İki istisna:** `dg_token` `lib/auth.js`'e, `dg_theme` `lib/theme.js`'e aittir.
@@ -1890,6 +1941,119 @@ fotoğraf sorunu teyit edildikten sonra üç yerden de kaldırılabilir.
 > Bundan sonraki her çalışma buraya tarihiyle işlenir: eklenen özellikler, düzeltilen
 > hatalar, alınan mimari kararlar. En yeni kayıt en üstte.
 
+### 2026-08-24 — Kombin paylaşım indirmesi: Android'de native paylaşım menüsü
+- **Ne değişti:** `downloadBlob` (`lib/shareCard.js`) artık PLATFORM BAZLI
+  dallanıyor (`Capacitor.isNativePlatform()`). **Web'de HİÇBİR ŞEY değişmedi**
+  — mevcut `<a download>` akışı aynen duruyor. **Android'de** görsel artık
+  `@capacitor/filesystem` ile cihazın önbellek klasörüne yazılıp
+  `@capacitor/share` ile native paylaşım menüsü (`Intent.ACTION_SEND`)
+  açılıyor — kullanıcı "Galeriye Kaydet" (Google Fotoğraflar gibi bir hedef
+  üzerinden), "WhatsApp'ta Paylaş" gibi seçenekler arasından seçiyor.
+- **GEREKÇE:** Android WebView'de `<a download>` GÜVENİLİR DEĞİLDİR — bazı
+  WebView sürümlerinde indirme sessizce hiçbir şey yapmaz, kullanıcı boşuna
+  bekler. Native `Intent.ACTION_SEND` her Android sürümünde çalışan, sistemin
+  kendi mekanizması. "Eksikler" tablosundaki *"Paylaşım indirmesi mobilde
+  denenmedi"* maddesi bu çalışmayla değişti (bkz. aşağıdaki "AÇIK KALAN İŞ").
+
+**Yeni bağımlılıklar:** `@capacitor/filesystem@8.1.3`, `@capacitor/share@8.0.1`
+(ikisi de `@capacitor/core@^8.5.0` ile uyumlu, `npm view ... peerDependencies`
+ile doğrulandı). `npx cap sync android` ile Android projesine kaydedildiler
+(`capacitor.build.gradle` + `capacitor.settings.gradle` güncellendi;
+`AndroidManifest.xml` ve `res/xml/` — beklendiği gibi — **hiç değişmedi**,
+`cap sync` bu dosyalara dokunmaz).
+
+- **`Directory.Cache` BİLİNÇLİ seçim — YENİ BİR DEPOLAMA İZNİ EKLENMEDİ.**
+  `@capacitor/filesystem`'in Android kaynağı (`FilesystemPlugin.kt`) okunarak
+  doğrulandı: eklenti yalnızca **paylaşılan** (public) dizinlere
+  (`Directory.Documents`, `Directory.ExternalStorage`) yazarken çalışma
+  zamanı izni istiyor (`isPublicDirectory(directory)` kontrolü); `Directory.
+  Cache` uygulamaya ÖZEL bir alandır ve hiçbir izin tetiklemez — modern
+  Android'in scoped storage modelinde bu tür bir dosya için zaten hiç izin
+  gerekmiyor. `AndroidManifest.xml`'e bu yüzden `WRITE_EXTERNAL_STORAGE` gibi
+  yeni bir `<uses-permission>` **BİLEREK EKLENMEDİ** — eklenseydi gereksiz
+  olur ve talimatın "gerekli izinleri ekle" ruhundan çok "izin listesini
+  şişir"e kayardı. Bu karar kod yorumunda ve CLAUDE.md'de belgeli.
+- **FileProvider için de HİÇBİR manifest değişikliği gerekmedi.**
+  `@capacitor/camera` kurulumundan kalma `androidx.core.content.FileProvider`
+  girdisi (`AndroidManifest.xml`) ve `file_paths.xml`'deki
+  `cache-path name="my_cache_images" path="."` girdisi UYGULAMANIN TÜM
+  önbellek dizinini zaten kapsıyor. `@capacitor/share`'in Android kaynağı
+  (`SharePlugin.java`) okunarak doğrulandı: paylaşılan dosyayı **aynı**
+  FileProvider authority'siyle (`${applicationId}.fileprovider`)
+  `content://` URI'ye çeviriyor — yani mevcut kamera altyapısı, hiç
+  planlanmamış olsa da, paylaşım özelliğini bedavaya destekliyordu.
+- **İki katmanlı, birbirinden bağımsız hata yönetimi** (`shareBlobNative`):
+  1. `Filesystem.writeFile` başarısız olursa "Görsel cihaza kaydedilemedi.
+     Tekrar deneyebilirsin." (mesaj "izin"/"denied" içeriyorsa ayrı bir
+     "Depolama izni verilmedi..." mesajı — teorik olarak Cache dizini izin
+     istemez ama bir OEM tuhaflığına karşı savunma amaçlı, `photoPicker.js`
+     ile aynı disiplin).
+  2. `Share.share()` KULLANICI TARAFINDAN iptal edilirse (Android
+     `RESULT_CANCELED` → eklenti bunu "Share canceled" ile reddeder) bu bir
+     HATA SAYILMAZ — sessizce dönülür, kullanıcı ekranında hiçbir hata
+     mesajı görmez. Yalnızca GERÇEK bir paylaşım hatası "Paylaşım açılamadı.
+     Tekrar deneyebilirsin." mesajını tetikler.
+  Her iki yol da **asla fırlatılmamış (raw) bir teknik hata** göstermez;
+  `ShareButton` zaten `console.error` ile teknik detayı loglar, ekrana yalnızca
+  anlaşılır Türkçe mesaj çıkar — uygulama hiçbir hata yolunda çökmez.
+- **`@capacitor/filesystem` ve `@capacitor/share` DİNAMİK import edilir**
+  (`photoPicker.js`'teki Camera deseniyle birebir aynı desen): web
+  derlemesinde bu native modüller HİÇ YÜKLENMEZ, ayrı küçük chunk'lara düşer
+  (`npm run build` çıktısında yeni `web-*.js` parçaları bunun kanıtı).
+- **`ShareButton`'ın `catch` bloğu artık `caught.message`'ı DOĞRUDAN
+  gösteriyor** (öncesinde tek bir sabit mesaj vardı, platformdan bağımsız).
+  `downloadBlob`'un fırlattığı her mesaj zaten kullanıcıya gösterilebilir
+  Türkçe metin; sabit mesaj yalnızca mesajsız kalan beklenmedik durumlar
+  için yedek olarak kaldı. `downloadBlob` bu yüzden artık `async` — `await
+  downloadBlob(...)` olarak çağrılıyor (öncesinde senkron bir çağrıydı, hata
+  fırlatması `await` edilmeden `catch`'e düşmüyordu — bu regresyon web
+  testinde ayrıca doğrulandı: hata olsaydı `catch` bloğu tetiklenmeden
+  fonksiyon sessizce yarım kalabilirdi).
+
+**Doğrulama — WEB (gerçek tarayıcıda, Playwright + sistem Chrome), geçici
+test kullanıcısı ve gerçek bir kombinle, 9 kontrol:**
+- "Paylaş" düğmesinin görünmesi; tıklanınca **hâlâ gerçek bir `<a download>`
+  indirmesinin tetiklenmesi** (Playwright `download` olayı yakalandı);
+  dosya adının beklenen kalıpta olması; indirilen dosyanın boş olmaması;
+  **PNG imzasının doğru olması** (gerçek bir PNG dosyası, bozuk veri değil);
+  **görselin hâlâ Story ölçüsünde olması** (1080×1920, byte'lar IHDR
+  chunk'ından okunarak doğrulandı — dış bir PNG kütüphanesi kurulmadan);
+  düğmenin işlem bitince "Paylaş"a geri dönmesi; **hiçbir hata mesajının
+  ÇIKMAMASI** (web akışında native kod hiç tetiklenmediğinin kanıtı);
+  temiz konsol.
+- **TEST TUZAĞI (yakalandı, ürün hatası DEĞİL):** İlk denemede seçici
+  `getByRole('button', { name: 'Paylaş' })` düğmeyi HİÇ bulamadı. Sebep:
+  `ShareButton`'da `aria-label="Kombini görsel olarak indir"` VAR ve bu,
+  erişilebilir ADI görünür metinden ("Paylaş") tamamen FARKLI hâle getiriyor
+  (aria-label her zaman önceliklidir) — bu, koddaki ÖNCEDEN VAR OLAN,
+  bilinçli bir erişilebilirlik kararı (buton boşken de anlamlı bir isim
+  taşısın diye). Test, role tabanlı seçici yerine metin tabanlı seçiciye
+  (`locator('button', { hasText: 'Paylaş' })`) çevrilerek düzeltildi.
+- Regresyon: `npm run lint` + `npm run build` temiz (build çıktısında yeni
+  `web-*.js` chunk'ları filesystem/share'in web derlemesine hiç girmediğini
+  gösteriyor).
+
+**AÇIK KALAN İŞ — Android tarafı gerçek cihaz/emülatörde HENÜZ ÇALIŞTIRILMADI.**
+Bu ortamda (`./gradlew`) yerel bir Gradle derlemesi denenip **JDK/Gradle sürüm
+uyuşmazlığı** yüzünden engellendi: proje Gradle 8.14.3'e sabit, makinedeki
+JDK'ların hiçbiri (sistem `java` = JDK 26, Android Studio'nun JBR'si = JDK 25)
+bu Gradle sürümüyle Groovy ayarlar dosyasını derleyemiyor
+(`Unsupported class file major version 69/70`) — bu, KODDAN BAĞIMSIZ bir
+ortam sorunu (makinede JDK 17/21 kurulu değil), CLAUDE.md'nin "Android
+emülatöründe test etme" bölümüne troubleshooting notu olarak işlendi.
+Bunun yerine yapılan doğrulama:
+1. **Kaynak kod seviyesinde** — `@capacitor/filesystem` ve `@capacitor/share`
+   paketlerinin GERÇEK Android kaynak dosyaları (`FilesystemPlugin.kt`,
+   `SharePlugin.java`) okunarak `Directory.Cache`'in izin istemediği ve
+   mevcut `FileProvider` yapılandırmasının paylaşılan dosyayı doğru
+   kapsadığı doğrulandı (varsayımla değil, gerçek kaynakla).
+2. **`npx cap sync android`'in temiz çalışması** — üç native eklenti de
+   (camera, filesystem, share) doğru şekilde kaydedildi, `AndroidManifest.xml`
+   beklendiği gibi değişmedi.
+3. **Web regresyonu** — yukarıdaki 9 kontrol.
+Gerçek bir Android Studio/emülatör çalıştırması (izin akışı, paylaşım
+menüsünün gerçekten açılması, "Galeriye Kaydet" hedefinin gerçekten
+çalışması) hâlâ **kullanıcı tarafında** yapılmalı.
 ### 2026-08-24 — Selfie'ler AYRI klasörde ve token'lı bir uçtan servis ediliyor
 - **Ne değişti:** Selfie'ler artık kıyafet fotoğraflarından FİZİKSEL VE
   ERİŞİM olarak ayrıldı. Dosyalar `backend/uploads/selfies/` altına yazılıyor
