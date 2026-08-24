@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
-import { Sparkles, WashingMachine } from 'lucide-react'
+import { RefreshCw, Sparkles, WashingMachine } from 'lucide-react'
 import AiAnalysisPanel from '../components/AiAnalysisPanel'
 import ClothingCard from '../components/ClothingCard'
 import Button from '../components/ui/Button'
@@ -646,6 +646,57 @@ function ClothingDetail() {
           reanalyzeError={reanalyzeError}
           photoChanged={photoChanged}
         />
+
+        {/* Analizi HİÇ oluşmamış (ya da başarısız olmuş) parça için manuel
+            tetikleyici. AiAnalysisPanel yalnızca dolu bir analiz varken
+            render olur; bu blok TAM TERSİ durumu kapsıyor. Aynı handler'ı
+            (handleReanalyze) kullanıyor — backend ucu zaten `force: true`
+            gönderiyor ve ai_analysis NULL olduğu için maliyet koruması
+            (`zaten-analiz-edilmis`) baştan devreye girmiyor; force ile
+            force'suz burada aynı sonucu verir.
+            Fotoğrafsız parçada hiç görünmez (analiz edilecek görsel yok);
+            arka planda otomatik analiz sürerken de (isAnalysisPending)
+            görünmez — o pencere kapanmadan ikinci bir deneme başlatmak
+            kafa karıştırırdı (backend'in in-flight muhafızı zaten 409
+            döndürür ama kullanıcıya "neden iki tane oldu" sorusu kalırdı). */}
+        {item.imageUrl && !item.aiAnalysis && !isAnalysisPending && (
+          <div
+            className="mt-12 rounded-2xl border border-dusty-rose/40 bg-dusty-rose/10 px-5 py-6 text-center"
+            data-testid="ai-analiz-daveti"
+          >
+            <span className="mx-auto flex h-11 w-11 items-center justify-center rounded-full bg-dusty-rose/20">
+              <Sparkles size={18} strokeWidth={1.75} className="text-accent-ink" />
+            </span>
+            <p className="mt-3 font-display text-lg italic text-ink">
+              Bu parça için henüz yapay zekâ analizi yok
+            </p>
+            <p className="mt-1.5 text-sm text-ink/55">
+              Analiz; stil, renk ve kombin uyumu önerileri çıkarır ve bu parçayı
+              Kombin Öner'in akıllı eşleştirmesine dahil eder.
+            </p>
+            <div className="mt-4">
+              <Button
+                variant="outline"
+                onClick={handleReanalyze}
+                disabled={isReanalyzing}
+                className="inline-flex items-center gap-2 text-xs"
+                data-testid="simdi-analiz-et"
+              >
+                <RefreshCw
+                  size={13}
+                  strokeWidth={1.75}
+                  className={isReanalyzing ? 'animate-spin' : ''}
+                />
+                {isReanalyzing ? 'Analiz ediliyor...' : 'Şimdi Analiz Et'}
+              </Button>
+            </div>
+            {reanalyzeError && !isReanalyzing && (
+              <p className="mt-3 text-sm text-burgundy" data-testid="simdi-analiz-hatasi">
+                {reanalyzeError}
+              </p>
+            )}
+          </div>
+        )}
 
         {/* "Buna Benzer Diğer Parçalar" — analiz paneliyle AYNI GEREKÇEYLE
             ızgaranın altında, tam genişlikte: sağ sütun md üstünde yarım

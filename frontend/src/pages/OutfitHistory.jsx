@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { Heart, Trash2 } from 'lucide-react'
+import { CalendarCheck, Heart, Trash2 } from 'lucide-react'
 import PageHeader from '../components/ui/PageHeader'
 import EmptyState from '../components/ui/EmptyState'
 import Modal from '../components/ui/Modal'
@@ -11,6 +11,7 @@ import {
   deleteOutfit,
   fetchCategories,
   fetchOutfits,
+  markOutfitAsWorn,
   toggleOutfitFavorite,
 } from '../lib/api'
 import { toCategoryNameMap } from '../lib/transformers'
@@ -21,14 +22,22 @@ const dateFormatter = new Intl.DateTimeFormat('tr-TR', {
   year: 'numeric',
 })
 
-function OutfitCard({ outfit, categoryNames, onToggleFavorite, onRequestDelete }) {
+function OutfitCard({ outfit, categoryNames, onToggleFavorite, onMarkWorn, onRequestDelete }) {
   const [isPending, setIsPending] = useState(false)
+  const [isWornPending, setIsWornPending] = useState(false)
 
   const handleFavorite = async () => {
     if (isPending) return
     setIsPending(true)
     await onToggleFavorite(outfit)
     setIsPending(false)
+  }
+
+  const handleWorn = async () => {
+    if (isWornPending) return
+    setIsWornPending(true)
+    await onMarkWorn(outfit)
+    setIsWornPending(false)
   }
 
   return (
@@ -98,7 +107,19 @@ function OutfitCard({ outfit, categoryNames, onToggleFavorite, onRequestDelete }
       )}
 
       {outfit.items.length > 0 && (
-        <div className="mt-5 border-t border-ink/10 pt-4">
+        <div className="mt-5 flex flex-wrap items-center gap-3 border-t border-ink/10 pt-4">
+          {/* PATCH /outfits/:id/worn zaten hazırdı, yalnızca arayüzde
+              tetikleyicisi yoktu. Atomik +1 (sunucu tarafında
+              times_worn = times_worn + 1), yarış durumu oluşturmaz. */}
+          <Button
+            variant="outline"
+            onClick={handleWorn}
+            disabled={isWornPending}
+            className="inline-flex items-center gap-2 text-xs"
+          >
+            <CalendarCheck size={14} strokeWidth={1.75} />
+            {isWornPending ? 'Kaydediliyor...' : 'Bugün Giydim'}
+          </Button>
           <ShareButton
             occasion={outfit.occasion}
             items={outfit.items}
@@ -163,6 +184,29 @@ function OutfitHistory() {
       console.error('Kombin favorisi güncellenemedi:', error)
       setOutfits((rows) =>
         rows.map((row) => (row.id === outfit.id ? { ...row, is_favorite: previous } : row)),
+      )
+      setActionError(error.message)
+    }
+  }
+
+  // İyimser güncelleme: sayaç anında +1 olur, sunucudan gelen GERÇEK değerle
+  // değiştirilir (favori toggle'ıyla aynı desen). Hata olursa geri alınır.
+  const handleMarkWorn = async (outfit) => {
+    const previous = outfit.times_worn
+    setActionError('')
+    setOutfits((rows) =>
+      rows.map((row) => (row.id === outfit.id ? { ...row, times_worn: previous + 1 } : row)),
+    )
+
+    try {
+      const updated = await markOutfitAsWorn(outfit.id)
+      setOutfits((rows) =>
+        rows.map((row) => (row.id === outfit.id ? { ...row, times_worn: updated.times_worn } : row)),
+      )
+    } catch (error) {
+      console.error('Kombin "giyildi" sayacı güncellenemedi:', error)
+      setOutfits((rows) =>
+        rows.map((row) => (row.id === outfit.id ? { ...row, times_worn: previous } : row)),
       )
       setActionError(error.message)
     }
@@ -235,6 +279,7 @@ function OutfitHistory() {
                 outfit={outfit}
                 categoryNames={categoryNames}
                 onToggleFavorite={handleToggleFavorite}
+                onMarkWorn={handleMarkWorn}
                 onRequestDelete={setPendingDelete}
               />
             ))}

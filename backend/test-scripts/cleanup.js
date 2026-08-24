@@ -12,9 +12,11 @@
 const path = require('node:path')
 require('dotenv').config({ path: path.join(__dirname, '..', '.env') })
 
+const fs = require('node:fs')
 const pool = require('../src/config/database')
 const { isEnabled: isChromaEnabled } = require('../src/config/chroma')
 const VectorRepository = require('../src/repositories/VectorRepository')
+const { UPLOAD_DIR } = require('../src/config/upload')
 
 // Test scriptlerinin ürettiği kayıtlar bu kalıplarla adlandırılır.
 const TEST_NAME_PATTERNS = [
@@ -119,6 +121,13 @@ async function main() {
   // benzer aramasında artık var olmayan bir parçanın dönmesi demektir.
   await temizleOksuzVektorler()
 
+  // Diskteki fotoğraflar da AYRI bir depodur (dosya sistemi). Kullanıcı
+  // silme akışı artık kendi dosyalarını temizliyor (bkz. UserService.deleteUser)
+  // ama BURADAKİ doğrudan SQL silmeleri (test parçaları + test kullanıcıları,
+  // yukarıda) o akıştan geçmiyor — aynı Chroma-öksüzü mantığının dosya
+  // sistemi karşılığı burada gerekiyor.
+  await temizleOksuzDosyalar()
+
   console.log('\nTemizlik tamamlandı.')
   await pool.end()
 }
@@ -164,6 +173,51 @@ async function temizleOksuzVektorler() {
     // Temizlik bir kolaylık aracıdır; Chroma yüzünden çökmemeli.
     console.log(`\nVektör temizliği yapılamadı: ${error.message}`)
   }
+}
+
+// Diskte olup Postgres'te (artık) hiçbir satırdan referans edilmeyen
+// fotoğrafları siler. Kıyafet fotoğrafları VE selfie'ler aynı `uploads/`
+// klasörünü paylaşır, o yüzden tek taramada ikisi de kontrol edilir.
+async function temizleOksuzDosyalar() {
+  let diskteki
+  try {
+    diskteki = fs.readdirSync(UPLOAD_DIR).filter((name) => name !== '.gitkeep')
+  } catch (error) {
+    console.log(`
+Dosya temizliği yapılamadı: ${error.message}`)
+    return
+  }
+  if (diskteki.length === 0) return
+
+  // is_deleted FARK ETMEZ: soft-delete edilmiş bir parçanın dosyası normal
+  // akışta zaten silinmiş olur, ama garanti değildir — referans hâlâ
+  // duruyorsa dosya SİLİNMEMELİDİR (yanlışlıkla canlı bir kaydı bozmaktan
+  // iyidir birkaç fazladan dosyayı elde tutmak).
+  const [itemRows, userRows] = await Promise.all([
+    pool.query('SELECT image_url FROM clothing_items WHERE image_url IS NOT NULL'),
+    pool.query('SELECT skin_tone_photo_url FROM users WHERE skin_tone_photo_url IS NOT NULL'),
+  ])
+  const referanslar = new Set(
+    [...itemRows.rows.map((row) => row.image_url), ...userRows.rows.map((row) => row.skin_tone_photo_url)]
+      .map((url) => url.replace(/^\/uploads\//, '')),
+  )
+
+  const oksuzler = diskteki.filter((name) => !referanslar.has(name))
+  if (oksuzler.length === 0) {
+    console.log(`
+Dosyalar: ${diskteki.length} dosya, öksüz yok.`)
+    return
+  }
+
+  for (const name of oksuzler) {
+    try {
+      fs.unlinkSync(path.join(UPLOAD_DIR, name))
+    } catch (error) {
+      if (error.code !== 'ENOENT') console.log(`  ${name} silinemedi: ${error.message}`)
+    }
+  }
+  console.log(`
+Dosyalar: ${oksuzler.length} öksüz dosya silindi (${diskteki.length} taranmıştı).`)
 }
 
 main().catch((error) => {

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
-import { Plus, Search } from 'lucide-react'
+import { Heart, Plus, Search } from 'lucide-react'
 import { CATEGORY_ICONS } from '../lib/categoryIcons'
 import { fetchCategories, fetchClothingItems } from '../lib/api'
 import { toCategoryNameMap, toClothingItems } from '../lib/transformers'
@@ -25,6 +25,12 @@ function Wardrobe() {
   const [activeCategory, setActiveCategory] = useState(ALL)
   const [isAddModalOpen, setIsAddModalOpen] = useState(false)
   const [searchQuery, setSearchQuery] = useState('')
+  // Ana Sayfa'daki "Favori" kartı ?favori=1 ile buraya bağlanıyor (bkz.
+  // Dashboard.jsx). Kategori filtresiyle aynı desen: yalnızca İLK yüklemede
+  // URL'den okunur, sonrası yerel state'te kalır (URL'e geri yazılmaz).
+  const [favoriteOnly, setFavoriteOnly] = useState(
+    () => searchParams.get('favori') === '1',
+  )
 
   // Yeni parça eklendikten sonra da çağrılabilmesi için efekt dışında tanımlı.
   // showSkeleton=false ile tazeleme sırasında liste yerinde kalır, iskelete dönmez.
@@ -92,11 +98,13 @@ function Wardrobe() {
         ? items
         : items.filter((item) => item.category === activeCategory)
 
-    const query = searchQuery.trim().toLowerCase()
-    if (!query) return byCategory
+    const byFavorite = favoriteOnly ? byCategory.filter((item) => item.isFavorite) : byCategory
 
-    return byCategory.filter((item) => item.name.toLowerCase().includes(query))
-  }, [items, activeCategory, searchQuery])
+    const query = searchQuery.trim().toLowerCase()
+    if (!query) return byFavorite
+
+    return byFavorite.filter((item) => item.name.toLowerCase().includes(query))
+  }, [items, activeCategory, favoriteOnly, searchQuery])
 
   // Yükleme bitmiş ve elde hiç parça yoksa (veri boş ya da istek başarısız)
   // sayfa çökmek yerine boş durum gösterir.
@@ -128,8 +136,8 @@ function Wardrobe() {
               onAction={() => setIsAddModalOpen(true)}
             />
 
-            <div className="mt-10 max-w-xs">
-              <div className="relative">
+            <div className="mt-10 flex flex-wrap items-center gap-3">
+              <div className="relative max-w-xs flex-1 sm:min-w-[220px]">
                 <Search
                   size={16}
                   strokeWidth={1.75}
@@ -143,6 +151,32 @@ function Wardrobe() {
                   className="w-full rounded-full border border-ink/15 bg-surface py-2.5 pl-10 pr-4 text-sm text-ink placeholder:text-ink/40 focus:border-dusty-rose focus:outline-none"
                 />
               </div>
+
+              {/* FilterPills ile AYNI görsel dil (aktif/pasif hap) ama ayrı
+                  bir bileşen: kategoriler gibi karşılıklı dışlayan bir set
+                  değil, tek başına açık/kapalı bir anahtar. */}
+              <button
+                type="button"
+                onClick={() => setFavoriteOnly((previous) => !previous)}
+                aria-pressed={favoriteOnly}
+                className={`inline-flex shrink-0 items-center gap-1.5 rounded-full px-5 py-2.5 text-sm font-medium transition-colors duration-200 ${
+                  favoriteOnly
+                    ? 'bg-burgundy text-on-primary'
+                    : 'border border-ink/15 text-ink/60 hover:border-dusty-rose hover:text-accent-ink'
+                }`}
+              >
+                <Heart
+                  size={15}
+                  strokeWidth={1.75}
+                  className={favoriteOnly ? 'fill-on-primary stroke-on-primary' : ''}
+                />
+                Favoriler
+                {favoriteCount > 0 && (
+                  <span className={`text-xs font-normal ${favoriteOnly ? 'text-on-primary/70' : 'text-ink/40'}`}>
+                    ({favoriteCount})
+                  </span>
+                )}
+              </button>
             </div>
 
             {categoryNames.length > 0 && (
@@ -171,9 +205,11 @@ function Wardrobe() {
                 <p className="text-sm text-ink/50">
                   {searchQuery.trim()
                     ? 'Aramanızla eşleşen bir parça bulunamadı.'
-                    : 'Bu kategoride henüz parça yok.'}
+                    : favoriteOnly
+                      ? 'Henüz favori işaretlediğin bir parça yok.'
+                      : 'Bu kategoride henüz parça yok.'}
                 </p>
-                {!searchQuery.trim() && (
+                {!searchQuery.trim() && !favoriteOnly && (
                   <Button
                     variant="primary"
                     onClick={() => setIsAddModalOpen(true)}

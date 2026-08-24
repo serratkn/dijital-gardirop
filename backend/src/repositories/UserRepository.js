@@ -146,6 +146,36 @@ class UserRepository {
     }
   }
 
+  // Kullanıcı silinmeden ÖNCE çağrılmalıdır. `ON DELETE CASCADE`
+  // clothing_items satırlarını veritabanından temizler ama diskteki
+  // fotoğraf dosyalarına DOKUNMAZ — bu yüzden hangi dosyaların artık
+  // sahipsiz kalacağını cascade'den ÖNCE toplamak gerekiyor.
+  //
+  // `is_deleted` FARK ETMEZ: soft-delete edilmiş bir parçanın dosyası
+  // normal akışta zaten silinmiş olur (bkz. ClothingItemService.deleteItem),
+  // ama garanti değildir (örn. doğrudan SQL ile silinen test verisi);
+  // burada dosya sistemine bakılmadan tüm olası yollar toplanıp silme
+  // en sonda idempotent olarak (yoksa hata vermeden) yapılır.
+  async collectUploadedFileNames(userId) {
+    try {
+      const items = await this.pool.query(
+        'SELECT image_url FROM clothing_items WHERE user_id = $1 AND image_url IS NOT NULL',
+        [userId],
+      )
+      const selfie = await this.pool.query(
+        'SELECT skin_tone_photo_url FROM users WHERE id = $1 AND skin_tone_photo_url IS NOT NULL',
+        [userId],
+      )
+      return [
+        ...items.rows.map((row) => row.image_url),
+        ...selfie.rows.map((row) => row.skin_tone_photo_url),
+      ]
+    } catch (error) {
+      console.error('UserRepository.collectUploadedFileNames hatası:', error.message)
+      throw error
+    }
+  }
+
   async delete(id) {
     try {
       const result = await this.pool.query(

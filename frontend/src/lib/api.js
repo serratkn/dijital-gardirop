@@ -322,6 +322,12 @@ export function toggleOutfitFavorite(id) {
   return request(`/outfits/${encodeURIComponent(id)}/favorite`, { method: 'PATCH' })
 }
 
+// "Bugün Giydim" — times_worn'u atomik olarak +1 artırır (sunucu tarafında
+// UPDATE ... SET times_worn = times_worn + 1, yarış durumu yok).
+export function markOutfitAsWorn(id) {
+  return request(`/outfits/${encodeURIComponent(id)}/worn`, { method: 'PATCH' })
+}
+
 export function deleteOutfit(id) {
   return request(`/outfits/${encodeURIComponent(id)}`, { method: 'DELETE' })
 }

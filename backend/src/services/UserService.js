@@ -1,5 +1,6 @@
 const { NotFoundError, ValidationError, ConflictError } = require('../utils/errors')
 const { FIELD_LIMITS, assertMaxLength } = require('../utils/validators')
+const { removeUploadedFile, fileNameFromImageUrl } = require('../config/upload')
 
 const UNIQUE_VIOLATION = '23505'
 const SUBSCRIPTION_TIERS = ['free', 'premium']
@@ -87,10 +88,22 @@ class UserService {
       throw new NotFoundError('Kullanıcı bulunamadı')
     }
 
+    // Dosya yolları CASCADE'DEN ÖNCE toplanır: kullanıcı silindiği anda
+    // clothing_items satırları da gider, image_url'lere bir daha erişilemez.
+    const dosyaYollari = await this.userRepository.collectUploadedFileNames(id)
+
     const deletedUser = await this.userRepository.delete(id)
     if (!deletedUser) {
       throw new NotFoundError('Kullanıcı bulunamadı')
     }
+
+    // Dosya silme EN SONDA ve best-effort: kullanıcı zaten silindi, burada
+    // tek bir dosyanın silinememesi (ör. zaten yok) asıl işlemi ne geri
+    // alır ne de yanıtı geciktirir — removeUploadedFile sessiz ve idempotenttir.
+    for (const url of dosyaYollari) {
+      await removeUploadedFile(fileNameFromImageUrl(url))
+    }
+
     return deletedUser
   }
 

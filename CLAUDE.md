@@ -238,7 +238,9 @@ olduğu için iskelet oraya taşındı, kombin üretimi istemci tarafında anlı
 
 **Uygulamanın tamamı gerçek API üzerinde çalışır; mock veri kalmamıştır.**
 
-- **Gardırop** — listeleme, kategori filtresi, arama, parça ekleme (QuickAddModal), favori,
+- **Gardırop** — listeleme, kategori filtresi, arama, **favori filtresi** (kategori pilleriyle
+  birlikte çalışan bağımsız bir anahtar; Ana Sayfa'daki "Favori" kartı artık doğrudan
+  `?favori=1` ile buraya açılır), parça ekleme (QuickAddModal), favori,
   temiz/kirli işaretleme (kirli parçalar listede kalır, yalnızca kombin önerisi dışında tutulur)
 - **Ana Sayfa** — gerçek istatistikler (parça/kombin/favori) ve son eklenen 4 parça;
   istatistik kartları tıklanabilir (Gardırop / Kombinlerim)
@@ -255,7 +257,8 @@ olduğu için iskelet oraya taşındı, kombin üretimi istemci tarafında anlı
   ya da Chroma'ya ulaşılamayan kullanıcı düğmeyi bile görmez. **Bu kategoride rastgele
   geri düşüş YOKTUR.** Bölüm açıkken kaydedilen kombine makyaj da dahil edilir,
   kapalıyken dört parça kaydedilir
-- **Kombinlerim** — kayıtlı kombinler; parçaları, tarihi, favori ve silme işlemleriyle
+- **Kombinlerim** — kayıtlı kombinler; parçaları, tarihi, favori, **"Bugün Giydim"**
+  (`times_worn` sayacını atomik artırır) ve silme işlemleriyle
 - **Kıyafet Detay** — görüntüleme, favori, onaylı silme, fotoğraf yönetimi,
   **o parçanın geçtiği kombinlerin listesi** ve **"Buna Benzer Diğer Parçalar"**
   (aynı kategoriden en yakın 4 komşu; benzer parça yoksa bölüm hiç görünmez)
@@ -302,14 +305,11 @@ olduğu için iskelet oraya taşındı, kombin üretimi istemci tarafında anlı
 | **Token yenileme yok** | Tek bir access token (varsayılan 7 gün) kullanılır; refresh token yoktur, süre dolunca yeniden giriş gerekir. |
 | **Fotoğraflar yerel diskte** | `backend/uploads/` altında tutulur; çok sunuculu bir kurulumda paylaşılan depolamaya (S3 vb.) taşınması gerekir. Dosyalar `/uploads` yolundan **token'sız** servis edilir — ad tahmin edilemez UUID olduğu için kabul edilebilir sayıldı. |
 | **Fotoğraf boyutlandırma yok** | Yüklenen görsel olduğu gibi saklanır; küçük resim (thumbnail) üretilmez. Native tarafta Capacitor `width: 1600` ile ön küçültme yapar, web'de böyle bir sınır yoktur. |
-| **Kıyafet düzenleme yok** | `PUT /api/clothing-items/:id` ucu hazır ama arayüzde düzenleme akışı yok. |
-| **Kombin "giyildi" sayacı** | `PATCH /outfits/:id/worn` ucu hazır; Kombinlerim sayfası `times_worn` değerini gösterir ama artırma butonu yoktur. |
+| **Kıyafet düzenleme yok** | `PUT /api/clothing-items/:id` ucu hazır ama arayüzde düzenleme akışı yok — QuickAddModal'ı "düzenleme modu"na taşımak gerekir; bu tek başına bir form/akış değişikliği olduğu için ayrı bir çalışma olarak bırakıldı. |
 | **Bildirimler / Yardım & Destek** | "Yakında" sayfalarıdır, işlevleri yoktur. |
-| **Gardırop'ta favori filtresi yok** | Sayfada kategori pillerinden ve aramadan başka filtre yoktur; favorileri tek başına listelemenin bir yolu bulunmuyor. Bu yüzden Ana Sayfa'daki "Favori" kartı filtresiz `/gardirop`'a gider. |
 | **Paylaşım indirmesi mobilde denenmedi** | Görsel üretimi platformdan bağımsızdır ama indirme `<a download>` ile yapılır; Android WebView'de çalışmazsa Capacitor Filesystem/Share eklentisine geçilmelidir. Hata hâlinde kullanıcıya mesaj gösterilir, uygulama çökmez. |
 | **Gemini ücretsiz kotası günde 20 istek** | Ölçüldü (`GenerateRequestsPerDayPerProjectPerModel-FreeTier`, limit 20, `gemini-3.6-flash`). Kota dolduğunda analiz sessizce atlanır ve parça analizsiz kalır; **kendiliğinden yeniden deneyen bir mekanizma yoktur** — `analyze-existing-items.js --uygula` ertesi gün elle çalıştırılır. Gerçek kullanım ücretli plan ister. |
 | **Fotoğraf değişince analiz KENDİLİĞİNDEN güncellenmez** | Maliyet koruması "dolu `ai_analysis` varsa tekrar analiz etme" der. Artık **elle tetiklenebiliyor**: Kıyafet Detay'daki "Yeniden Analiz Et" düğmesi (`POST /clothing-items/:id/analyze`) ve fotoğraf değiştirildiğinde çıkan hatırlatma. Otomatik yapılmıyor çünkü her çağrı gerçek para harcıyor. |
-| **Analizi NULL kalan parçada arayüzde tetikleyici yok** | "Yeniden Analiz Et" düğmesi AI panelinin içindedir, panel de yalnızca analiz varken render edilir. Analizi hiç oluşmamış (ya da başarısız olmuş) bir parçada düğme görünmez; toplu doldurma `test-scripts/analyze-existing-items.js` ile elle yapılır. |
 | **`/gemini/test-analyze` hâlâ duruyor** | Aşama 1'den kalan teşhis ucudur; ürün akışı artık otomatik analizdir. Kaldırılmadı çünkü `test-gemini.js` bağlantı/anahtar yollarını bunun üzerinden doğruluyor. |
 | **Öneri kalitesi indekslenmiş parça sayısına bağlı** | Vektör eşleştirmesi yalnızca `ai_analysis` (dolayısıyla fotoğrafı) olan parçalar için çalışır. Analizsiz bir gardıropta Kombin Öner sessizce eskisi gibi rastgele seçim yapar ve rozet hiç görünmez — hatalı değil ama "akıllı" da değildir. Toplu doldurma `analyze-existing-items.js` + `create-embeddings.js` ile elle yapılır. |
 | **Durum (occasion) vektör aramasına GİRMİYOR** | "Üniversite" ile "Özel Davet" aynı adayları getirir; durum yalnızca kaydedilen kombinin etiketidir. Başlangıç parçası rastgele seçildiği için sonuç yine de her seferinde değişir. Durumu prompt'a/sorguya katmak ayrı bir aşamanın işi. |
@@ -321,7 +321,6 @@ olduğu için iskelet oraya taşındı, kombin üretimi istemci tarafında anlı
 | **Benzer parçalar yalnızca indekslenmiş parçalar arasında** | Analizi olmayan parça ne kaynak ne sonuç olabilir; o parçada bölüm hiç görünmez. Toplu doldurma `analyze-existing-items.js` + `create-embeddings.js` ile elle yapılır. |
 | **Selfie'ler `/uploads`'tan token'sız servis ediliyor** | Kıyafet fotoğraflarıyla AYNI mekanizma: dosya adı tahmin edilemez UUID, yol yalnızca sahibine dönüyor. Ama bir selfie için bu, bir tişört fotoğrafından daha zayıf bir güvence — adres bir kez sızarsa (ekran görüntüsü, tarayıcı geçmişi) kimlik doğrulaması yok. Gerçekten korumak için ayrı bir dizin + token'lı stream ucu gerekir; `<img>` başlık gönderemediği için istemci blob'a çevirmeli. |
 | **Ten tonu analizi GERÇEK selfie ile denenmedi** | Elde gerçek bir selfie olmadığı için doğrulama sentetik bir portre çizimiyle yapıldı (Gemini bunu kabul etti ve çizilen sıcak paleti doğru okudu: "Sıcak / Açık buğday teni"). Gerçek bir fotoğrafta sonucun kalitesi ölçülmedi. |
-| **Kullanıcı silinince fotoğrafları diskte kalıyor** | `ON DELETE CASCADE` veritabanı satırlarını siler ama `uploads/` altındaki dosyalara dokunmaz; test kullanıcıları arkasında öksüz dosya bırakıyor. `cleanup.js` bunları toplamaz (yalnızca Chroma öksüzlerini toplar), elle temizlik gerekir. |
 | **Test altyapısı yok** | Test framework'ü yoktur. Doğrulama: `npm run lint` + `backend/test-scripts/` + elle deneme. |
 
 ---
@@ -681,7 +680,7 @@ ve kart favori kalbini, "Kirli" rozetini bu alanlardan çiziyor.
 | `GET` | `/users/:id` | — |
 | `POST` | `/users` | `{ name, email*, age, city }` |
 | `PUT` | `/users/:id` | `{ name, email*, age, city, subscriptionTier }` |
-| `DELETE` | `/users/:id` | → `204`; tercih/kıyafet/kombinleri CASCADE ile siler |
+| `DELETE` | `/users/:id` | → `204`; tercih/kıyafet/kombinleri CASCADE ile siler, **ilişkili fotoğrafları/selfie'yi diskten de siler** |
 | `GET` | `/users/:id/stats` | Gardırop istatistik özeti (bkz. aşağısı) |
 | `GET` | `/users/skin-tone-analysis` | Ten tonu analizi (yoksa `null`) |
 | `POST` | `/users/skin-tone-analysis` | **multipart/form-data**, alan adı `image`. Selfie yükler ve analiz eder (senkron) |
@@ -1063,10 +1062,16 @@ node test-scripts/test-skin-tone.js --kotasiz
 node test-scripts/test-gemini.js
 node test-scripts/test-gemini.js --image ../yol/kiyafet.jpg
 
-# Test artıklarını temizler
+# Test artıklarını temizler (test kayıtları + Chroma öksüz vektörleri +
+# uploads/ öksüz dosyaları — üçü de aynı çalıştırmada temizlenir)
 node test-scripts/cleanup.js --dry-run               # önce neyin silineceğini göster
 node test-scripts/cleanup.js                         # test parçaları + @example.com kullanıcıları
 node test-scripts/cleanup.js --all --user <uuid>     # bir kullanıcının TÜM verisi
+
+# Öksüz dosya temizliği (9 kontrol): kullanıcı silinince kıyafet fotoğrafı VE
+# selfie diskten kalkıyor mu, cleanup.js referanssız dosyaları süpürüp
+# referanslı (canlı) dosyalara dokunmuyor mu.
+node test-scripts/test-file-cleanup.js
 ```
 
 **Frontend'de de tek bir test scripti var** (`frontend/` klasöründen çalıştırılır):
@@ -1343,6 +1348,18 @@ veritabanı için aynı kodu kullanır.
 tarafından kullanılması — bunlar `password_hash` döndüren tek metodlardır, dönen nesne
 asla doğrudan API yanıtına verilmemelidir.
 
+**`UserService.deleteUser` dosya yollarını CASCADE'DEN ÖNCE toplar.** `ON DELETE CASCADE`
+yalnızca Postgres satırlarını temizler, diskteki dosyalara dokunmaz; kullanıcı silindikten
+sonra `clothing_items.image_url`'lere bir daha erişilemez. Sıra: `collectUploadedFileNames`
+(kıyafet fotoğrafları + `skin_tone_photo_url`) → `delete` (CASCADE tetiklenir) → her yol için
+`removeUploadedFile` (best-effort, sessiz — kullanıcı zaten silindi, tek bir dosyanın
+silinememesi asıl işlemi geri almamalı). `cleanup.js`'in kendi `DELETE FROM ...` çağrıları
+(test parçaları + test kullanıcıları) bu akıştan GEÇMEZ; onun için ayrı bir
+`temizleOksuzDosyalar()` var — Chroma'nın `temizleOksuzVektorler()`'iyle birebir aynı
+desen, yalnızca "referans" kümesi `clothing_items.image_url` + `users.skin_tone_photo_url`
+birleşimi. `is_deleted` fark etmez: hem soft-delete edilmiş hem canlı satırların
+referansları korunur, yalnızca DİSKTE OLUP hiçbir satırdan işaret edilmeyen dosyalar silinir.
+
 Backend ayrı `DB_HOST` / `DB_PORT` / `DB_NAME` / `DB_USER` / `DB_PASSWORD` değişkenleri okur.
 **Kökteki** `.env.example` içindeki `DATABASE_URL` satırı mevcut kod tarafından kullanılmaz.
 
@@ -1356,6 +1373,19 @@ kullanıcıya gösterilebilir. `204` için `null` döner.
 (onboarding'de `POST /api/users` ile oluşturulan gerçek kullanıcı), yoksa sabit bir yedek
 id'ye düşer. **Sabit değil fonksiyondur** — onboarding sonrası id değişir, bu yüzden her
 çağrıda güncel değer okunmalıdır. Auth geldiğinde ikisi de kaldırılacak.
+
+**Gardırop favori filtresi.** Kategori pilleriyle AYNI görsel dilde ama ayrı bir
+bileşen: kategoriler karşılıklı dışlayan bir küme, favori ise tek başına açık/kapalı
+bir anahtar (`favoriteOnly` state). `?kategori=` ile birebir aynı desen — yalnızca
+İLK yüklemede `?favori=1`'den okunur, sonrası URL'e geri yazılmaz. Ana Sayfa'daki
+"Favori" `StatCard`'ı artık `/gardirop?favori=1`'e gider (öncesinde filtresiz
+`/gardirop`'a gidiyordu, çünkü filtre yoktu).
+
+**Kombinlerim "Bugün Giydim".** `PATCH /outfits/:id/worn` zaten hazırdı, yalnızca
+arayüzde tetikleyicisi yoktu. Favori toggle'ıyla AYNI iyimser güncelleme deseni:
+sayaç anında +1 olur, sunucudan gelen gerçek `times_worn` ile değiştirilir, hata
+olursa geri alınır. Artış **idempotent DEĞİLDİR** — her tıklama ayrı bir "giyme"
+kaydı sayılır, bilerek (backend zaten atomik `times_worn = times_worn + 1` yapıyor).
 
 **Dönüştürücü:** `src/lib/transformers.js` snake_case → camelCase çevirisini ve
 `category_id` → kategori **adı** eşlemesini yapar (ikon eşlemesi ada göre çalışır).
@@ -1548,6 +1578,15 @@ yazmaya değmezdi: hatırlatmanın hedefi zaten kullanıcının AZ ÖNCE yaptı�
 değişiklik. `handlePhotoUpload` başarılı olduğunda ve parçanın analizi doluysa
 `photoChanged` açılır, yeniden analiz sonrası kapanır.
 
+**Analizi HİÇ oluşmamış parçada AYRI bir davet kutusu var** (`ClothingDetail.jsx`,
+`AiAnalysisPanel`'in DIŞINDA — panel `analysis` boşken zaten null döner). Aynı
+`handleReanalyze`'ı çağırır; backend zaten `force: true` gönderiyor ve
+`ai_analysis` NULL olduğu için maliyet koruması baştan devre dışı kalır, force
+ile forcesuz burada aynı sonucu verir. Yalnızca `item.imageUrl` VARSA ve
+otomatik arka plan yoklaması (`isAnalysisPending`) BİTMİŞSE gösterilir — pencere
+sürerken göstermek kafa karıştırırdı (backend'in in-flight muhafızı zaten 409
+döndürür ama "neden iki tane oldu" sorusu kalırdı).
+
 **Gösterim SIRASI arayüzde tanımlıdır** (`ALAN_ETIKETLERI` / `UYUMLULUK_ETIKETLERI`
 nesnelerinin anahtar sırası). Saklanan JSON'ın sırasına güvenilemez: kolon JSONB'dir
 ve anahtarları uzunluk + bayt sırasına göre yeniden dizer. İlk sürümde buna
@@ -1715,6 +1754,131 @@ fotoğraf sorunu teyit edildikten sonra üç yerden de kaldırılabilir.
 
 > Bundan sonraki her çalışma buraya tarihiyle işlenir: eklenen özellikler, düzeltilen
 > hatalar, alınan mimari kararlar. En yeni kayıt en üstte.
+
+### 2026-08-24 — Bilinen Eksikliklerin Temizlenmesi
+- **Kapsam:** CLAUDE.md'nin "Eksikler" tablosundan, küçük ve izole olan dört
+  madde tarandı, düzeltildi ve tablodan çıkarıldı. Her biri ayrı ayrı test
+  edildi; büyük mimari değişiklik gerektiren maddelere (selfie'nin token'sız
+  servis edilmesi gibi) BİLEREK dokunulmadı, yalnızca raporlandı.
+
+**1) "Şimdi Analiz Et" — analizi hiç oluşmamış parçada manuel tetikleyici**
+- **Sorun:** "Yeniden Analiz Et" düğmesi `AiAnalysisPanel`'in içindeydi ve panel
+  yalnızca DOLU bir analiz varken render oluyordu; `ai_analysis` hiç oluşmamış
+  ya da kalıcı olarak başarısız kalmış bir parçada arayüzde HİÇBİR tetikleyici
+  yoktu — tek çözüm `analyze-existing-items.js`'i elle çalıştırmaktı.
+- **Çözüm:** `ClothingDetail.jsx`'e, panelin DIŞINDA yeni bir davet kutusu
+  eklendi (`data-testid="ai-analiz-daveti"`). AYNI `handleReanalyze`'ı çağırıyor;
+  backend zaten `force: true` gönderiyor ve `ai_analysis` NULL olduğu için
+  maliyet koruması baştan devre dışı — force ile forcesuz burada aynı sonucu
+  veriyor, **backend'de hiçbir değişiklik gerekmedi**.
+- **Görünürlük koşulları bilinçli:** yalnızca `item.imageUrl` VARSA (analiz
+  edilecek görsel olmalı) ve otomatik arka plan yoklaması BİTMİŞSE
+  (`!isAnalysisPending`) gösterilir. Pencere sürerken göstermek kafa
+  karıştırırdı — backend'in in-flight muhafızı zaten 409 döndürür ama kullanıcı
+  "neden iki tane oldu" diye sorardı.
+- **Doğrulama — gerçek tarayıcıda 18 kontrol** (geçici test kullanıcısıyla):
+  arka plan yoklaması sürerken davet YOK; yoklama penceresi (70 sn) kapanınca
+  davet çıkıyor; Gemini erişilemezken davet ekranında kalıp panele GEÇMİYOR,
+  eski hâliyle tekrar denenebiliyor; **gerçek Gemini ile ilk analiz** sonrası
+  davet kayboluyor ve panel + "Yeniden Analiz Et" düğmesi beliriyor; fotoğrafsız
+  parçada davet hiç görünmüyor.
+- **TEST TUZAĞI — SQL ile `ai_analysis`'i NULL'a çekmek gerçek arka plan
+  analiziyle YARIŞTI.** İlk denemede fotoğraf yükleme ucu (`POST .../image`)
+  HER ZAMAN arka plan analizini tetikliyor; SQL null-out'un hemen ardından o
+  analiz bitip kolonu geri doldurdu, test kararsız oldu. Ürün hatası değildi —
+  düzeltme: fotoğraf, upload ucu yerine dosyayı elle kopyalayıp `image_url`'i
+  DOĞRUDAN SQL ile yazarak eklendi; bu yol analiz tetikleyicisini hiç
+  çağırmadığı için "analizi hiç yapılmamış parça" durumu YARIŞSIZ kuruldu.
+
+**2) Öksüz dosya temizliği — kullanıcı silme + `cleanup.js`**
+- **Sorun:** `DELETE /api/users/:id` `ON DELETE CASCADE` ile Postgres
+  satırlarını temizliyordu ama `uploads/` altındaki kıyafet fotoğrafları ve
+  selfie'ler diskte kalıyordu — kullanıcı silindikten SONRA `image_url`'lere
+  bir daha erişilemediği için bu dosyalar sonsuza dek öksüz kalıyordu.
+- **Çözüm — iki ayrı kaynak, iki ayrı düzeltme:**
+  1. `UserRepository.collectUploadedFileNames(userId)` eklendi: kıyafet
+     fotoğrafları + `skin_tone_photo_url`'i CASCADE'DEN ÖNCE toplar.
+     `UserService.deleteUser` artık: topla → sil (CASCADE tetiklenir) → her
+     yol için `removeUploadedFile` (best-effort, sessiz). Sıra bilinçli:
+     kullanıcı zaten silindiği için tek bir dosyanın silinememesi asıl işlemi
+     ne geri alır ne engeller.
+  2. `cleanup.js`'e Chroma'nın `temizleOksuzVektorler()`'iyle BİREBİR AYNI
+     desende bir `temizleOksuzDosyalar()` eklendi: bu, `cleanup.js`'in KENDİ
+     doğrudan `DELETE FROM ...` çağrılarının (test parçaları + test
+     kullanıcıları) UserService akışından geçmediği için bıraktığı öksüzleri
+     süpürür. Referans kümesi `clothing_items.image_url` +
+     `users.skin_tone_photo_url` birleşimi; `is_deleted` FARK ETMEZ (hem
+     soft-delete hem canlı satırların referansları korunur), yalnızca diskte
+     olup HİÇBİR satırdan işaret edilmeyen dosyalar silinir.
+- **Gerçek veriyle doğrulandı:** kullanıcı silme akışı gerçek bir kıyafet
+  fotoğrafını ve simüle edilmiş bir selfie'yi diskten kaldırdığı, `cleanup.js`
+  çalıştırıldığında 6 önceden birikmiş test artığı dosyanın süpürüldüğü ve
+  **canlı gardırop fotoğraflarının hiçbirine dokunulmadığı** doğrulandı
+  (referans testi: rastgele seçilen canlı bir dosyanın sweep sonrası hâlâ
+  diskte olduğu kontrol edildi).
+- **Doğrulama — yeni `test-scripts/test-file-cleanup.js`, 9 kontrol:**
+  kullanıcı silme akışı (kıyafet fotoğrafı gerçek upload ucundan yükleniyor,
+  selfie SQL ile simüle ediliyor — Gemini kotası harcanmıyor), ikisinin de
+  silme sonrası diskten kalktığı, kullanıcının veritabanından da gittiği;
+  `cleanup.js` (gerçek `execFileSync` ile child process olarak çalıştırılıyor)
+  öksüz dosyayı süpürüyor VE referanslı dosyaya dokunmuyor.
+
+**3) Gardırop favori filtresi + Kombinlerim "Bugün Giydim" sayacı**
+- Eksikler tablosunda ayrıca iki küçük UI/bağlantı eksikliği bulundu:
+  "Gardırop'ta favori filtresi yok" (kullanıcının açıkça adlandırdığı madde)
+  ve "Kombin 'giyildi' sayacı" (endpoint hazır, arayüzde tetikleyici yok —
+  madde 1'le AYNI kalıp). İkisi de düzeltildi.
+- **Favori filtresi:** `Wardrobe.jsx`'e kategori pilleriyle AYNI görsel dilde
+  ama ayrı bir bileşen eklendi — kategoriler karşılıklı dışlayan bir küme,
+  favori ise tek başına açık/kapalı bir anahtar (`favoriteOnly`). `?kategori=`
+  ile BİREBİR AYNI desen: yalnızca İLK yüklemede `?favori=1`'den okunur, sonrası
+  URL'e geri yazılmaz. Ana Sayfa'daki "Favori" `StatCard`'ı artık
+  `/gardirop?favori=1`'e gidiyor (kodda zaten "filtre eklenirse buraya
+  bağlanmalı" diye yorumla işaretlenmişti). Kategori + favori + arama filtreleri
+  BİRLİKTE çalışıyor (zincirleme, birbirini geçersiz kılmıyor).
+- **"Bugün Giydim":** `PATCH /outfits/:id/worn` zaten hazırdı (Aşama 6'dan
+  kalma), yalnızca arayüzde tetikleyicisi yoktu. `OutfitHistory.jsx`'teki
+  favori toggle'ıyla BİREBİR AYNI iyimser güncelleme deseni: sayaç anında +1
+  olur, sunucudan gelen gerçek `times_worn` ile değiştirilir, hata olursa geri
+  alınır. Artış **idempotent DEĞİLDİR** — her tıklama ayrı bir "giyme" kaydı
+  sayılır (backend zaten atomik `times_worn = times_worn + 1` yapıyor,
+  yarış durumu oluşturmuyor).
+- **Backend'de hiçbir değişiklik gerekmedi** — ikisi de mevcut uçların üstüne
+  yalnızca frontend bağlantısıydı.
+- **Doğrulama — gerçek tarayıcıda 8 + 6 kontrol:** favori kartının doğru
+  yolu taşıması, tıklanınca filtrenin ÖNCEDEN AKTİF açılması, gösterilen kart
+  sayısının gerçek favori sayısıyla eşleşmesi, kartların hepsinin gerçekten
+  dolu kalp taşıması, filtre kapanınca tüm gardırobun görünmesi, kategoriyle
+  birlikte çalışması; "Bugün Giydim" düğmesinin görünmesi, tıklanınca
+  veritabanında `times_worn`'un GERÇEKTEN +1 olması, ekrandaki "X kez giyildi"
+  metninin güncellenmesi, ikinci tıklamada tekrar artması (idempotent
+  olmadığının kanıtı). Test sonunda gerçek kombinin sayacı test öncesi
+  değerine geri alındı.
+
+**Rapor edilen, DOKUNULMAYAN maddeler** (kullanıcı talebiyle mimari kapsam dışı
+bırakıldı, karar kullanıcıya bırakıldı):
+- **Kıyafet düzenleme yok** — `PUT /api/clothing-items/:id` ucu hazır ama
+  arayüzde düzenleme akışı yok. "Quick fix" kapsamına GİRMEDİ: tam bir form/akış
+  gerektiriyor (QuickAddModal'ı "düzenleme modu"na taşımak gibi), tek satırlık
+  bir bağlantı değil.
+- **Selfie'ler `/uploads`'tan token'sız servis ediliyor** — güvenlik mimarisi
+  kararı, kullanıcı açıkça dokunulmamasını istedi.
+- **Paylaşım indirmesi mobilde denenmedi** — fiziksel cihaz gerektiriyor,
+  koddan doğrulanamaz.
+- **Şifre sıfırlama / e-posta doğrulama / token yenileme** — yeni özellik
+  gerektiren maddeler, "küçük UI/bağlantı eksikliği" tanımına girmiyor.
+- **Fotoğraflar yerel diskte / boyutlandırma yok** — depolama mimarisi kararı.
+- **Bildirimler / Yardım & Destek "Yakında" sayfaları** — kasıtlı yer tutucular,
+  bug değil.
+- **Gemini kota, embedding/durum sınırlamaları, Chroma-Postgres bütünlüğü**
+  — bilinçli mimari ödünleşmeler ya da veri/algoritma sınırlamaları, UI
+  bağlantısı eksikliği değil.
+
+Regresyon: `test-all-endpoints` 72/72, `test-auth` 48/48, `test-stats` 60/60,
+`test-item-outfits` 27/27, `test-clean-status` 26/26, `test-skin-tone --kotasiz`
+40/40, `test-vector` 82/82, `test-outfit-rag` 69/69, `test-ai-analysis --kotasiz`
+67/67, `test-outfit-builder` 73/73, lint + build temiz. Temizlik sonrası
+gardırop 17 parça / 9 dosya (öksüz yok), test kullanıcısı kalmadı.
 
 ### 2026-08-23 — Gemini Entegrasyonu — Ten Tonu Analizi
 - **Ne eklendi:** Kullanıcı Profil > "Ten Tonu Analizim" bölümünden bir selfie
