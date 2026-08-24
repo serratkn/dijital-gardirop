@@ -18,7 +18,7 @@ const crypto = require('node:crypto')
 const { execFileSync } = require('node:child_process')
 require('dotenv').config({ path: path.join(__dirname, '..', '.env') })
 
-const { UPLOAD_DIR } = require('../src/config/upload')
+const { UPLOAD_DIR, SELFIE_UPLOAD_DIR } = require('../src/config/upload')
 const pool = require('../src/config/database')
 
 const BASE_URL = `http://localhost:${process.env.PORT || 3001}/api`
@@ -53,6 +53,15 @@ function gercekGorselKopyala() {
   const kaynak = fs.readdirSync(UPLOAD_DIR).find((f) => f.endsWith('.png'))
   const yeniAd = `${crypto.randomUUID()}.png`
   fs.copyFileSync(path.join(UPLOAD_DIR, kaynak), path.join(UPLOAD_DIR, yeniAd))
+  return yeniAd
+}
+
+// Selfie ARTIK SELFIE_UPLOAD_DIR'e yazılır (kıyafet fotoğraflarıyla aynı
+// kaynak dosyadan kopyalanır, ama hedef klasör farklıdır).
+function gercekSelfieKopyala() {
+  const kaynak = fs.readdirSync(UPLOAD_DIR).find((f) => f.endsWith('.png'))
+  const yeniAd = `${crypto.randomUUID()}.png`
+  fs.copyFileSync(path.join(UPLOAD_DIR, kaynak), path.join(SELFIE_UPLOAD_DIR, yeniAd))
   return yeniAd
 }
 
@@ -99,25 +108,25 @@ async function kullaniciSilmeTesti() {
   // "dosya siliniyor mu", "Gemini doğru ten tonu buluyor mu" değil —
   // test-skin-tone.js zaten o kısmı kapsıyor. Doğrudan SQL ile users
   // satırına yazmak yeterli ve kotayı boşa harcamıyor.
-  const selfieAdi = gercekGorselKopyala()
+  const selfieAdi = gercekSelfieKopyala()
   await pool.query('UPDATE users SET skin_tone_photo_url = $1 WHERE id = $2', [
-    `/uploads/${selfieAdi}`,
+    `/uploads/selfies/${selfieAdi}`,
     auth.user.id,
   ])
-  check('Selfie dosyası diskte', fs.existsSync(path.join(UPLOAD_DIR, selfieAdi)))
+  check('Selfie dosyası diskte (selfies/ altında)', fs.existsSync(path.join(SELFIE_UPLOAD_DIR, selfieAdi)))
 
   const { status: deleteStatus } = await call('DELETE', `/users/${auth.user.id}`, { token: auth.token })
   check('Kullanıcı silindi (204)', deleteStatus === 204)
 
-  // removeUploadedFile fs işlemleri senkron değil (fs.promises); küçük bir
-  // pay bırakıyoruz.
+  // removeUploadedFile/removeSelfieFile fs işlemleri senkron değil
+  // (fs.promises); küçük bir pay bırakıyoruz.
   await new Promise((resolve) => setTimeout(resolve, 300))
 
   check(
     'Kıyafet fotoğrafı DİSKTEN kalktı',
     kiyafetDosyaAdi ? !fs.existsSync(path.join(UPLOAD_DIR, kiyafetDosyaAdi)) : false,
   )
-  check('Selfie DİSKTEN kalktı', !fs.existsSync(path.join(UPLOAD_DIR, selfieAdi)))
+  check('Selfie DİSKTEN kalktı (selfies/ altından)', !fs.existsSync(path.join(SELFIE_UPLOAD_DIR, selfieAdi)))
 
   const { rows } = await pool.query('SELECT count(*)::int c FROM users WHERE id = $1', [auth.user.id])
   check('Kullanıcı veritabanından da gitti', rows[0].c === 0)
@@ -140,6 +149,14 @@ async function cleanupScriptTesti() {
   const oksuzAdi = gercekGorselKopyala()
   check('Öksüz test dosyası oluşturuldu', fs.existsSync(path.join(UPLOAD_DIR, oksuzAdi)))
 
+  // Selfie tarafı İÇİN AYRI bir öksüz dosya — artık farklı bir klasörde
+  // (SELFIE_UPLOAD_DIR) yaşadığı için sweep'in oraya da baktığını doğruluyoruz.
+  const oksuzSelfieAdi = gercekSelfieKopyala()
+  check(
+    'Öksüz selfie test dosyası oluşturuldu (selfies/ altında)',
+    fs.existsSync(path.join(SELFIE_UPLOAD_DIR, oksuzSelfieAdi)),
+  )
+
   execFileSync(process.execPath, [path.join(__dirname, 'cleanup.js')], {
     cwd: path.join(__dirname, '..'),
     stdio: 'pipe',
@@ -147,9 +164,17 @@ async function cleanupScriptTesti() {
 
   check('Öksüz dosya SÜPÜRÜLDÜ', !fs.existsSync(path.join(UPLOAD_DIR, oksuzAdi)))
   check(
+    'Öksüz SELFIE de SÜPÜRÜLDÜ (ayrı klasör, ayrı tarama)',
+    !fs.existsSync(path.join(SELFIE_UPLOAD_DIR, oksuzSelfieAdi)),
+  )
+  check(
     'Referanslı (canlı) dosyaya DOKUNULMADI',
     referansliDosya ? fs.existsSync(path.join(UPLOAD_DIR, referansliDosya)) : true,
     referansliDosya ?? '(gardırop boş, kontrol atlandı)',
+  )
+  check(
+    "'selfies' alt klasörü YANLIŞLIKLA silinmeye çalışılmadı (kıyafet taramasından hariç tutulur)",
+    fs.existsSync(SELFIE_UPLOAD_DIR),
   )
 }
 

@@ -4,3 +4,9 @@ node_modules
 # Yüklenen kıyafet fotoğrafları (klasörün kendisi .gitkeep ile repoda kalır)
 backend/uploads/*
 !backend/uploads/.gitkeep
+# uploads/selfies/ AYRI bir alt klasördür (token'sız /uploads static'inden
+# hariç tutulur, bkz. server.js) — klasörün kendisi önce açıkça un-ignore
+# edilmeli ki içindeki .gitkeep'e ulaşılabilsin.
+!backend/uploads/selfies/
+backend/uploads/selfies/*
+!backend/uploads/selfies/.gitkeep

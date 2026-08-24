@@ -388,6 +388,30 @@ export function deleteSkinToneAnalysis() {
   return request('/users/skin-tone-analysis', { method: 'DELETE' })
 }
 
+// Selfie'nin KENDİSİ artık /uploads/... İLE DEĞİL, bu token'lı uçtan blob
+// olarak çekilir (backend bunu express.static ile değil, doğrudan controller'dan
+// okuyup gönderir — bkz. CLAUDE.md). Çağıran taraf blob'u URL.createObjectURL
+// ile <img src>'e çevirir ve iş bittiğinde revokeObjectURL ile serbest bırakır
+// (PhotoPicker'daki aynı yaşam döngüsü deseni).
+//
+// Analiz/selfie yoksa backend 404 döner; bu bir HATA DEĞİLDİR — null dönülür,
+// çağıran taraf görseli hiç göstermez.
+export async function fetchSkinTonePhoto() {
+  const token = getToken()
+  const response = await fetch(`${API_BASE_URL}/users/skin-tone-analysis/photo`, {
+    headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+  })
+
+  if (response.status === 404) return null
+
+  if (!response.ok) {
+    if (response.status === 401) notifyUnauthorized()
+    throw new Error(`Selfie alınamadı (${response.status})`)
+  }
+
+  return response.blob()
+}
+
 export function fetchStylePreferences() {
   return request('/style-preferences')
 }

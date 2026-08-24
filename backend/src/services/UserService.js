@@ -1,6 +1,6 @@
 const { NotFoundError, ValidationError, ConflictError } = require('../utils/errors')
 const { FIELD_LIMITS, assertMaxLength } = require('../utils/validators')
-const { removeUploadedFile, fileNameFromImageUrl } = require('../config/upload')
+const { removeUploadedFile, removeSelfieFile, fileNameFromImageUrl } = require('../config/upload')
 
 const UNIQUE_VIOLATION = '23505'
 const SUBSCRIPTION_TIERS = ['free', 'premium']
@@ -90,7 +90,8 @@ class UserService {
 
     // Dosya yolları CASCADE'DEN ÖNCE toplanır: kullanıcı silindiği anda
     // clothing_items satırları da gider, image_url'lere bir daha erişilemez.
-    const dosyaYollari = await this.userRepository.collectUploadedFileNames(id)
+    const { clothingImageUrls, selfiePhotoUrl } =
+      await this.userRepository.collectUploadedFileNames(id)
 
     const deletedUser = await this.userRepository.delete(id)
     if (!deletedUser) {
@@ -99,9 +100,14 @@ class UserService {
 
     // Dosya silme EN SONDA ve best-effort: kullanıcı zaten silindi, burada
     // tek bir dosyanın silinememesi (ör. zaten yok) asıl işlemi ne geri
-    // alır ne de yanıtı geciktirir — removeUploadedFile sessiz ve idempotenttir.
-    for (const url of dosyaYollari) {
+    // alır ne de yanıtı geciktirir — her iki fonksiyon da sessiz ve idempotent.
+    // İKİ AYRI FONKSİYON kullanılır çünkü kıyafet fotoğrafları ve selfie
+    // artık FARKLI klasörlerde yaşıyor (UPLOAD_DIR kökü / UPLOAD_DIR/selfies).
+    for (const url of clothingImageUrls) {
       await removeUploadedFile(fileNameFromImageUrl(url))
+    }
+    if (selfiePhotoUrl) {
+      await removeSelfieFile(fileNameFromImageUrl(selfiePhotoUrl))
     }
 
     return deletedUser

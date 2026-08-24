@@ -156,6 +156,10 @@ class UserRepository {
   // ama garanti değildir (örn. doğrudan SQL ile silinen test verisi);
   // burada dosya sistemine bakılmadan tüm olası yollar toplanıp silme
   // en sonda idempotent olarak (yoksa hata vermeden) yapılır.
+  // İKİ AYRI liste döner (tek bir düz dizi DEĞİL): kıyafet fotoğrafları
+  // UPLOAD_DIR kökünde, selfie ise UPLOAD_DIR/selfies altında yaşıyor —
+  // çağıran (UserService.deleteUser) her biri için doğru silme fonksiyonunu
+  // (removeUploadedFile / removeSelfieFile) seçebilsin diye ayrım burada yapılır.
   async collectUploadedFileNames(userId) {
     try {
       const items = await this.pool.query(
@@ -166,10 +170,10 @@ class UserRepository {
         'SELECT skin_tone_photo_url FROM users WHERE id = $1 AND skin_tone_photo_url IS NOT NULL',
         [userId],
       )
-      return [
-        ...items.rows.map((row) => row.image_url),
-        ...selfie.rows.map((row) => row.skin_tone_photo_url),
-      ]
+      return {
+        clothingImageUrls: items.rows.map((row) => row.image_url),
+        selfiePhotoUrl: selfie.rows[0]?.skin_tone_photo_url ?? null,
+      }
     } catch (error) {
       console.error('UserRepository.collectUploadedFileNames hatası:', error.message)
       throw error

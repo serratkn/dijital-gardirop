@@ -12,9 +12,12 @@
 
 const path = require('node:path')
 const fs = require('node:fs')
+const crypto = require('node:crypto')
+const { execFileSync } = require('node:child_process')
 require('dotenv').config({ path: path.join(__dirname, '..', '.env') })
 
-const { UPLOAD_DIR } = require('../src/config/upload')
+const { UPLOAD_DIR, SELFIE_UPLOAD_DIR } = require('../src/config/upload')
+const pool = require('../src/config/database')
 
 const BASE_URL = `http://localhost:${process.env.PORT || 3001}/api`
 const ONLY_UNIT = process.argv.includes('--birim')
@@ -68,16 +71,29 @@ async function upload(endpoint, filePath, token, { mimetype = 'image/png', name 
 
 const isNonEmptyString = (v) => typeof v === 'string' && v.trim().length > 0
 const uploadsSayisi = () => fs.readdirSync(UPLOAD_DIR).length
+// Selfie'ler ARTIK SELFIE_UPLOAD_DIR'de yaşıyor — öksüz dosya sayımı (gerçek
+// Gemini bölümü) bu yüzden ayrı bir sayaç kullanır.
+const selfieUploadsSayisi = () => fs.readdirSync(SELFIE_UPLOAD_DIR).filter((f) => f !== '.gitkeep').length
+
+async function fotoIndir(token) {
+  const response = await fetch(`${BASE_URL}/users/skin-tone-analysis/photo`, {
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+  })
+  const buffer = Buffer.from(await response.arrayBuffer())
+  return { status: response.status, contentType: response.headers.get('content-type'), buffer }
+}
 
 // ============================================================
 // BÖLÜM 1 — birim (sunucu ve anahtar GEREKTİRMEZ)
 // ============================================================
 
 // Gerçek bir dosya yazıyoruz: servis dosyayı okuyup siliyor, sahte yol
-// kullanmak bu davranışı test dışında bırakırdı.
+// kullanmak bu davranışı test dışında bırakırdı. SELFIE_UPLOAD_DIR'e yazılır
+// çünkü gerçek multer akışında (uploadSelfieImage) dosya zaten oraya düşer —
+// servis bunu KENDİSİ diske yazmaz, yalnızca zaten yazılmış olanı okur/siler.
 function geciciSelfie(ad) {
   const dosyaAdi = `test-selfie-${ad}-${Date.now()}.png`
-  const tamYol = path.join(UPLOAD_DIR, dosyaAdi)
+  const tamYol = path.join(SELFIE_UPLOAD_DIR, dosyaAdi)
   fs.writeFileSync(tamYol, Buffer.from('sahte-png-icerigi'))
   return { filename: dosyaAdi, path: tamYol, mimetype: 'image/png' }
 }
@@ -181,7 +197,11 @@ async function birimTestleri() {
     check('Analiz kaydedildi', repo.yazmaSayisi === 1)
     check('Ten tonu dönüyor', sonuc.analiz?.veri?.ten_tonu === 'Sıcak')
     check('Model ve tarih saklanıyor', isNonEmptyString(sonuc.analiz?.model) && isNonEmptyString(sonuc.analiz?.analiz_tarihi))
-    check('Fotoğraf GÖRELİ yol olarak saklanıyor', sonuc.foto_url === `/uploads/${file.filename}`)
+    check(
+      'Fotoğraf GÖRELİ yol olarak, selfies/ ALT KLASÖRÜNDE saklanıyor',
+      sonuc.foto_url === `/uploads/selfies/${file.filename}`,
+      sonuc.foto_url,
+    )
     check('Selfie diskte duruyor', fs.existsSync(file.path))
     check('Gemini tampon aldı (dosya yolu değil)', Buffer.isBuffer(g.sonDosya?.buffer))
 
@@ -221,10 +241,10 @@ async function birimTestleri() {
     const repo = sahteUserRepo({
       id: 'u1',
       skin_tone_analysis: eski,
-      skin_tone_photo_url: '/uploads/eski-selfie.png',
+      skin_tone_photo_url: '/uploads/selfies/eski-selfie.png',
     })
     // Eski selfie'nin gerçekten silinmediğini görebilmek için dosyayı yaz.
-    const eskiYol = path.join(UPLOAD_DIR, 'eski-selfie.png')
+    const eskiYol = path.join(SELFIE_UPLOAD_DIR, 'eski-selfie.png')
     fs.writeFileSync(eskiYol, Buffer.from('eski'))
 
     const g = sahteGemini(() => {
@@ -314,12 +334,12 @@ async function birimTestleri() {
   console.log('\n8) Eski selfie yalnızca BAŞARILI yazmadan sonra silinir')
 
   {
-    const eskiYol = path.join(UPLOAD_DIR, 'eski-selfie-2.png')
+    const eskiYol = path.join(SELFIE_UPLOAD_DIR, 'eski-selfie-2.png')
     fs.writeFileSync(eskiYol, Buffer.from('eski'))
     const repo = sahteUserRepo({
       id: 'u1',
       skin_tone_analysis: { model: 'onceki' },
-      skin_tone_photo_url: '/uploads/eski-selfie-2.png',
+      skin_tone_photo_url: '/uploads/selfies/eski-selfie-2.png',
     })
     const service = new SkinToneService(repo, sahteGemini())
     const file = geciciSelfie('degistir')
@@ -333,12 +353,12 @@ async function birimTestleri() {
   console.log('\n9) Silme — analiz ve selfie birlikte kalkar')
 
   {
-    const eskiYol = path.join(UPLOAD_DIR, 'eski-selfie-3.png')
+    const eskiYol = path.join(SELFIE_UPLOAD_DIR, 'eski-selfie-3.png')
     fs.writeFileSync(eskiYol, Buffer.from('eski'))
     const repo = sahteUserRepo({
       id: 'u1',
       skin_tone_analysis: { model: 'onceki' },
-      skin_tone_photo_url: '/uploads/eski-selfie-3.png',
+      skin_tone_photo_url: '/uploads/selfies/eski-selfie-3.png',
     })
     const service = new SkinToneService(repo, sahteGemini())
 
@@ -428,11 +448,176 @@ async function ucTestleri() {
 }
 
 // ============================================================
+// BÖLÜM 2.5 — selfie fotoğrafı: token'lı GET ucu + selfie'lerin ASLA
+// statik olarak servis edilmemesi (sunucu ister, Gemini GEREKMEZ — selfie
+// SQL ile doğrudan yazılır, gerçek analiz burada konu değil).
+// ============================================================
+
+async function fotoUcuTestleri(hesap) {
+  console.log("\n12) HTTP — selfie fotoğrafı token'lı GET ucu (/photo)")
+
+  const { status: analizSizStatus } = await fotoIndir(hesap.token)
+  check(
+    'Analizi olmayan kullanıcıda /photo 404 döner (hata değil, "henüz yok")',
+    analizSizStatus === 404,
+  )
+
+  // Gerçek bir görseli selfie klasörüne YAZIP doğrudan SQL ile bağlıyoruz —
+  // amaç Gemini'yi tetiklemeden "kendi selfie'ni doğru görüyor musun /
+  // başkasının selfie'sine erişebiliyor musun" sorularını sınamak
+  // (test-ai-analysis.js / test-vector.js'teki "elle yazılmış analiz" kalıbı).
+  const kaynakGorsel = fs.readdirSync(UPLOAD_DIR).find((f) => f.endsWith('.png'))
+  const dosyaAdi = `${crypto.randomUUID()}.png`
+  fs.copyFileSync(path.join(UPLOAD_DIR, kaynakGorsel), path.join(SELFIE_UPLOAD_DIR, dosyaAdi))
+  const beklenenBoyut = fs.statSync(path.join(SELFIE_UPLOAD_DIR, dosyaAdi)).size
+  await pool.query('UPDATE users SET skin_tone_photo_url = $1 WHERE id = $2', [
+    `/uploads/selfies/${dosyaAdi}`,
+    hesap.userId,
+  ])
+
+  const kendi = await fotoIndir(hesap.token)
+  check('Kendi selfie\'si 200 döner', kendi.status === 200)
+  check(
+    'Content-Type image/* (resolveImageUrl gerektirmeden <img>/blob ile kullanılabilir)',
+    /^image\//.test(kendi.contentType ?? ''),
+    kendi.contentType,
+  )
+  check(
+    'Dönen içerik BAYT SEVİYESİNDE diskteki dosyayla aynı',
+    kendi.buffer.length === beklenenBoyut,
+    `${kendi.buffer.length} / ${beklenenBoyut}`,
+  )
+  check(
+    'Cache-Control private/no-store (hassas veri paylaşılan önbelleğe girmez)',
+    /no-store/.test((await fetch(`${BASE_URL}/users/skin-tone-analysis/photo`, {
+      headers: { Authorization: `Bearer ${hesap.token}` },
+    })).headers.get('cache-control') ?? ''),
+  )
+
+  // --- Sahiplik: BAŞKA bir kullanıcı bu selfie'yi HİÇBİR ŞEKİLDE göremez ---
+  const { data: baskaAuth } = await call('POST', '/auth/register', {
+    body: {
+      name: 'Foto Baska Kullanici',
+      email: `tenTonu-baska-${Date.now()}@example.com`,
+      password: 'test1234',
+      age: 30,
+    },
+  })
+  const baskasi = await fotoIndir(baskaAuth.token)
+  check(
+    'Başkasının token\'ıyla 404 (kendi selfie\'si yok — id PARAMETRESİ YOK, sızıntı imkânsız)',
+    baskasi.status === 404,
+  )
+  check(
+    'Başkasının yanıtı bizim fotoğrafımızla AYNI DEĞİL (200 dönmedi, veri sızmadı)',
+    baskasi.status !== 200,
+  )
+  await call('DELETE', `/users/${baskaAuth.user.id}`, { token: baskaAuth.token })
+
+  check('Token olmadan /photo 401', (await fotoIndir(undefined)).status === 401)
+
+  // --- KRİTİK GÜVENLİK: /uploads/selfies/... static olarak ASLA çalışmaz ---
+  const statikYanit = await fetch(`http://localhost:${process.env.PORT || 3001}/uploads/selfies/${dosyaAdi}`)
+  check(
+    'Aynı dosya /uploads/selfies/... üzerinden TOKEN OLMADAN dahi 404 (static tamamen kapalı)',
+    statikYanit.status === 404,
+  )
+  const statikYanitToken = await fetch(
+    `http://localhost:${process.env.PORT || 3001}/uploads/selfies/${dosyaAdi}`,
+    { headers: { Authorization: `Bearer ${hesap.token}` } },
+  )
+  check(
+    "Aynı yol TOKEN'i OLSA BİLE 404 (bu blok auth'a bakmaz, tamamen kapalı)",
+    statikYanitToken.status === 404,
+  )
+
+  // Kıyafet fotoğrafları REGRESYON: bu değişiklik onları etkilememeli.
+  const kiyafetStatik = await fetch(`http://localhost:${process.env.PORT || 3001}/uploads/${kaynakGorsel}`)
+  check(
+    'Kıyafet fotoğrafları HÂLÂ token\'sız /uploads/... üzerinden çalışıyor (regresyon)',
+    kiyafetStatik.status === 200,
+  )
+}
+
+// ============================================================
+// BÖLÜM 2.6 — migrate-selfie-photos.js: eski konumdaki bir selfie'yi
+// uploads/selfies/'e taşıyıp veritabanını güncelliyor mu (idempotent).
+// ============================================================
+
+async function migrasyonTesti() {
+  console.log('\n13) migrate-selfie-photos.js — eski konumdaki selfie taşınıyor')
+
+  const email = `tenTonu-migrasyon-${Date.now()}@example.com`
+  const { data: auth } = await call('POST', '/auth/register', {
+    body: { name: 'Migrasyon Test', email, password: 'test1234', age: 28 },
+  })
+  if (!auth?.token) {
+    check('Migrasyon test kullanıcısı oluşturuldu', false)
+    return
+  }
+
+  // ÖZELLİKTEN ÖNCEKİ (eski) düzeni simüle ediyoruz: dosya UPLOAD_DIR
+  // KÖKÜNDE, veritabanı yolu da eski biçimde ("/uploads/<ad>").
+  const kaynakGorsel = fs.readdirSync(UPLOAD_DIR).find((f) => f.endsWith('.png') && f !== '.gitkeep')
+  const eskiAd = `${crypto.randomUUID()}.png`
+  fs.copyFileSync(path.join(UPLOAD_DIR, kaynakGorsel), path.join(UPLOAD_DIR, eskiAd))
+  await pool.query('UPDATE users SET skin_tone_photo_url = $1 WHERE id = $2', [
+    `/uploads/${eskiAd}`,
+    auth.user.id,
+  ])
+
+  execFileSync(process.execPath, [path.join(__dirname, 'migrate-selfie-photos.js'), '--uygula'], {
+    cwd: path.join(__dirname, '..'),
+    stdio: 'pipe',
+  })
+
+  check('Dosya ESKİ konumdan kalktı', !fs.existsSync(path.join(UPLOAD_DIR, eskiAd)))
+  check('Dosya YENİ konumda (uploads/selfies/)', fs.existsSync(path.join(SELFIE_UPLOAD_DIR, eskiAd)))
+
+  const { rows } = await pool.query('SELECT skin_tone_photo_url FROM users WHERE id = $1', [
+    auth.user.id,
+  ])
+  check(
+    'Veritabanı yolu /uploads/selfies/ ile güncellendi',
+    rows[0]?.skin_tone_photo_url === `/uploads/selfies/${eskiAd}`,
+    rows[0]?.skin_tone_photo_url,
+  )
+
+  const { status } = await fotoIndir(auth.token)
+  check('Taşıma sonrası /photo ucu dosyayı DOĞRU konumdan buluyor', status === 200)
+
+  // İDEMPOTENTLİK: script'i İKİNCİ kez çalıştırmak hataya düşmemeli ve
+  // zaten taşınmış kaydı "atlandı" olarak görmeli (dosyayı bir daha taşımaya
+  // çalışıp ENOENT ile patlamamalı).
+  let ikinciCalismaHatasiz = true
+  try {
+    execFileSync(process.execPath, [path.join(__dirname, 'migrate-selfie-photos.js'), '--uygula'], {
+      cwd: path.join(__dirname, '..'),
+      stdio: 'pipe',
+    })
+  } catch {
+    ikinciCalismaHatasiz = false
+  }
+  check('Script İKİNCİ kez çalıştırıldığında hata vermiyor (idempotent)', ikinciCalismaHatasiz)
+  check(
+    'Dosya hâlâ yerinde (ikinci çalışma bir şeyi bozmadı)',
+    fs.existsSync(path.join(SELFIE_UPLOAD_DIR, eskiAd)),
+  )
+
+  // Temizlik: kullanıcı silinince selfie de (artık doğru klasörden) gitmeli.
+  await call('DELETE', `/users/${auth.user.id}`, { token: auth.token })
+  check(
+    'Test kullanıcısı silinince taşınmış selfie de diskten kalktı',
+    !fs.existsSync(path.join(SELFIE_UPLOAD_DIR, eskiAd)),
+  )
+}
+
+// ============================================================
 // BÖLÜM 3 — gerçek Gemini (anahtar ve kota ister)
 // ============================================================
 
 async function gercekTest(hesap) {
-  console.log('\n12) Gerçek Gemini — sentetik portre ve yüzsüz fotoğraf')
+  console.log('\n14) Gerçek Gemini — sentetik portre ve yüzsüz fotoğraf')
 
   // Yüz İÇERMEYEN gerçek bir fotoğraf: "tekrar dene" yolunu gerçek modelle sınar.
   const yuzsuz = fs
@@ -446,14 +631,14 @@ async function gercekTest(hesap) {
     return
   }
 
-  const oncekiSayi = uploadsSayisi()
+  const oncekiSayi = selfieUploadsSayisi()
   const { status, data } = await upload('/users/skin-tone-analysis', yuzsuz, hesap.token)
   check(
     'Yüz içermeyen fotoğrafta 400 + yönlendirici mesaj (500 DEĞİL)',
     status === 400 && /tekrar deneyin/i.test(data?.error ?? ''),
     `${status} ${data?.error ?? ''}`,
   )
-  check('Başarısız denemeden sonra ÖKSÜZ DOSYA kalmadı', uploadsSayisi() === oncekiSayi)
+  check('Başarısız denemeden sonra ÖKSÜZ DOSYA kalmadı', selfieUploadsSayisi() === oncekiSayi)
 
   const { data: hala } = await call('GET', '/users/skin-tone-analysis', { token: hesap.token })
   check('Başarısız analiz kaydı bozmadı', hala?.analiz === null)
@@ -477,6 +662,8 @@ async function main() {
     }
 
     hesap = await ucTestleri()
+    if (hesap) await fotoUcuTestleri(hesap)
+    await migrasyonTesti()
     if (hesap && !NO_QUOTA) await gercekTest(hesap)
     else if (hesap) console.log('\n(--kotasiz: gerçek Gemini bölümü atlandı)')
 
@@ -485,6 +672,7 @@ async function main() {
     console.log('\n(--birim: uçtan uca bölümler atlandı)')
   }
 
+  await pool.end()
   ozet()
   process.exit(failed > 0 ? 1 : 0)
 }

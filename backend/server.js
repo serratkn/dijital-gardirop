@@ -32,8 +32,20 @@ app.use(express.json())
 const authService = new AuthService(new UserRepository(pool))
 const authenticate = createAuthenticate(authService)
 
-// Yüklenen fotoğraflar. Token gerektirmez: dosya adları rastgele UUID olduğu
-// için tahmin edilemez, ayrıca <img> etiketleri Authorization başlığı gönderemez.
+// Selfie'ler ASLA statik olarak servis edilmez — bu blok, aşağıdaki genel
+// '/uploads' static middleware'inden ÖNCE mount edilmelidir (sıra kritik:
+// Express middleware'leri tanım sırasına göre dener; bu satır sonra gelseydi
+// static handler zaten yanıt vermiş olurdu). Tek okuma yolu, kimliği
+// req.userId'den okuyan token'lı GET /api/users/skin-tone-analysis/photo'dur.
+// Kıyafet fotoğrafları buna TABİ DEĞİLDİR ve eskisi gibi token'sız kalır —
+// bu bilinçli bir ödünleşme (dosya adı tahmin edilemez UUID), CLAUDE.md'de var.
+app.use('/uploads/selfies', (req, res) => {
+  res.status(404).json({ error: 'Bulunamadı' })
+})
+
+// Yüklenen kıyafet fotoğrafları. Token gerektirmez: dosya adları rastgele UUID
+// olduğu için tahmin edilemez, ayrıca <img> etiketleri Authorization başlığı
+// gönderemez. (uploads/selfies/ yukarıdaki blokla bu middleware'e hiç ulaşmaz.)
 app.use('/uploads', express.static(UPLOAD_DIR, { maxAge: '1d' }))
 
 // --- Korumasız uçlar ---

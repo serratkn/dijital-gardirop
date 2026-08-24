@@ -320,7 +320,6 @@ olduğu için iskelet oraya taşındı, kombin üretimi istemci tarafında anlı
 | **Makyaj önerisi tek ürün** | Bölüm en yakın TEK ürünü gösterir (havuz derinliği "Başka Öneri Göster" ile ilerler). Birden fazla ürünü aynı anda öneren bir "makyaj seti" akışı yok. |
 | **Benzer parçalar durumdan ve renk/stil ağırlığından bağımsız** | Sıralama yalnızca embedding yakınlığına bakar; "aynı renk olsun" ya da "farklı stil öner" gibi bir ağırlıklandırma yok. |
 | **Benzer parçalar yalnızca indekslenmiş parçalar arasında** | Analizi olmayan parça ne kaynak ne sonuç olabilir; o parçada bölüm hiç görünmez. Toplu doldurma `analyze-existing-items.js` + `create-embeddings.js` ile elle yapılır. |
-| **Selfie'ler `/uploads`'tan token'sız servis ediliyor** | Kıyafet fotoğraflarıyla AYNI mekanizma: dosya adı tahmin edilemez UUID, yol yalnızca sahibine dönüyor. Ama bir selfie için bu, bir tişört fotoğrafından daha zayıf bir güvence — adres bir kez sızarsa (ekran görüntüsü, tarayıcı geçmişi) kimlik doğrulaması yok. Gerçekten korumak için ayrı bir dizin + token'lı stream ucu gerekir; `<img>` başlık gönderemediği için istemci blob'a çevirmeli. |
 | **Ten tonu analizi GERÇEK selfie ile denenmedi** | Elde gerçek bir selfie olmadığı için doğrulama sentetik bir portre çizimiyle yapıldı (Gemini bunu kabul etti ve çizilen sıcak paleti doğru okudu: "Sıcak / Açık buğday teni"). Gerçek bir fotoğrafta sonucun kalitesi ölçülmedi. |
 | **Test altyapısı yok** | Test framework'ü yoktur. Doğrulama: `npm run lint` + `backend/test-scripts/` + elle deneme. |
 
@@ -703,6 +702,7 @@ gönderilmeyen `city` (`name`, `age` gibi) `NULL` olur. Bu, `clothing-items`'tak
 | `GET` | `/users/skin-tone-analysis` | Kullanıcının analizi; yoksa `{ "analiz": null, "foto_url": null }` |
 | `POST` | `/users/skin-tone-analysis` | Selfie yükler, Gemini'ye analiz ettirir, kaydeder |
 | `DELETE` | `/users/skin-tone-analysis` | Analizi ve selfie'yi siler |
+| `GET` | `/users/skin-tone-analysis/photo` | Selfie'nin KENDİSİ — **token'lı**, binary yanıt (`image/*`) |
 
 ```json
 {"analiz":{"model":"gemini-3.6-flash","analiz_tarihi":"2026-08-23T…Z",
@@ -711,7 +711,7 @@ gönderilmeyen `city` (`name`, `age` gibi) `NULL` olur. Bu, `clothing-items`'tak
           "uyumsuz_renkler":["Buz Mavisi","Soğuk Gri","Neon Pembe"],
           "uyumlu_metal_tonlari":["Altın"],
           "genel_tavsiye":"Sıcak ve toprak tonlarını tercih ederek…"}},
- "foto_url":"/uploads/69ec8377-….png"}
+ "foto_url":"/uploads/selfies/69ec8377-….png"}
 ```
 
 - **YOLDA `:id` YOKTUR — kimlik daima `req.userId`'den okunur.** Bilinçli:
@@ -732,7 +732,34 @@ gönderilmeyen `city` (`name`, `age` gibi) `NULL` olur. Bu, `clothing-items`'tak
 - **Çift tıklama ikinci Gemini çağrısı yapmaz:** kullanıcı başına in-flight
   muhafızı var, ikinci istek `409` döner (ve o isteğin dosyası geri alınır).
 - Dosya kısıtları fotoğraf yüklemeyle aynı (jpg/png/webp, en fazla 5 MB) ve
-  dosya adı rastgele UUID'dir.
+  dosya adı rastgele UUID'dir. **Fiziksel olarak `backend/uploads/selfies/`
+  altına yazılır** (kıyafet fotoğraflarının aksine `uploads/` kökünde DEĞİL).
+
+**`GET /users/skin-tone-analysis/photo` — selfie'nin KENDİSİ.** Kıyafet
+fotoğraflarından **kasıtlı olarak farklı** servis edilir:
+
+- **`express.static` KULLANILMAZ.** `SkinToneController.getPhoto`, dosyayı
+  `res.sendFile` ile DOĞRUDAN okuyup gönderir; yol yine `:id` TAŞIMAZ —
+  kimlik `req.userId`'den gelir, dolayısıyla "başkasının selfie'sini id ile
+  çekmeye çalış" senaryosu yapısal olarak imkânsızdır (sorguya girecek bir
+  kullanıcı id'si parametresi hiç yok).
+- **`/uploads/selfies/...` STATİK OLARAK ASLA ÇALIŞMAZ** — token'lı olsun
+  olmasın. `server.js`, genel `/uploads` static middleware'inden ÖNCE bu alt
+  yolu 404'e düşüren bir blok mount eder. Fiziksel konum tek başına yeterli
+  bir koruma DEĞİLDİR (bir dizin adı tahmin edilebilir); asıl güvence bu
+  engelleme satırıdır. Kıyafet fotoğrafları **buna tabi değildir** ve eskisi
+  gibi token'sız `/uploads/...` üzerinden servis edilmeye devam eder — bu
+  CLAUDE.md'de zaten belgeli, bilinçli bir ödünleşmedir ve DEĞİŞMEDİ.
+- **`Cache-Control: private, max-age=0, no-store`** döner — selfie hassas
+  veridir, paylaşılan bir önbellekte (proxy, CDN) iz bırakmamalıdır.
+- Analiz/selfie yoksa `404` döner (bu, `GET /users/skin-tone-analysis`'in
+  "analiz yoksa 200 + null" sözleşmesinden BİLEREK FARKLIDIR: o uç bir JSON
+  gövdesi döndürüyor ve orada `null` doğal bir "henüz yok" ifadesi; burada
+  ikili bir dosya isteniyor ve dönecek anlamlı bir "boş dosya" yok).
+- Frontend bu ucu `<img src="...">` ile DOĞRUDAN kullanmaz (tarayıcının
+  `<img>` etiketi `Authorization` başlığı gönderemez); `fetchSkinTonePhoto()`
+  ile blob olarak çekilip `URL.createObjectURL` ile object URL'e çevrilir
+  (bkz. §8, `SkinToneSection`).
 
 ### Wardrobe Stats
 
@@ -1064,12 +1091,17 @@ node test-scripts/analyze-existing-items.js              # yalnızca listeler
 node test-scripts/analyze-existing-items.js --uygula
 node test-scripts/analyze-existing-items.js --uygula --limit 3
 
-# Ten tonu analizi (43 kontrol: 33 birim + 7 uçtan uca + 3 gerçek Gemini).
-# --birim: yalnızca birim bölümü (sunucu ve anahtar GEREKTİRMEZ)
-# --kotasiz: gerçek Gemini bölümünü atlar
+# Ten tonu analizi (58 kontrol: 33 birim + 22 uçtan uca/foto ucu/migrasyon
+# + 3 gerçek Gemini). --birim: yalnızca birim bölümü (sunucu ve anahtar
+# GEREKTİRMEZ). --kotasiz: gerçek Gemini bölümünü atlar.
 node test-scripts/test-skin-tone.js
 node test-scripts/test-skin-tone.js --birim
 node test-scripts/test-skin-tone.js --kotasiz
+
+# Var olan selfie'leri uploads/ kökünden uploads/selfies/'e taşır (bu özellikten
+# ÖNCE analiz yapmış kullanıcılar için). VARSAYILAN SALT OKUNURDUR, İDEMPOTENTTİR.
+node test-scripts/migrate-selfie-photos.js                # yalnızca listeler
+node test-scripts/migrate-selfie-photos.js --uygula
 
 # Gemini Aşama 1 (20 kontrol). Birinci bölüm GEÇERLİ ANAHTAR OLMADAN da çalışır
 # (eksik/geçersiz anahtar yolları); analiz bölümü anahtar ve görsel ister.
@@ -1082,8 +1114,9 @@ node test-scripts/cleanup.js --dry-run               # önce neyin silineceğini
 node test-scripts/cleanup.js                         # test parçaları + @example.com kullanıcıları
 node test-scripts/cleanup.js --all --user <uuid>     # bir kullanıcının TÜM verisi
 
-# Öksüz dosya temizliği (9 kontrol): kullanıcı silinince kıyafet fotoğrafı VE
-# selfie diskten kalkıyor mu, cleanup.js referanssız dosyaları süpürüp
+# Öksüz dosya temizliği (12 kontrol): kullanıcı silinince kıyafet fotoğrafı VE
+# selfie (artık uploads/selfies/'ten) diskten kalkıyor mu, cleanup.js'in İKİ
+# AYRI dizin taraması (kıyafet kökü + selfies/) referanssız dosyaları süpürüp
 # referanslı (canlı) dosyalara dokunmuyor mu.
 node test-scripts/test-file-cleanup.js
 ```
@@ -1262,6 +1295,58 @@ ayırt edici kuralı var:
 `/auth/me` ve `/users/:id` her yerde çağrılıyor, hassas selfie yolunu ve
 büyükçe analiz nesnesini oralarda taşımanın bir sebebi yok. Yalnızca kendi
 ucundan okunurlar; test bu sızıntıyı ayrıca kontrol eder.
+
+**Selfie dosyaları AYRI bir klasörde ve AYRI bir servis mekanizmasıyla
+tutulur** (`backend/uploads/selfies/`, `config/upload.js`): kıyafet
+fotoğraflarıyla aynı `UPLOAD_DIR` kökünü PAYLAŞMAZLAR. Sebep — bir selfie,
+tahmin edilemez UUID adına rağmen bir tişört fotoğrafından daha hassas bir
+veri türüdür; adres bir kez sızarsa (ekran görüntüsü, tarayıcı geçmişi,
+proxy log'u) kimlik doğrulaması olmayan `/uploads` üzerinden herkes erişebilirdi.
+
+- **`uploadSelfieImage`** (`config/upload.js`) — `uploadImage` ile AYNI
+  `fileFilter`/boyut sınırını paylaşan ama hedefi `SELFIE_UPLOAD_DIR` olan
+  ayrı bir multer diskStorage. `skinToneRoutes` bunu kullanır, `uploadImage`
+  DEĞİL — kıyafet route'ları hiç değişmedi.
+- **`removeSelfieFile` / `resolveSelfiePath`** — `removeUploadedFile`'ın
+  selfie karşılıkları, AYRI fonksiyonlar olarak tutuldu (tek bir "dizin
+  parametresi" eklemek yerine): çağıran yerin hangi dosya türünü sildiğini
+  isim düzeyinde görmesi, bir kıyafet silme çağrısının yanlışlıkla selfie
+  dizinine (ya da tersi) bakması ihtimalini tamamen ortadan kaldırır.
+  `SkinToneService` artık `removeUploadedFile`'ı HİÇ kullanmaz.
+- **`server.js`, `/uploads/selfies` yolunu genel `/uploads` static
+  middleware'inden ÖNCE 404'e düşürür.** Bu, fiziksel ayrımın TEK BAŞINA
+  yeterli olmadığının kabulüdür — bir dizin adı tahmin edilebilir, bu yüzden
+  asıl güvence Express seviyesindeki bu engelleme satırıdır. Kıyafet
+  fotoğrafları (`/uploads/<uuid>.png`, kök dizinde) bu bloğa hiç girmez ve
+  eskisi gibi token'sız servis edilmeye devam eder — CLAUDE.md'de zaten
+  belgeli, bilinçli bir ödünleşme, DEĞİŞMEDİ.
+- **`GET /users/skin-tone-analysis/photo`** — `SkinToneController.getPhoto`
+  dosyayı `express.static` yerine `res.sendFile` ile DOĞRUDAN okuyup
+  gönderir. Yolda `:id` YOKTUR (skinToneRoutes'un genel kuralıyla aynı):
+  kimlik `req.userId`'den gelir, `SkinToneService.getPhotoPath` de bu id ile
+  sorgular — başka bir kullanıcının selfie'sini "id ile bile" istemenin bir
+  yolu yok, çünkü sorguya girecek böyle bir parametre hiç mevcut değil.
+  `Cache-Control: private, max-age=0, no-store` döner (paylaşılan önbellekte
+  iz bırakmasın diye); selfie yoksa `404`.
+- **`UserRepository.collectUploadedFileNames` İKİ AYRI liste döner**
+  (`clothingImageUrls` + `selfiePhotoUrl`, tek bir düz dizi DEĞİL):
+  `UserService.deleteUser` artık kıyafet fotoğrafları için `removeUploadedFile`,
+  selfie için `removeSelfieFile` çağırır — iki dosya türü farklı klasörlerde
+  yaşadığı için tek bir silme fonksiyonu artık ikisine birden uymuyor.
+- **`cleanup.js`'in öksüz dosya taraması İKİ AYRI dizini gezer**
+  (`UPLOAD_DIR` kökü + `SELFIE_UPLOAD_DIR`, ortak mantık `taraVeSil`
+  yardımcısında); kök taraması `selfies` klasör adını **hariç tutar** —
+  aksi hâlde bir alt klasörü sıradan bir "öksüz dosya" sanıp `unlink` ile
+  silmeye çalışır (ve `EISDIR` ile başarısız olurdu).
+- **Var olan selfie'ler için tek seferlik taşıma scripti:**
+  `test-scripts/migrate-selfie-photos.js`. Özellikten ÖNCE analiz yapmış
+  kullanıcıların selfie'si hâlâ `uploads/` kökünde durabilir; script bunları
+  `uploads/selfies/`'e taşır ve `users.skin_tone_photo_url`'i günceller.
+  **VARSAYILAN SALT OKUNURDUR** (`create-embeddings.js` kalıbı), `--uygula`
+  ile gerçekten taşır; **İDEMPOTENTTİR** (yolu zaten `/uploads/selfies/` ile
+  başlayan kayıtlar atlanır, script defalarca çalıştırılabilir). Dosya önce
+  taşınır, veritabanı ANCAK ondan sonra güncellenir — sıra tersine olsaydı ve
+  taşıma patlasaydı kayıt, artık var olmayan bir yolu gösterirdi.
 
 **Vektör katmanı (Aşama 3).** `config/chroma.js` istemciyi kurar (database.js /
 gemini.js ile aynı rol), `VectorRepository` yalnızca ChromaDB ile konuşur ve
@@ -1581,6 +1666,16 @@ geri kalanını etkilemez.
 - **GİZLİLİK: selfie yalnızca bu bölümde, sahibine gösterilir.** Paylaşım
   görseline, kombin kartlarına ya da başka bir listeye girmez; test bunu
   Kombin Öner sayfasının HTML'inde arayarak doğrular.
+- **Selfie görseli `resolveImageUrl` İLE DEĞİL, `fetchSkinTonePhoto()` +
+  blob ile gösterilir.** Backend'in döndürdüğü `foto_url` artık doğrudan bir
+  `<img src>` DEĞİLDİR — yalnızca "bir selfie var mı" bilgisini taşır ve bir
+  `useEffect`'i tetikler; o effect token'lı `GET /users/skin-tone-analysis/photo`
+  ucunu çağırıp blob'u `URL.createObjectURL` ile object URL'e çevirir
+  (`PhotoPicker`'daki create/revokeObjectURL yaşam döngüsüyle BİREBİR AYNI
+  desen: `fotoUrl` değiştiğinde — yeni analiz, silme — eski object URL
+  serbest bırakılır). `<img>` etiketi `Authorization` başlığı gönderemediği
+  için bu dolaylama zorunludur; doğrudan `src="/uploads/selfies/..."`
+  yazılsaydı zaten `server.js`'teki blok bunu 404'e düşürürdü.
 
 **"✓ Ten tonuna uygun" işareti (`lib/skinTone.js > matchesSkinTone`).** Kombin
 Öner'de, eşleşen kartın ALTINDA. Kartın kendisine konmadı çünkü `ClothingCard`
@@ -1794,6 +1889,139 @@ fotoğraf sorunu teyit edildikten sonra üç yerden de kaldırılabilir.
 
 > Bundan sonraki her çalışma buraya tarihiyle işlenir: eklenen özellikler, düzeltilen
 > hatalar, alınan mimari kararlar. En yeni kayıt en üstte.
+
+### 2026-08-24 — Selfie'ler AYRI klasörde ve token'lı bir uçtan servis ediliyor
+- **Ne değişti:** Selfie'ler artık kıyafet fotoğraflarından FİZİKSEL VE
+  ERİŞİM olarak ayrıldı. Dosyalar `backend/uploads/selfies/` altına yazılıyor
+  (kıyafet fotoğrafları hâlâ `uploads/` kökünde) ve bu alt yol `/uploads`
+  static middleware'inden TAMAMEN hariç tutuluyor — tek okuma yolu **yeni**
+  `GET /api/users/skin-tone-analysis/photo` ucu, kimlik her zamanki gibi
+  `req.userId`'den okunuyor (`:id` parametresi YOK). Kıyafet fotoğrafları
+  **hiç etkilenmedi**: eskisi gibi `/uploads/<uuid>.png` üzerinden token'sız
+  servis edilmeye devam ediyor — bu, CLAUDE.md'de zaten belgeli bilinçli bir
+  ödünleşme ve bilerek değiştirilmedi.
+- **GEREKÇE:** dosya adı tahmin edilemez UUID olsa da, bir selfie bir tişört
+  fotoğrafından daha hassas bir veri türü. Adres bir kez sızarsa (ekran
+  görüntüsü, tarayıcı geçmişi, paylaşılan bir proxy log'u) `/uploads` hiçbir
+  kimlik doğrulaması yapmadan dosyayı verirdi. "Eksikler" tablosundaki
+  *"Selfie'ler `/uploads`'tan token'sız servis ediliyor"* maddesi bu çalışmayla
+  kapandı.
+
+**BACKEND — iki katmanlı koruma (biri tek başına yetmez):**
+
+1. **Fiziksel ayrım.** `config/upload.js`'e `SELFIE_UPLOAD_DIR`
+   (`uploads/selfies/`) ve buna yazan ayrı bir multer diskStorage
+   (`uploadSelfieImage`) eklendi — `uploadImage` ile AYNI `fileFilter`/boyut
+   sınırını paylaşır, tek farkı hedef klasördür. `skinToneRoutes` artık
+   `uploadImage` yerine bunu kullanıyor; kıyafet route'ları hiç dokunulmadı.
+2. **Erişim engeli (ASIL güvence).** Fiziksel konum TEK BAŞINA yeterli
+   değildir — bir klasör adı tahmin edilebilir. `server.js`, genel `/uploads`
+   static middleware'inden **ÖNCE** `/uploads/selfies` yolunu 404'e düşüren
+   bir blok mount ediyor. Bu satır olmasaydı `uploads/selfies/` yine de
+   `express.static(UPLOAD_DIR)`'in kapsama alanında kalırdı (SELFIE_UPLOAD_DIR
+   fiziksel olarak UPLOAD_DIR'in bir alt klasörü) ve hiçbir şey değişmemiş
+   olurdu — asıl koruma budur, klasör ayrımı yalnızca onu kolaylaştırır.
+
+- **Yeni uç `GET /users/skin-tone-analysis/photo`.** `SkinToneController.
+  getPhoto`, `SkinToneService.getPhotoPath(req.userId)`'den mutlak dosya
+  yolunu alıp `res.sendFile` ile DOĞRUDAN okuyup gönderir — `express.static`
+  KULLANILMAZ. Yolda `:id` yok (diğer ten tonu uçlarıyla aynı kural):
+  kimlik her zaman `req.userId`'den geldiği için "başka bir kullanıcının
+  selfie'sini id ile iste" senaryosunun sorguya girecek bir parametresi hiç
+  yok — ayrı bir sahiplik kontrolü yazmaya bile gerek kalmadı. `Cache-Control:
+  private, max-age=0, no-store` döner (paylaşılan önbellekte iz bırakmasın).
+  Analiz/selfie yoksa `404` (bu, `GET /users/skin-tone-analysis`'in "analiz
+  yoksa 200+null" sözleşmesinden bilerek farklı — orada JSON gövdesi var ve
+  `null` doğal, burada ikili bir dosya isteniyor ve dönecek bir "boş dosya"
+  kavramı yok).
+- **`removeSelfieFile` / `resolveSelfiePath` eklendi, `removeUploadedFile`
+  DOKUNULMADI.** Selfie ve kıyafet dosyaları artık farklı klasörlerde
+  yaşadığı için tek bir "dosya sil" fonksiyonu ikisine de uymuyor. Tek bir
+  fonksiyona dizin parametresi eklemek yerine bilerek AYRI iki fonksiyon
+  tutuldu: çağıran kodun hangi dosya türünü sildiği isim düzeyinde görünsün,
+  bir kıyafet silme çağrısının yanlışlıkla selfie dizinine (ya da tam tersi)
+  bakması ihtimali sıfırlansın. `SkinToneService` artık yalnızca
+  `removeSelfieFile` kullanıyor.
+- **`UserRepository.collectUploadedFileNames` ARTIK İKİ AYRI liste
+  döndürüyor** (`{ clothingImageUrls, selfiePhotoUrl }`, tek düz dizi değil).
+  `UserService.deleteUser` bu ayrıma göre her dosya türü için doğru silme
+  fonksiyonunu (`removeUploadedFile` / `removeSelfieFile`) çağırıyor —
+  önceki tek-liste hâliyle kullanıcı silindiğinde selfie artık YANLIŞ
+  klasörden silinmeye çalışılıp sessizce (ENOENT) atlanacaktı, yani öksüz
+  kalacaktı. Bu regresyon `test-file-cleanup.js`'te yakalandı ve doğrulandı.
+- **`cleanup.js`'in öksüz dosya taraması İKİ AYRI dizini geziyor** (ortak
+  mantık yeni `taraVeSil` yardımcısında): `UPLOAD_DIR` kökü (referans =
+  `clothing_items.image_url`, `selfies` klasör adı taramadan HARİÇ TUTULUR
+  — aksi hâlde bir alt klasörü sıradan bir dosya sanıp `unlink` ile silmeye
+  çalışıp `EISDIR` ile başarısız olurdu) ve `SELFIE_UPLOAD_DIR` (referans =
+  `users.skin_tone_photo_url`).
+- **Yeni migrasyon scripti `test-scripts/migrate-selfie-photos.js`.**
+  Özellikten ÖNCE analiz yapmış kullanıcıların selfie'si hâlâ `uploads/`
+  kökünde durabilir; script `users.skin_tone_photo_url IS NOT NULL` olan
+  kayıtları tarar, dosyayı `uploads/selfies/`'e taşır ve veritabanı yolunu
+  günceller. **VARSAYILAN SALT OKUNURDUR** (`create-embeddings.js` /
+  `analyze-existing-items.js` kalıbı), `--uygula` ile gerçekten uygular.
+  **İDEMPOTENTTİR:** yolu zaten `/uploads/selfies/` ile başlayan kayıtlar
+  atlanır, script güvenle birden fazla kez çalıştırılabilir. Dosya ÖNCE
+  taşınır, veritabanı ANCAK ondan SONRA güncellenir (`SkinToneService`'teki
+  "önce yaz, sonra sil" disipliniyle aynı gerekçe: sıra tersine olsaydı ve
+  taşıma yarıda patlarsa kayıt artık var olmayan bir yolu gösterirdi).
+  Elde gerçek bir eski-düzen selfie kaydı olmadığı için doğrulama, testte
+  BİLEREK simüle edilen bir "eski konum" kaydıyla yapıldı (bkz. aşağı).
+
+**FRONTEND**
+
+- **`SkinToneSection`, selfie'yi artık `resolveImageUrl` İLE DEĞİL, yeni
+  `fetchSkinTonePhoto()` + blob ile gösteriyor.** Backend'in döndürdüğü
+  `foto_url` artık doğrudan bir `<img src>` DEĞİL — yalnızca "bir selfie var
+  mı" bilgisini taşıyor ve bir `useEffect`'i tetikliyor; o effect token'lı
+  `/photo` ucunu çağırıp blob'u `URL.createObjectURL` ile object URL'e
+  çeviriyor. **Mevcut `PhotoPicker` deseni AYNEN tekrar kullanıldı**
+  (`useEffect` + `createObjectURL` + cleanup'ta `revokeObjectURL`): `fotoUrl`
+  değiştiğinde (yeni analiz, silme) eski object URL serbest bırakılıyor.
+  `<img>` etiketi `Authorization` başlığı gönderemediği için bu dolaylama
+  zorunlu; doğrudan `/uploads/selfies/...` yazılsaydı zaten backend'deki blok
+  bunu 404'e düşürürdü.
+- Yeni `api.js` fonksiyonu: `fetchSkinTonePhoto()` — token'lı `fetch` ile
+  `/users/skin-tone-analysis/photo`'yu çağırır, `404`'ü hata SAYMAZ (`null`
+  döner — "henüz selfie yok" durumu), diğer hatalarda (401 dahil, oturumu
+  düşürerek) mesajlı bir `Error` fırlatır, başarıda `response.blob()` döner.
+
+**Doğrulama — `test-scripts/test-skin-tone.js` 43 → 58 kontrol:**
+- Mevcut birim bölümündeki tüm fixture'lar (`geciciSelfie`, "eski selfie"
+  senaryoları) `SELFIE_UPLOAD_DIR`'e ve `/uploads/selfies/...` yoluna
+  taşındı — gerçek multer akışını (artık `uploadSelfieImage`) doğru
+  yansıtsınlar diye.
+- **Yeni bölüm — `/photo` ucu (11 kontrol):** analiz yokken 404; kendi
+  selfie'sinin 200 + doğru `Content-Type: image/*` + **bayt seviyesinde
+  diskteki dosyayla birebir aynı içerik** ile dönmesi; `Cache-Control:
+  private, no-store`; **başka bir kullanıcının token'ıyla 404** (kendi
+  selfie'si olmadığı için — sızıntı imkânsız, çünkü sorguya girecek bir id
+  parametresi hiç yok); token'sız 401; **KRİTİK GÜVENLİK: aynı dosyanın
+  `/uploads/selfies/...` üzerinden token OLSA DA OLMASA DA 404 dönmesi**
+  (static tamamen kapalı); kıyafet fotoğraflarının hâlâ token'sız
+  `/uploads/...` üzerinden çalıştığının regresyon kontrolü.
+- **Yeni bölüm — migrasyon scripti (7 kontrol):** eski konumda (uploads/
+  kökü) simüle edilen bir selfie'nin `--uygula` sonrası doğru şekilde
+  taşınması (dosya + veritabanı yolu), taşıma sonrası `/photo` ucunun
+  dosyayı YENİ konumdan bulması, script **ikinci kez** çalıştırıldığında
+  hata vermemesi (idempotentlik) ve kullanıcı silindiğinde taşınmış
+  selfie'nin de (artık doğru klasörden) diskten kalkması.
+- **Doğrulama — `test-scripts/test-file-cleanup.js` 9 → 12 kontrol:**
+  selfie simülasyonu artık `SELFIE_UPLOAD_DIR`'e yazılıyor; öksüz-selfie
+  süpürme testi ayrıca eklendi (ayrı klasör, ayrı tarama); `selfies` alt
+  klasörünün kıyafet taramasında yanlışlıkla silinmeye çalışılmadığı kontrolü.
+- **Doğrulama — gerçek tarayıcıda 7 kontrol (Playwright + sistem Chrome),
+  geçici test kullanıcısı ve Gemini tetiklenmeden SQL ile bağlanan gerçek bir
+  selfie'yle:** `<img>` görünüyor; **`src` bir `blob:` URL** (`/uploads`
+  değil); tarayıcının `/uploads/selfies/...`'e DOĞRUDAN bir `<img>` isteği
+  ATMADIĞI, bunun yerine token'lı `/photo` ucunu çağırdığı (ağ isteklerinden
+  doğrulandı); temiz konsol; **silme sonrası selfie `<img>`'in kaybolması**
+  ve davet ekranının geri gelmesi.
+- Regresyon: `test-all-endpoints` 77/77, `test-auth` 48/48, `test-stats`
+  60/60, `test-item-outfits` 27/27, `test-clean-status` 26/26, `test-vector
+  --birim` 46/46, `test-outfit-rag --birim` 36/36, `test-ai-analysis --birim`
+  48/48, lint + build temiz.
 
 ### 2026-08-24 — Kıyafet Düzenleme (Edit) Özelliği
 - **Ne eklendi:** Kullanıcı, mevcut bir kıyafetin isim/kategori/renk/sezon/

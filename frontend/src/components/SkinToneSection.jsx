@@ -6,7 +6,7 @@ import SkinTonePanel from './SkinTonePanel'
 import {
   deleteSkinToneAnalysis,
   fetchSkinToneAnalysis,
-  resolveImageUrl,
+  fetchSkinTonePhoto,
   uploadSkinToneSelfie,
 } from '../lib/api'
 
@@ -22,7 +22,11 @@ import {
 
 function SkinToneSection() {
   const [analiz, setAnaliz] = useState(null)
+  // Backend'in foto_url'i artık DOĞRUDAN <img src> olarak kullanılmaz —
+  // yalnızca "bir selfie var mı" bilgisini taşır ve aşağıdaki efekti tetikler.
+  // Gerçek görsel selfieBlobUrl'dedir (token'lı /photo ucundan blob olarak çekilir).
   const [fotoUrl, setFotoUrl] = useState(null)
+  const [selfieBlobUrl, setSelfieBlobUrl] = useState(null)
   const [isLoading, setIsLoading] = useState(true)
   const [hasLoadError, setHasLoadError] = useState(false)
 
@@ -58,6 +62,39 @@ function SkinToneSection() {
       isStale = true
     }
   }, [])
+
+  // Selfie GÖRSELİ artık /uploads'tan değil, token'lı /photo ucundan blob
+  // olarak çekilir. fotoUrl değiştiğinde (ilk yükleme, yeniden analiz, silme)
+  // eski blob URL serbest bırakılır ve gerekiyorsa yenisi çekilir —
+  // PhotoPicker'daki createObjectURL/revokeObjectURL deseniyle aynı yaşam döngüsü.
+  useEffect(() => {
+    if (!fotoUrl) {
+      setSelfieBlobUrl(null)
+      return undefined
+    }
+
+    let isStale = false
+    let objectUrl = null
+
+    async function selfieBlobunuYukle() {
+      try {
+        const blob = await fetchSkinTonePhoto()
+        if (isStale || !blob) return
+        objectUrl = URL.createObjectURL(blob)
+        setSelfieBlobUrl(objectUrl)
+      } catch (error) {
+        if (isStale) return
+        console.error('Selfie görseli alınamadı:', error)
+      }
+    }
+
+    selfieBlobunuYukle()
+
+    return () => {
+      isStale = true
+      if (objectUrl) URL.revokeObjectURL(objectUrl)
+    }
+  }, [fotoUrl])
 
   // Analiz sırasında düğme kilitli; backend'de de kullanıcı başına in-flight
   // muhafızı var (ikinci istek 409 döner), yani çift tıklama iki Gemini
@@ -148,9 +185,9 @@ function SkinToneSection() {
           <>
             <div className="flex items-start gap-4">
               {/* Selfie küçük bir önizleme olarak yalnızca burada görünür. */}
-              {fotoUrl && (
+              {selfieBlobUrl && (
                 <img
-                  src={resolveImageUrl(fotoUrl)}
+                  src={selfieBlobUrl}
                   alt="Ten tonu analizi için yüklediğin fotoğraf"
                   className="h-20 w-20 shrink-0 rounded-2xl border border-ink/10 object-cover"
                   data-testid="ten-tonu-selfie"

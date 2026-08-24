@@ -1,6 +1,6 @@
 const fs = require('node:fs')
 const { NotFoundError, ValidationError, ConflictError } = require('../utils/errors')
-const { removeUploadedFile, fileNameFromImageUrl } = require('../config/upload')
+const { removeSelfieFile, resolveSelfiePath, fileNameFromImageUrl } = require('../config/upload')
 
 // Ten tonu analizi orkestrasyonu.
 //
@@ -54,7 +54,7 @@ class SkinToneService {
 
     if (this.inFlight.has(userId)) {
       // Yüklenen dosya çöp olmasın.
-      await removeUploadedFile(file.filename)
+      await removeSelfieFile(file.filename)
       throw new ConflictError('Ten tonu analiziniz şu anda sürüyor, lütfen bekleyin')
     }
 
@@ -62,7 +62,7 @@ class SkinToneService {
     try {
       const mevcut = await this.userRepository.findSkinTone(userId)
       if (!mevcut) {
-        await removeUploadedFile(file.filename)
+        await removeSelfieFile(file.filename)
         throw new NotFoundError('Kullanıcı bulunamadı')
       }
 
@@ -77,14 +77,14 @@ class SkinToneService {
       } catch (error) {
         // Gemini hatası, kota, zaman aşımı, dosya okunamadı… Hepsinde YENİ
         // DOSYA GERİ ALINIR: öksüz selfie diskte kalmaz.
-        await removeUploadedFile(file.filename)
+        await removeSelfieFile(file.filename)
         throw error
       }
 
       // Yüz okunamadı: bu bir SİSTEM HATASI DEĞİL, kullanıcının daha iyi bir
       // fotoğraf çekmesi gereken normal bir durum. 400 + yönlendirici mesaj.
       if (!sonuc.yuz_tespit_edildi) {
-        await removeUploadedFile(file.filename)
+        await removeSelfieFile(file.filename)
         throw new ValidationError(
           sonuc.sorun
             ? `${sonuc.sorun}. Yüzünüzün net göründüğü, iyi aydınlatılmış bir fotoğrafla tekrar deneyin.`
@@ -99,13 +99,13 @@ class SkinToneService {
       }
       // Göreli yol saklanır (kıyafet fotoğraflarıyla aynı kural): web
       // localhost'tan, Android 10.0.2.2'den erişir; host'u istemci ekler.
-      const photoUrl = `/uploads/${file.filename}`
+      const photoUrl = `/uploads/selfies/${file.filename}`
 
       let guncel
       try {
         guncel = await this.userRepository.updateSkinTone(userId, { analysis: analiz, photoUrl })
       } catch (error) {
-        await removeUploadedFile(file.filename)
+        await removeSelfieFile(file.filename)
         throw error
       }
 
@@ -113,7 +113,7 @@ class SkinToneService {
       // önce silseydik ve yazma patlasaydı kullanıcı hem eski hem yeni
       // fotoğrafını kaybederdi.
       if (mevcut.skin_tone_photo_url) {
-        await removeUploadedFile(fileNameFromImageUrl(mevcut.skin_tone_photo_url))
+        await removeSelfieFile(fileNameFromImageUrl(mevcut.skin_tone_photo_url))
       }
 
       return {
@@ -156,10 +156,25 @@ class SkinToneService {
     await this.userRepository.updateSkinTone(userId, { analysis: null, photoUrl: null })
 
     if (mevcut.skin_tone_photo_url) {
-      await removeUploadedFile(fileNameFromImageUrl(mevcut.skin_tone_photo_url))
+      await removeSelfieFile(fileNameFromImageUrl(mevcut.skin_tone_photo_url))
     }
 
     return { analiz: null, foto_url: null }
+  }
+
+  // Selfie'nin MUTLAK dosya yolunu döner — controller bunu res.sendFile ile
+  // okur. Yolda ":id" YOKTUR (bkz. controller/route yorumları): kimlik
+  // DAİMA req.userId'den gelir, dolayısıyla bu metodun kendisi zaten
+  // "yalnızca kendi selfie'ni görebilirsin" garantisidir — ayrı bir
+  // sahiplik kontrolüne gerek yok, çünkü başka bir kullanıcının id'sini
+  // sorguya sokacak bir parametre hiç mevcut değil.
+  async getPhotoPath(userId) {
+    const row = await this.userRepository.findSkinTone(userId)
+    if (!row || !row.skin_tone_photo_url) {
+      throw new NotFoundError('Selfie bulunamadı')
+    }
+
+    return resolveSelfiePath(fileNameFromImageUrl(row.skin_tone_photo_url))
   }
 }
 
