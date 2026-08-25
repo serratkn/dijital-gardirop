@@ -3,7 +3,7 @@ import { Link, useNavigate } from 'react-router-dom'
 import AuthLayout from '../components/auth/AuthLayout'
 import Button from '../components/ui/Button'
 import { register } from '../lib/api'
-import { setToken } from '../lib/auth'
+import { setSession } from '../lib/auth'
 import { setUserProfile } from '../lib/onboarding'
 
 const fieldLabel = 'text-xs font-medium uppercase tracking-[0.15em] text-ink/50'
@@ -40,7 +40,7 @@ function Register() {
     setErrorMessage('')
 
     try {
-      const { user, token } = await register({
+      const { user, token, refreshToken } = await register({
         name: form.name.trim(),
         email: form.email.trim(),
         age: form.age === '' ? null : Number(form.age),
@@ -48,7 +48,7 @@ function Register() {
       })
 
       // Token hemen saklanır: sıradaki adım (tarz anketi) korumalı bir uçtur.
-      setToken(token)
+      setSession({ token, refreshToken })
       setUserProfile({ name: user.name, email: user.email, age: user.age ?? '' })
       navigate('/tarz-anketi', { replace: true })
     } catch (error) {

@@ -79,6 +79,68 @@ class UserRepository {
     }
   }
 
+  // --- Refresh token (bkz. AuthService.refresh) ---
+  //
+  // Bu üç metod da SAFE_COLUMNS KULLANMAZ: hiçbiri API yanıtına doğrudan
+  // dönmez, yalnızca AuthService'in kendi iç akışında tüketilir. Ham token
+  // asla parametre olarak buraya gelmez — çağıran taraf (AuthService)
+  // bcrypt.hash sonucunu gönderir; bu repository yalnızca hash'i saklar.
+
+  // Login/register/refresh sonrası YENİ bir refresh token yazılır (ROTASYON:
+  // bir önceki hash bu satırla birlikte üzerine yazılıp geçersiz kalır).
+  async setRefreshToken(userId, { hash, expiresAt }) {
+    try {
+      const result = await this.pool.query(
+        `UPDATE users
+         SET refresh_token_hash = $1, refresh_token_expires_at = $2, updated_at = NOW()
+         WHERE id = $3
+         RETURNING id`,
+        [hash, expiresAt, userId],
+      )
+      return result.rows[0] || null
+    } catch (error) {
+      console.error('UserRepository.setRefreshToken hatası:', error.message)
+      throw error
+    }
+  }
+
+  // Refresh token OPAK bir dizedir (bcrypt hash'i sorgulanamaz — her hash'leme
+  // farklı salt üretir); bu yüzden AuthService token'ın içine gömülü user id'yi
+  // önce çıkarır, sonra SADECE O KULLANICININ hash'ini burada okuyup
+  // bcrypt.compare ile doğrular. `password_hash` gibi bu metod da yalnızca
+  // AuthService içinde tüketilir, doğrudan API yanıtına asla verilmez.
+  async findRefreshTokenData(userId) {
+    try {
+      const result = await this.pool.query(
+        `SELECT id, email, refresh_token_hash, refresh_token_expires_at
+         FROM users WHERE id = $1`,
+        [userId],
+      )
+      return result.rows[0] || null
+    } catch (error) {
+      console.error('UserRepository.findRefreshTokenData hatası:', error.message)
+      throw error
+    }
+  }
+
+  // "Çıkış Yap" — gerçek bir çıkış: refresh token veritabanından SİLİNİR,
+  // yalnızca istemci tarafında token'ları unutmak yetmez (frontend'de
+  // localStorage temizlense bile, sunucu tarafında hâlâ geçerli bir refresh
+  // token dursaydı çalınmış bir kopya oturumu canlı tutmaya devam ederdi).
+  async clearRefreshToken(userId) {
+    try {
+      await this.pool.query(
+        `UPDATE users
+         SET refresh_token_hash = NULL, refresh_token_expires_at = NULL, updated_at = NOW()
+         WHERE id = $1`,
+        [userId],
+      )
+    } catch (error) {
+      console.error('UserRepository.clearRefreshToken hatası:', error.message)
+      throw error
+    }
+  }
+
   async updatePassword(id, passwordHash) {
     try {
       const result = await this.pool.query(

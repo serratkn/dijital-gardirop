@@ -24,6 +24,30 @@ class AuthController extends BaseController {
     }
   }
 
+  // Korumasız — access token'ın SÜRESİ ZATEN DOLDUĞU için buraya bir Bearer
+  // token'la gelinmez; kimlik body'deki refresh token'ın İÇİNE gömülüdür
+  // (bkz. AuthService.refresh > #extractUserIdFromRefreshToken).
+  async refresh(req, res) {
+    try {
+      const tokens = await this.authService.refresh(req.body?.refreshToken)
+      res.status(200).json(tokens)
+    } catch (error) {
+      this.handleError(error, res)
+    }
+  }
+
+  // Korumalı: req.userId auth middleware tarafından doldurulur. Body'de
+  // refresh token GEREKMEZ — kullanıcının HANGİ refresh token'ı sakladığını
+  // bilmemize gerek yok, DB'de o kullanıcı için ne varsa temizlenir.
+  async logout(req, res) {
+    try {
+      await this.authService.logout(req.userId)
+      res.status(204).send()
+    } catch (error) {
+      this.handleError(error, res)
+    }
+  }
+
   // Korumalı: req.userId auth middleware tarafından doldurulur.
   async me(req, res) {
     try {

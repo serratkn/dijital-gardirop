@@ -13,12 +13,21 @@ function createAuthRoutes(authService, authenticate) {
   // otomatik kayıt denemelerine karşı (15 dakikada 5 deneme, IP bazlı).
   router.post('/auth/register', authLimiter, (req, res) => authController.register(req, res))
   router.post('/auth/login', authLimiter, (req, res) => authController.login(req, res))
+  // /auth/refresh de KORUMASIZDIR (bilerek): tam olarak bu uca gelindiğinde
+  // access token ZATEN SÜRESİ DOLMUŞ olur — authenticate'in arkasına
+  // konsaydı kullanıcı hiç buraya ulaşamazdı. authLimiter'ı diğer kimlik
+  // bilgisi değişim uçlarıyla (register/login) AYNI gerekçeyle paylaşır;
+  // normal kullanımda (tek sekme, sessiz yenileme) bu limite hiç yaklaşılmaz.
+  router.post('/auth/refresh', authLimiter, (req, res) => authController.refresh(req, res))
 
   // Korumalı
   router.get('/auth/me', authenticate, (req, res) => authController.me(req, res))
   router.post('/auth/change-password', authenticate, (req, res) =>
     authController.changePassword(req, res),
   )
+  // Gerçek çıkış: refresh token'ı DB'den siler. authenticate ARKASINDA —
+  // kimliği req.userId'den okur, body'de ayrıca bir refresh token istemez.
+  router.post('/auth/logout', authenticate, (req, res) => authController.logout(req, res))
 
   return router
 }

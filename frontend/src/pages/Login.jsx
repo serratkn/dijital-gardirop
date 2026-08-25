@@ -3,7 +3,7 @@ import { Link, useNavigate } from 'react-router-dom'
 import AuthLayout from '../components/auth/AuthLayout'
 import Button from '../components/ui/Button'
 import { login } from '../lib/api'
-import { setToken } from '../lib/auth'
+import { setSession } from '../lib/auth'
 import { setUserProfile } from '../lib/onboarding'
 
 const fieldLabel = 'text-xs font-medium uppercase tracking-[0.15em] text-ink/50'
@@ -30,8 +30,8 @@ function Login() {
     setErrorMessage('')
 
     try {
-      const { user, token } = await login({ email: email.trim(), password })
-      setToken(token)
+      const { user, token, refreshToken } = await login({ email: email.trim(), password })
+      setSession({ token, refreshToken })
       // Ana Sayfa karşılaması ilk boyamada buradan okuyor.
       setUserProfile({ name: user.name, email: user.email, age: user.age ?? '' })
       navigate('/', { replace: true })

@@ -5,7 +5,7 @@ import Button from '../components/ui/Button'
 import WardrobeStats from '../components/WardrobeStats'
 import SkinToneSection from '../components/SkinToneSection'
 import ThemeToggle from '../components/ui/ThemeToggle'
-import { fetchMe } from '../lib/api'
+import { fetchMe, logout } from '../lib/api'
 import { clearToken } from '../lib/auth'
 import { getUserProfile, setUserProfile, clearOnboardingState } from '../lib/onboarding'
 
@@ -58,7 +58,18 @@ function Profile({ onLoggedOut }) {
     }
   }, [])
 
-  const handleLogout = () => {
+  const handleLogout = async () => {
+    // Sunucu tarafı GERÇEK çıkıştır: refresh token'ı veritabanından siler.
+    // Bu çağrı BAŞARISIZ olsa bile (ağ hatası, sunucu erişilemez) yerel
+    // çıkış ENGELLENMEZ — kullanıcı yine de uygulamadan çıkabilmeli
+    // (best-effort sunucu temizliği, UserService.deleteUser'daki dosya
+    // silme disipliniyle aynı ilke).
+    try {
+      await logout()
+    } catch (error) {
+      console.error('Sunucu tarafı oturum kapatma başarısız:', error.message)
+    }
+
     clearToken()
     // Bir sonraki kullanıcının verisi görünmesin diye önbellek de temizlenir.
     clearOnboardingState()

@@ -305,10 +305,10 @@ olduğu için iskelet oraya taşındı, kombin üretimi istemci tarafında anlı
 
 | Konu | Durum |
 |---|---|
-| **Token localStorage'da** | XSS durumunda okunabilir. httpOnly cookie daha güvenli olurdu ama Capacitor WebView'de oturum yönetimini karmaşıklaştırır; bilinçli ödünleşme. |
+| **Token'lar localStorage'da** | Access VE refresh token ikisi de `localStorage`'da (`dg_token`/`dg_refresh_token`). XSS durumunda okunabilir. httpOnly cookie daha güvenli olurdu ama Capacitor WebView'de oturum yönetimini karmaşıklaştırır (Android'de ayrı origin/scheme, native isteklerle cookie paylaşılmaması); bilinçli ödünleşme. Access token artık KISA ömürlü (15dk-1sa) olduğu için XSS'in okuyabileceği pencere daha dar; refresh token çalınırsa da rotasyon (bkz. §8) meşru sahibinin bir sonraki sessiz yenilemesinde çalıntı kopyayı geçersiz kılar. |
 | **Şifre sıfırlama yok** | "Şifremi unuttum" akışı (e-posta ile sıfırlama bağlantısı) yoktur; kullanıcı şifresini yalnızca giriş yapmışken değiştirebilir. |
 | **E-posta doğrulama yok** | `email_verified` kolonu var ama hep `false`; doğrulama akışı kurulmadı. |
-| **Token yenileme yok** | Tek bir access token (varsayılan 7 gün) kullanılır; refresh token yoktur, süre dolunca yeniden giriş gerekir. |
+| **Çoklu cihaz oturum yönetimi yok** | Kullanıcı başına TEK bir aktif refresh token vardır (`users` tablosunun kendi satırında, ayrı bir "sessions" tablosu değil). Yeni bir cihaz/tarayıcıda giriş yapmak ÖNCEKİ refresh token'ı geçersiz kılar (üzerine yazar) — o cihazdaki oturum, access token'ı süresi dolana kadar (15dk-1sa) çalışmaya devam eder ama sonraki sessiz yenilemesi başarısız olur ve Login'e düşer. Bilinçli bir sınırlama (bkz. §8, migration `007`). |
 | **Fotoğraflar yerel diskte** | `backend/uploads/` altında tutulur; çok sunuculu bir kurulumda paylaşılan depolamaya (S3 vb.) taşınması gerekir. Dosyalar `/uploads` yolundan **token'sız** servis edilir — ad tahmin edilemez UUID olduğu için kabul edilebilir sayıldı. |
 | **Fotoğraf boyutlandırma yok** | Yüklenen görsel olduğu gibi saklanır; küçük resim (thumbnail) üretilmez. Native tarafta Capacitor `width: 1600` ile ön küçültme yapar, web'de böyle bir sınır yoktur. |
 | **Bildirimler / Yardım & Destek** | "Yakında" sayfalarıdır, işlevleri yoktur. |
@@ -344,6 +344,8 @@ olduğu için iskelet oraya taşındı, kombin üretimi istemci tarafında anlı
 | `age` | INTEGER | |
 | `city` | VARCHAR(100) | Hava durumu için; **opsiyonel**, boşsa hava durumu hiç sorgulanmaz |
 | `password_hash` | VARCHAR(255) | **API yanıtlarında asla dönmez** |
+| `refresh_token_hash` | VARCHAR(500) | bcrypt(refresh token) — `password_hash` ile AYNI kural, ham token asla saklanmaz. **NULL = aktif oturum yok** (çıkış yapılmış/hiç giriş yapılmamış). `SAFE_COLUMNS` DIŞINDA |
+| `refresh_token_expires_at` | TIMESTAMP | Bu tarihten sonra reddedilir. Her başarılı `/auth/refresh` bunu `NOW() + REFRESH_TOKEN_EXPIRES_IN` olarak YENİLER (kayan pencere). `SAFE_COLUMNS` DIŞINDA |
 | `skin_tone_analysis` | JSONB | Gemini ten tonu analizi. **NULL = kullanıcı selfie yüklemedi** (özellik isteğe bağlı). `SAFE_COLUMNS` DIŞINDA |
 | `skin_tone_photo_url` | VARCHAR(500) | Selfie yolu (göreli). **HASSAS** — yalnızca sahibine, yalnızca kendi ucundan döner. `SAFE_COLUMNS` DIŞINDA |
 | `subscription_tier` | VARCHAR(20) | `'free'` — `free` \| `premium` |
@@ -441,9 +443,9 @@ Taban adres: `http://localhost:3001/api`
 
 ### Kimlik doğrulama
 
-**`/health`, `/auth/register` ve `/auth/login` dışındaki TÜM uçlar token ister.**
-İstekler `Authorization: Bearer <token>` başlığıyla gelir; `authenticate` middleware
-token'ı doğrulayıp `req.userId`'yi doldurur.
+**`/health`, `/auth/register`, `/auth/login` ve `/auth/refresh` dışındaki TÜM uçlar
+token ister.** İstekler `Authorization: Bearer <token>` başlığıyla gelir; `authenticate`
+middleware token'ı doğrulayıp `req.userId`'yi doldurur.
 
 > **Kullanıcı kimliği asla istekten okunmaz.** Controller'lar `req.query.userId` /
 > `req.body.userId` değil **yalnızca `req.userId`** kullanır — aksi hâlde bir kullanıcı
@@ -453,8 +455,10 @@ token'ı doğrulayıp `req.userId`'yi doldurur.
 
 | Metod | Yol | Açıklama |
 |---|---|---|
-| `POST` | `/auth/register` | `{ name, email*, age, password* }` → `201 { user, token }` |
-| `POST` | `/auth/login` | `{ email*, password* }` → `200 { user, token }` |
+| `POST` | `/auth/register` | `{ name, email*, age, password* }` → `201 { user, token, refreshToken }` |
+| `POST` | `/auth/login` | `{ email*, password* }` → `200 { user, token, refreshToken }` |
+| `POST` | `/auth/refresh` | `{ refreshToken* }` → `200 { token, refreshToken }` |
+| `POST` | `/auth/logout` | Korumalı — `204`, refresh token'ı veritabanından SİLER |
 | `GET` | `/auth/me` | Token sahibinin kaydı |
 | `POST` | `/auth/change-password` | `{ currentPassword*, newPassword* }` → `204` |
 
@@ -462,15 +466,42 @@ Parola en az 8 karakter, en fazla 72 bayt (bcrypt sınırı) olmalıdır; `bcryp
 10 tur hash'lenir. Giriş hatalarında "kullanıcı yok" ile "şifre yanlış" **aynı** mesajı
 döner (`E-posta veya şifre hatalı`) — hangi e-postaların kayıtlı olduğu sızmasın diye.
 
-**`/auth/register` ve `/auth/login` hız sınırlıdır** (`middleware/rateLimiters.js` >
-`authLimiter`): aynı IP'den **15 dakikada en fazla 5 deneme**, aşılırsa `429` +
-`{ "error": "Çok fazla deneme yapıldı..." }`. Brute-force ve otomatik kayıt
-denemelerine karşı; `Retry-After` yerine standart `RateLimit-*` başlıkları döner
-(`standardHeaders: true`). **LOOPBACK (127.0.0.1/::1) muaftır** — bir saldırgan
+**İki token, iki farklı ömür (bkz. §8 "Refresh token sistemi" için tam mimari).**
+`token` (access) **KISA ömürlüdür** (`JWT_EXPIRES_IN`, varsayılan **15 dakika**) — bir
+JWT'dir, `authenticate` bunu doğrular. `refreshToken` **UZUN ömürlüdür**
+(`REFRESH_TOKEN_EXPIRES_IN`, varsayılan **30 gün**, kayan pencere) — JWT DEĞİLDİR, opak
+rastgele bir dizedir (`<userId>:<48 baytlık hex>`) ve veritabanında yalnızca bcrypt
+özeti olarak durur. Access token süresi dolduğunda korumalı uçlar **401** döner (davranış
+değişmedi); frontend bunu **otomatik ve sessizce** `/auth/refresh` ile yeniler ve
+orijinal isteği yeniden gönderir (bkz. §8, `lib/api.js > tryRefreshSession`) —
+kullanıcı hiçbir şey fark etmez, yalnızca refresh token da geçersizse (süresi dolmuş,
+iptal edilmiş, hiç yoksa) Login'e yönlendirilir.
+
+**`POST /auth/refresh` yanıtında `user` alanı YOKTUR** — çağıran zaten oturum açık bir
+sayfada, kullanıcı nesnesine ihtiyacı yok. **ROTASYON:** her başarılı yenilemede HEM
+yeni bir access token HEM de yeni bir refresh token döner ve **eski refresh token anında
+geçersiz kılınır** (veritabanındaki hash üzerine yazılır) — çalınmış bir refresh token'ın
+kullanım penceresi meşru sahibinin bir sonraki sessiz yenilemesine kadardır. Geçersiz/
+süresi dolmuş/eksik bir `refreshToken` her durumda **aynı** `401` + Türkçe mesajı döner
+(login'deki "kullanıcı yok/şifre yanlış" ayrımsızlığıyla aynı ilke — hangi doğrulamanın
+başarısız olduğu dışarı sızmaz).
+
+**`POST /auth/logout` GERÇEK bir çıkıştır** — `req.userId`'nin refresh token'ını
+veritabanından siler (body'de ayrıca bir token istemez). Yalnızca frontend'de
+localStorage'ı temizlemek yeterli değildir: sunucu tarafında refresh token hâlâ
+dursaydı çalınmış (ya da unutulmuş bir cihazdaki) bir kopya oturumu canlı tutmaya
+devam ederdi.
+
+**`/auth/register`, `/auth/login` ve `/auth/refresh` hız sınırlıdır**
+(`middleware/rateLimiters.js` > `authLimiter`): aynı IP'den **15 dakikada en fazla 5
+deneme**, aşılırsa `429` + `{ "error": "Çok fazla deneme yapıldı..." }`. Brute-force ve
+otomatik kayıt denemelerine karşı; `Retry-After` yerine standart `RateLimit-*` başlıkları
+döner (`standardHeaders: true`). **LOOPBACK (127.0.0.1/::1) muaftır** — bir saldırgan
 bağlantısının kaynağını uzaktan bu adres gibi gösteremeyeceği için bu güvenliği
 zayıflatmaz, yalnızca aynı makineden art arda hesap oluşturan test scriptlerinin
 (`test-all-endpoints.js` tek başına 6 kayıt atıyor) birbirinin kotasını
-tüketmesini önler.
+tüketmesini önler. `/auth/refresh`'in bu limite pratikte hiç yaklaşmaması beklenir:
+tek sekmede eşzamanlı 401'ler TEK bir çağrıda birleşir (bkz. §8).
 
 ### Hata biçimi
 
@@ -1102,8 +1133,9 @@ yalnızca `assets/public` içeriğini ve plugin listesini günceller.
 ```bash
 cd backend
 
-# Kimlik doğrulama + yetkilendirme (48 kontrol). En kritik bölüm: bir kullanıcının
-# BAŞKASININ verisine erişememesi.
+# Kimlik doğrulama + yetkilendirme + refresh token (71 kontrol). En kritik
+# bölümler: bir kullanıcının BAŞKASININ verisine erişememesi VE refresh token
+# rotasyonu/süre dolumu/çıkışın gerçekten çalışması.
 node test-scripts/test-auth.js
 
 # Tüm uçları uçtan uca doğrular (77 kontrol); kendi hesabını açıp sonunda siler.
@@ -1575,6 +1607,124 @@ tutarsızlık bir hata değil, beklenen bir durumdur ve üç yerde karşılanır
 `authRoutes` bu yüzden diğerlerinden farklı olarak bir **fabrikadır**
 (`createAuthRoutes(authService, authenticate)`). Yeni korumalı bir kaynak eklerken
 `app.use('/api', authenticate, yeniRoutes)` deyip controller'da `req.userId` kullanın.
+
+**Refresh token sistemi (`AuthService` + `UserRepository`, migration `007`).**
+Eskiden tek bir 7 günlük access token vardı; süresi dolunca kullanıcı **zorla**
+yeniden giriş yapıyordu. Artık iki token var ve amaç ayrışıyor: **access token
+KISA ömürlü** (`accessTokenExpiresIn`, varsayılan `15m`) — çalınırsa saldırı
+penceresi dar kalsın diye; **refresh token UZUN ömürlü** (`refreshTokenExpiresInMs`,
+varsayılan `30d`, KAYAN pencere — her başarılı yenileme süresini `NOW() + 30d`'ye
+iter) — kullanıcının GERÇEK oturum süresini bu taşır, ve access token dolduğunda
+frontend'in arka planda sessizce yenilemesiyle kullanıcı hiçbir şey fark etmez.
+
+- **Refresh token bir JWT DEĞİLDİR — opak bir dizedir:** `<userId>:<48 baytlık
+  rastgele hex>` (384 bit entropi). Veritabanında yalnızca **bcrypt özeti**
+  (`refresh_token_hash`) durur, ham değer bir daha asla sunucu tarafında görünmez
+  (`password_hash` ile birebir aynı disiplin).
+- **NEDEN userId TOKEN'IN İÇİNE GÖMÜLÜ — bilinçli bir mimari karar.** Bcrypt
+  hash'leri SORGULANAMAZ (her hash'leme farklı salt üretir, `WHERE
+  refresh_token_hash = ?` diye arama yapılamaz). Refresh isteği geldiğinde HANGİ
+  kullanıcıya ait olduğunu bilmeden doğru satırı bulmanın pratik yolu ya TÜM
+  kullanıcılar üzerinde `bcrypt.compare` ile doğrusal tarama yapmak (ölçeklenmez)
+  ya da token'ın kendisine ucuz bir arama anahtarı gömmektir. İkincisi seçildi:
+  `AuthService.#extractUserIdFromRefreshToken` token'ın `:`'dan önceki kısmını
+  UUID olarak doğrulayıp `UserRepository.findRefreshTokenData(userId)` ile SADECE
+  o satırı okur, sonra `bcrypt.compare` ile gerçek doğrulamayı yapar. Bu, DB'yi
+  ele geçiren birine EK bir bilgi vermez (user id zaten access token payload'ında
+  da açıkça duruyor) — yalnızca O(1) bir bakışta doğru satırı bulmayı sağlar.
+- **ROTASYON (güvenlik pratiği, açıkça istendi).** Her başarılı `refresh()`
+  çağrısı YENİ bir refresh token üretir VE `UserRepository.setRefreshToken` ile
+  eski hash'in ÜZERİNE YAZAR — eski token bir daha ASLA kabul edilmez. Bir refresh
+  token çalınırsa, meşru sahibi bir sonraki sessiz yenilemesini yaptığı anda
+  çalıntı kopya kendiliğinden geçersiz kalır; test bunu `test-auth.js`'te
+  "ROTASYONLA GEÇERSİZ KILINAN eski refresh token" kontrolüyle doğruluyor.
+- **Kullanıcı başına TEK bir aktif refresh token** (ayrı bir "sessions" tablosu
+  değil, `users` satırının kendisinde) — bu depodaki tek-satır-tek-kullanıcı
+  deseniyle (`password_hash`, `skin_tone_photo_url`) tutarlı. Bilinçli sınırlama:
+  yeni bir cihazda giriş yapmak öncekini geçersiz kılar; çoklu-cihaz oturum
+  yönetimi kapsam dışı bırakıldı (bkz. §4 Eksikler).
+- **Süre dolumu İKİ AYRI yerde kontrol edilir ve İKİSİ DE 401'e düşer:**
+  `refresh_token_expires_at <= NOW()` (housekeeping olarak DB'den de temizlenir)
+  ve `bcrypt.compare` başarısızlığı (rotasyonla geçersiz kılınmış/bozuk bir
+  token). Hangi kontrolün başarısız olduğu dışarı **asla sızmaz** — ikisi de
+  aynı `"Oturum yenilenemedi, lütfen tekrar giriş yapın"` mesajını döner (login'in
+  "kullanıcı yok/şifre yanlış" ayrımsızlığıyla AYNI ilke).
+- **`refresh()` yanıtında `user` alanı YOKTUR** — `register`/`login`'den farklı
+  olarak çağıran zaten oturum açık bir sayfada, kullanıcı nesnesine ihtiyacı
+  yok. Üçü de (`register`/`login`/`refresh`) ortak `#issueTokenPair(userId,
+  email)` özel metodundan geçer — yalnızca `{ token, refreshToken }` döner,
+  `user` alanını `register`/`login` kendi tarafında ayrıca ekler.
+- **`JWT_EXPIRES_IN` ve `REFRESH_TOKEN_EXPIRES_IN` KENDİ küçük ayrıştırıcısıyla
+  okunur** (`parseDurationToMs`, `AuthService.js` içinde). `jsonwebtoken` kendi
+  içinde `ms` paketini kullanıyor ama bu paket `package.json`'da bizim DOĞRUDAN
+  bağımlılığımız değil (transitive) — ona güvenmek kırılgan olurdu (bir üst
+  paket güncellenip kaldırabilir). `.env` formatımız zaten dar bir küme
+  (`"30d"`, `"12h"`, `"15m"`, düz saniye) olduğu için küçük, bağımsız bir
+  regex yeterli görüldü.
+- **`UUID_PATTERN` `utils/validators.js`'ten EK OLARAK export edildi** —
+  `AuthService`'in refresh token'ın gömülü userId'sini biçim olarak doğrulaması
+  için (`assertUuid` burada uygun değil: o fırlatır, burada sessizce `null`
+  dönüp tek tip 401'e çevrilmesi gerekiyor).
+
+**Frontend — `lib/auth.js` + `lib/api.js`.** Access token'la AYNI mekanizmayla
+(`localStorage`, `dg_refresh_token` anahtarı) saklanır; httpOnly cookie'ye
+BİLEREK geçilmedi (Capacitor WebView'de cookie tabanlı oturum yönetimi
+karmaşıklaşır — ayrı origin/scheme, native isteklerle paylaşılmama gibi bilinen
+sorunlar — ve bu depo zaten access token için de aynı ödünleşmeyi yapmıştı).
+
+- **`setSession({ token, refreshToken })`** ikisini BİRLİKTE yazar — `Login`/
+  `Register`/sessiz yenileme HEPSİ bunu kullanır. `clearToken()` artık İKİSİNİ
+  DE temizler (`clearRefreshToken()` dahil) — yalnızca access token'ı silip
+  refresh token'ı unutmak, oturumun "yarı düşmüş" garip bir durumda kalmasına
+  yol açardı.
+- **`api.js > tryRefreshSession` / `fetchWithAuth` — asıl "sessizce yenile"
+  mekanizması.** `request`/`requestMultipart`/`fetchSkinTonePhoto`'nun ÜÇÜ DE
+  artık ortak `fetchWithAuth`'tan geçiyor: 401 alınırsa (ve `Authorization`
+  başlığı gönderilmişse) `tryRefreshSession()` çağrılır, başarılıysa
+  `Authorization` başlığı YENİ access token'la değiştirilip istek **BİR KEZ**
+  yeniden gönderilir — çağıran taraf (sayfa bileşenleri) bunu HİÇ BİLMEZ,
+  yalnızca nihai `Response`'u görür. Yeniden deneme yalnızca bir kez yapılır
+  (retry sonrası hâlâ 401 ise olduğu gibi döner, sonsuz döngü riski yok).
+- **`refreshPromise` MODÜL SEVİYESİNDE paylaşılır (dedup).** Bir sayfa
+  `Promise.all` ile birkaç uç çağırıyorsa (ör. Dashboard) ve hepsi AYNI ANDA
+  401 alırsa, hepsi TEK bir `/auth/refresh` çağrısını PAYLAŞIR — ikinci ve
+  sonraki çağıranlar kendi refresh isteklerini ATMAZ. Bu olmasaydı her biri
+  kendi rotasyonunu tetikler ve birbirinin YENİ refresh token'ını anında
+  geçersiz kılardı (rotasyon "en son kazanır" mantığında çalışır).
+- **BİLİNÇLİ SINIRLAMA: bu dedup yalnızca BİR SEKME içindir.** Birden fazla
+  sekme/pencere arasında paylaşılmaz — `refreshPromise` her sekmenin kendi JS
+  heap'inde ayrı bir modül örneğidir. İki sekme aynı anda (birbirinden habersiz)
+  refresh denerse, ROTASYON yüzünden ilk başarılı olan diğerinin token'ını
+  geçersiz kılar ve o sekme bir sonraki isteğinde Login'e düşer. Bu, gerçek
+  çok-sekmeli senkronizasyon (ör. `BroadcastChannel`) gerektirir; bu uygulamanın
+  (tek kullanıcı, genelde tek sekme/cihaz) kapsamı dışında bırakıldı.
+- **`hasValidSession()` artık refresh token'ı da SAYAR.** Yalnızca access
+  token'ın süresine bakmak, aktif bir refresh token'ı olan bir kullanıcıyı HER
+  SAYFA YÜKLEMESİNDE Login'e geri fırlatırdı — tam da bu özelliğin ORTADAN
+  KALDIRMAYA çalıştığı "zorla yeniden giriş" deneyiminin ta kendisi (access
+  token artık 15 dakika gibi kısa olduğu için bu her birkaç sayfa geçişinde bir
+  olurdu). Artık: access token geçerliyse HIZLI yol (ağ isteği yok); değilse
+  ama bir refresh token VARSA yine geçerli SAYILIR — gerçek yenileme burada
+  YAPILMAZ, sayfa normal açılır ve ilk API çağrısı 401 aldığı anda
+  `tryRefreshSession` sessizce devreye girer. Refresh token da geçersizse o
+  ilk çağrı `notifyUnauthorized()`'a düşer ve kullanıcı GERÇEKTEN Login'e
+  yönlendirilir — yani bu "iyimser" karar en kötü ihtimalle bir sayfa geçişi
+  GECİKMESİYLE aynı doğru sonuca varır, asla yanlış bir "oturum açık" izlenimini
+  kalıcı kılmaz.
+- **`logout()` (Profile.jsx) sunucu çağrısını best-effort yapar.** `POST
+  /auth/logout` başarısız olsa bile (ağ hatası, sunucu erişilemez) YEREL çıkış
+  ENGELLENMEZ — `UserService.deleteUser`'daki dosya silme disipliniyle aynı
+  ilke: kullanıcı deneyimi sunucu tarafı temizliğe rehin tutulmaz.
+- **Doğrulama:** backend `test-auth.js`'e yeni bir bölüm eklendi (rotasyon,
+  süre dolumu — veritabanında elle simüle edilir —, çıkış sonrası DB'nin
+  GERÇEKTEN temizlendiği, süresi dolmuş bir access token'ın 401 döndürüp
+  ARDINDAN atılan `/auth/refresh`'in çalışan yeni bir token ürettiği). Frontend
+  tarafı (401 → sessiz yenile → yeniden dene, TAM SAYFA YENİLEMESİ OLMADAN;
+  geçersiz refresh token → Login'e yönlendirme) gerçek tarayıcıda (Playwright +
+  sistem Chrome) doğrulandı: `page.on('load')` sayacının yenileme boyunca
+  **1'de kaldığı** (hiç tam sayfa yenilemesi olmadığı), localStorage'daki her
+  iki token'ın da güncellendiği (rotasyon), ve geçersiz senaryoda gerçekten
+  `/giris`'e düşüldüğü ölçüldü.
 
 **Güvenlik middleware'leri (`server.js`, en üstte, tüm route'lardan önce).**
 
@@ -2098,7 +2248,7 @@ bir hedef üzerinden), "WhatsApp'ta Paylaş" gibi seçenekler sunar.
 **Kalıcı durum:** `src/lib/onboarding.js` `dg_` önekli localStorage anahtarlarının
 tek sahibidir (onboarding bayrağı, kullanıcı profili önbelleği, anket cevapları —
 `dg_user_id` YOKTUR, kullanıcı kimliği tamamen `dg_token`'daki JWT'den okunur).
-**İki istisna:** `dg_token` `lib/auth.js`'e, `dg_theme` `lib/theme.js`'e aittir.
+**İki istisna:** `dg_token`/`dg_refresh_token` `lib/auth.js`'e, `dg_theme` `lib/theme.js`'e aittir.
 Tema bir OTURUM verisi değil CİHAZ tercihidir — bu yüzden çıkışta `clearOnboardingState()`
 ile silinmez, kullanıcı çıkış yapınca teması korunur.
 `localStorage`'a doğrudan dokunmayın. **Tek doğru kaynak veritabanıdır**; localStorage
@@ -2221,6 +2371,120 @@ tamamlayıp kaldırıldı:
 
 > Bundan sonraki her çalışma buraya tarihiyle işlenir: eklenen özellikler, düzeltilen
 > hatalar, alınan mimari kararlar. En yeni kayıt en üstte.
+
+### 2026-08-25 — JWT refresh token sistemi: zorla yeniden giriş kaldırıldı
+- **Ne değişti:** Kullanıcılar artık **7 gün sonra zorla yeniden giriş yapmak
+  zorunda değil.** Access token KISA ömürlü hâle getirildi (`JWT_EXPIRES_IN`,
+  eski varsayılan `7d` → yeni varsayılan **`15m`**) ve yanına UZUN ömürlü, kayan
+  pencereli bir refresh token (`REFRESH_TOKEN_EXPIRES_IN`, varsayılan **`30d`**)
+  eklendi. Access token süresi dolduğunda frontend arka planda **sessizce**
+  yeniler ve orijinal isteği yeniden gönderir — kullanıcı hiçbir şey fark
+  etmez; yalnızca refresh token da geçersizse (süresi dolmuş/iptal
+  edilmiş/hiç yoksa) GERÇEKTEN Login'e yönlendirilir. "Eksikler" tablosundaki
+  *"Token yenileme yok"* maddesi bu çalışmayla kapandı.
+- **Migration `007_add_refresh_token.sql`:** `users.refresh_token_hash
+  VARCHAR(500)` + `users.refresh_token_expires_at TIMESTAMP`. Kolon adı
+  BİLEREK `refresh_token` DEĞİL `refresh_token_hash`dır — `password_hash` ile
+  AYNI kural: kolonda asla düz metin token durmaz.
+
+**BACKEND — `AuthService` refresh token'ın TAM sahibi.**
+- **Refresh token bir JWT DEĞİL, opak bir dize:** `<userId>:<48 baytlık
+  rastgele hex>` (384 bit entropi). DB'de yalnızca bcrypt özeti durur.
+  **NEDEN userId gömülü:** bcrypt hash'leri sorgulanamaz (her hash'leme farklı
+  salt üretir); token'a ucuz bir arama anahtarı gömmek, tüm kullanıcılar
+  üzerinde doğrusal `bcrypt.compare` taraması yapmaktan çok daha iyi ölçekleniyor
+  ve DB'yi ele geçiren birine ek bilgi vermiyor (user id zaten access token
+  payload'ında da açık).
+- **ROTASYON:** her başarılı `POST /auth/refresh` çağrısı YENİ bir access +
+  refresh token çifti üretir ve eski refresh token'ın hash'inin ÜZERİNE YAZAR —
+  eski token bir daha asla kabul edilmez. Çalınmış bir kopyanın kullanım
+  penceresi, meşru sahibinin bir sonraki sessiz yenilemesine kadardır.
+- **Kullanıcı başına TEK bir aktif refresh token** (`users` satırının kendisinde,
+  ayrı bir "sessions" tablosu değil) — bu depodaki tek-satır-tek-kullanıcı
+  deseniyle tutarlı. Bilinçli sınırlama: yeni bir cihazda giriş yapmak
+  öncekini geçersiz kılar; çoklu-cihaz oturum yönetimi kapsam dışı (yeni bir
+  Eksikler satırı olarak işlendi).
+- **Yeni uçlar:** `POST /auth/refresh` (korumasız — tam olarak bu uca
+  gelindiğinde access token zaten süresi dolmuş olur; `authLimiter`'ın arkasında)
+  ve `POST /auth/logout` (korumalı, `req.userId`'nin refresh token'ını
+  veritabanından SİLER — gerçek çıkış, yalnızca localStorage temizlemek değil).
+- **`refresh()` yanıtında `user` alanı YOK** — `register`/`login`'in aksine
+  çağıran zaten oturum açık bir sayfada. Üçü de ortak `#issueTokenPair`'den geçer.
+- **`parseDurationToMs` — küçük, bağımsız bir süre ayrıştırıcı** (`"30d"`,
+  `"12h"`, `"15m"`, düz saniye). `jsonwebtoken`'ın kullandığı `ms` paketine
+  DOĞRUDAN güvenilmedi (transitive bağımlılık, package.json'da bildirilmemiş —
+  kırılgan olurdu); `.env` formatımız zaten dar bir küme olduğu için kendi
+  yardımcımız yeterli.
+- **`UUID_PATTERN` `utils/validators.js`'ten EK OLARAK export edildi** —
+  refresh token'ın gömülü userId'sini biçim olarak doğrulamak için.
+
+**FRONTEND — `lib/auth.js` + `lib/api.js`.**
+- Refresh token access token'la AYNI mekanizmayla (`localStorage`,
+  `dg_refresh_token`) saklanır — httpOnly cookie BİLEREK kullanılmadı
+  (Capacitor WebView'de karmaşıklaşır, access token için de aynı ödünleşme
+  zaten yapılmıştı). `setSession({ token, refreshToken })` ikisini BİRLİKTE
+  yazar; `clearToken()` artık ikisini de temizler.
+- **`api.js > fetchWithAuth` — üç fetch yolunun (`request`/`requestMultipart`/
+  `fetchSkinTonePhoto`) PAYLAŞTIĞI tek nokta.** 401 alınırsa `tryRefreshSession()`
+  dener, başarılıysa isteği YENİ access token'la **bir kez** yeniden gönderir —
+  çağıran sayfa bileşenleri bunu hiç bilmez.
+- **`refreshPromise` modül seviyesinde PAYLAŞILIR (dedup).** Bir sayfanın
+  `Promise.all` ile attığı birkaç uç AYNI ANDA 401 alırsa, hepsi TEK bir
+  `/auth/refresh` çağrısını paylaşır — aksi hâlde her biri kendi rotasyonunu
+  tetikleyip birbirinin YENİ token'ını geçersiz kılardı. **Bilinçli sınırlama:**
+  bu dedup yalnızca BİR SEKME içindir, sekmeler arası paylaşılmaz (gerçek
+  çok-sekme senkronizasyonu kapsam dışı).
+- **`hasValidSession()` artık refresh token'ı da SAYAR.** Yalnızca access
+  token'ın süresine bakmak, kısa ömürlü hâle geldiği için kullanıcıyı HER
+  SAYFA YÜKLEMESİNDE Login'e geri fırlatırdı — tam da bu özelliğin kaldırmaya
+  çalıştığı deneyimin ta kendisi. Artık access token geçerliyse hızlı yol; değilse
+  ama bir refresh token varsa yine geçerli SAYILIR — gerçek yenileme sayfa
+  açıldıktan SONRA, ilk API çağrısının 401'ine tepki olarak sessizce olur.
+- **`logout()` best-effort:** sunucu çağrısı başarısız olsa bile yerel çıkış
+  engellenmez (`UserService.deleteUser`'daki dosya silme disipliniyle aynı ilke).
+- **Bu görevin kapsamı dışında BİLEREK bırakılan bir nokta:** `fetchWithAuth`
+  içindeki `timeoutMs` tabanlı `AbortSignal`, YALNIZCA ilk denemede oluşturulur
+  ve retry aynı sinyali paylaşır — çok kısa zaman aşımlı uçlarda (ör.
+  `VECTOR_REQUEST_TIMEOUT_MS = 4000`) 401+refresh+retry döngüsü teorik olarak
+  bütçeyi aşabilir. Zararsız: bu uçlar zaten "başarısızlığı tolere edilebilir"
+  olarak tasarlanmış (bkz. `fetchCompanions`), başarısız retry sessizce
+  rastgele geri düşüşe döner.
+
+**Doğrulama:**
+- **Backend — `test-scripts/test-auth.js` 48 → 71 kontrol.** Yeni bölüm:
+  temel yenileme + ROTASYON (eski token'ın rotasyon sonrası kesin reddi),
+  geçersiz/eksik/bozuk refresh token (401, 500 DEĞİL), **KRİTİK — süresi
+  dolmuş bir access token'ın 401 döndürüp ARDINDAN atılan `/auth/refresh`'in
+  çalışan yeni bir token ürettiği** (backend'in "sessiz yenileme" sözleşmesi),
+  süresi dolmuş refresh token'ın veritabanında elle simüle edilip 401 + DB
+  housekeeping ile doğrulanması, ve **GERÇEK ÇIKIŞ**: `/auth/logout` sonrası
+  `refresh_token_hash`/`refresh_token_expires_at`'in veritabanında GERÇEKTEN
+  `NULL` olduğu ve çıkıştan önceki refresh token'ın bir daha kabul edilmediği.
+- **Frontend — gerçek tarayıcıda 13 kontrol (Playwright + sistem Chrome),**
+  gerçek bir test kullanıcısı ve elle imzalanmış süresi dolmuş bir access
+  token'la: `page.on('load')` sayacının **1'de kaldığı** (401→sessiz
+  yenileme→yeniden deneme sırasında TAM SAYFA YENİLEMESİ OLMADIĞI), sayfanın
+  `/gardirop`'ta kaldığı (Login'e düşmediği), `/auth/refresh`'in gerçekten
+  çağrılıp başarılı olduğu, orijinal isteğin yeniden gönderilip 200 döndüğü,
+  localStorage'daki HER İKİ token'ın da güncellendiği (rotasyon), hata
+  ekranının hiç görünmediği; **ayrı bir senaryoda** geçersiz bir refresh
+  token'la gerçekten `/giris`'e yönlendirildiği ve localStorage'ın temizlendiği.
+- Regresyon: `test-auth` 71/71, `test-all-endpoints` 77/77, `test-stats` 60/60,
+  `test-item-outfits` 27/27, `test-clean-status` 26/26, `test-file-cleanup`
+  12/12, `test-image-upload` 29/29, `test-vector --birim` 46/46,
+  `test-outfit-rag --birim` 36/36, `test-outfit-interpret --birim` 10/10,
+  `test-ai-analysis --birim` 48/48, `test-skin-tone --birim` 33/33,
+  lint + build temiz.
+- **TEST TUZAĞI (yakalandı, ürün hatası DEĞİL):** İlk tarayıcı koşusunda iki
+  kontrol yanlış yere kırmızı yandı. (1) "Tam sayfa yenilemesi olmadı" ölçümü
+  `page.goto(FRONTEND)` sonra `page.goto(FRONTEND + '/gardirop')` ile İKİ AYRI
+  gerçek navigasyon yapıyordu — ikinci `goto` kendi başına bir tam yüklemedir,
+  ölçümü anlamsızlaştırıyordu. Düzeltme: `context.addInitScript` ile
+  localStorage TEK navigasyondan ÖNCE dolduruldu, `page.on('load')` sayacı
+  yalnızca o TEK goto'yu saydı. (2) "Konsol temiz mi" kontrolü, senaryonun
+  KENDİSİNİN kasten tetiklediği 401 kaynaklı "Failed to load resource" tarayıcı
+  loglarını da hata sayıyordu (2026-08-22 kaydındaki AYNI tuzak) — bu satırlar
+  filtrelendi.
 
 ### 2026-08-25 — Serbest metin (mood) bağlamı artık GERÇEKTEN kombin seçimine katılıyor
 - **Düzeltilen gerçek hata:** bir önceki çalışma (`interpretOutfitRequest`,

@@ -42,4 +42,4 @@ function assertUuid(value, fieldName) {
   }
 }
 
-module.exports = { FIELD_LIMITS, assertMaxLength, assertFieldLengths, assertUuid }
+module.exports = { FIELD_LIMITS, assertMaxLength, assertFieldLengths, assertUuid, UUID_PATTERN }

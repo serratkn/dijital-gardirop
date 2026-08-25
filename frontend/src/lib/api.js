@@ -1,5 +1,5 @@
 import { Capacitor } from '@capacitor/core'
-import { clearToken, getToken, getUserIdFromToken } from './auth'
+import { clearToken, getRefreshToken, getToken, getUserIdFromToken, setSession } from './auth'
 
 const DEFAULT_PORT = 3001
 
@@ -71,10 +71,77 @@ function notifyUnauthorized() {
   unauthorizedListeners.forEach((listener) => listener())
 }
 
+// Access token süresi dolduğunda (401) tetiklenen SESSİZ yenileme. Birden
+// fazla istek AYNI ANDA 401 alırsa (ör. bir sayfanın Promise.all ile paralel
+// çektiği birkaç uç) hepsi TEK bir /auth/refresh çağrısını PAYLAŞIR — modül
+// seviyesindeki bu değişken, ikinci ve sonraki çağıranların kendi refresh
+// isteklerini atmasını önler (aksi hâlde her biri kendi rotasyonunu tetikler
+// ve birbirinin YENİ refresh token'ını anında geçersiz kılardı, bkz. backend
+// AuthService.refresh > ROTASYON). Yalnızca BU SEKME içindir — birden fazla
+// sekme/pencere arasında paylaşılmaz (bkz. CLAUDE.md, bilinçli bir sınırlama).
+let refreshPromise = null
+
+async function performRefresh() {
+  const refreshToken = getRefreshToken()
+  if (!refreshToken) return false
+
+  try {
+    const response = await fetch(`${API_BASE_URL}/auth/refresh`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ refreshToken }),
+    })
+    if (!response.ok) return false
+
+    const data = await response.json()
+    // ROTASYON: backend her başarılı yenilemede YENİ bir refresh token da
+    // döner ve ESKİSİNİ anında geçersiz kılar; setSession ikisini BİRLİKTE
+    // yazar — yalnızca access token güncellenseydi bir sonraki yenileme
+    // artık var olmayan eski refresh token'ı göndermeye devam ederdi.
+    setSession({ token: data.token, refreshToken: data.refreshToken })
+    return true
+  } catch {
+    // Ağ hatası, zaman aşımı vb. — yenileme başarısız SAYILIR, çağıran
+    // normal 401 akışına (notifyUnauthorized) düşer.
+    return false
+  }
+}
+
+function tryRefreshSession() {
+  if (!refreshPromise) {
+    refreshPromise = performRefresh().finally(() => {
+      refreshPromise = null
+    })
+  }
+  return refreshPromise
+}
+
+// `request`/`requestMultipart`/`fetchSkinTonePhoto`'nun PAYLAŞTIĞI tek fetch
+// noktası: 401 alınırsa (ve `allowRefresh` açıksa) sessizce `tryRefreshSession`
+// dener, başarılıysa Authorization başlığını YENİ access token'la değiştirip
+// isteği BİR KEZ yeniden gönderir — çağıranın kendisi bunu hiç bilmez,
+// yalnızca nihai `Response`'u görür. Yeniden deneme yalnızca BİR KEZ yapılır
+// (retry sonrası hâlâ 401 ise olduğu gibi döner) — sonsuz döngü riski yok.
+async function fetchWithAuth(url, { headers = {}, allowRefresh = true, ...init } = {}) {
+  const attempt = (attemptHeaders) => fetch(url, { ...init, headers: attemptHeaders })
+
+  let response = await attempt(headers)
+
+  if (response.status === 401 && allowRefresh && headers.Authorization) {
+    const refreshed = await tryRefreshSession()
+    if (refreshed) {
+      response = await attempt({ ...headers, Authorization: `Bearer ${getToken()}` })
+    }
+  }
+
+  return response
+}
+
 // Tüm isteklerin tek geçtiği nokta: Authorization başlığı burada eklenir,
 // böylece hiçbir çağrı yerinde token yönetmek zorunda kalmaz.
 // keepSessionOn401: bazı uçlarda 401 "oturum düştü" değil "girilen şifre yanlış"
-// demektir (örn. şifre değiştirme). Bu durumda kullanıcı dışarı atılmamalıdır.
+// demektir (örn. şifre değiştirme). Bu durumda kullanıcı dışarı atılmamalı VE
+// sessiz yenileme denenmemelidir (yanlış şifre bir oturum sorunu değildir).
 // timeoutMs: isteğin en fazla ne kadar bekleyeceği. Varsayılan YOK (sınırsız) —
 // çoğu uç için tarayıcının kendi davranışı yeterli. Yalnızca kullanıcının
 // ekrana bakıp beklediği ve BAŞARISIZLIĞI TOLERE EDİLEBİLEN çağrılarda
@@ -91,17 +158,19 @@ async function request(
     if (token) headers.Authorization = `Bearer ${token}`
   }
 
-  const response = await fetch(`${API_BASE_URL}${endpoint}`, {
+  const response = await fetchWithAuth(`${API_BASE_URL}${endpoint}`, {
     method,
     headers,
     body: body ? JSON.stringify(body) : undefined,
     signal: timeoutMs ? AbortSignal.timeout(timeoutMs) : undefined,
+    allowRefresh: !skipAuth && !keepSessionOn401,
   })
 
   if (!response.ok) {
-    // 401: token yok/süresi dolmuş → oturumu düşür ve dinleyicileri uyar.
-    // Giriş/kayıt isteklerinde (skipAuth) 401 "şifre hatalı" demektir,
-    // oturum düşürülmemelidir.
+    // 401: sessiz yenileme de (denendiyse) başarısız oldu → oturumu düşür ve
+    // dinleyicileri uyar. Giriş/kayıt isteklerinde (skipAuth) ya da
+    // keepSessionOn401 uçlarında 401 "şifre hatalı" demektir, oturum
+    // düşürülmemelidir.
     if (response.status === 401 && !skipAuth && !keepSessionOn401) {
       notifyUnauthorized()
     }
@@ -147,9 +216,9 @@ async function requestMultipart(
   { timeoutMs, errorPrefix = 'Fotoğraf yüklenemedi' } = {},
 ) {
   const token = getToken()
-  const response = await fetch(`${API_BASE_URL}${endpoint}`, {
+  const response = await fetchWithAuth(`${API_BASE_URL}${endpoint}`, {
     method: 'POST',
-    headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
     body: formData,
     signal: timeoutMs ? AbortSignal.timeout(timeoutMs) : undefined,
   })
@@ -192,6 +261,16 @@ export function login(payload) {
 
 export function fetchMe() {
   return request('/auth/me')
+}
+
+// GERÇEK çıkış: refresh token'ı sunucuda (veritabanında) SİLER — yalnızca
+// localStorage'ı temizlemek yetmez, aksi hâlde çalınmış (ya da unutulmuş bir
+// cihazdaki) bir kopya oturumu canlı tutmaya devam ederdi. `skipAuth`/
+// `keepSessionOn401` GEREKMEZ: bu uç zaten `authenticate`'in arkasında,
+// normal 401 davranışı (sessiz yenile, o da başarısızsa Login'e düş) burada
+// da doğru olan davranıştır.
+export function logout() {
+  return request('/auth/logout', { method: 'POST' })
 }
 
 export function changePassword(payload) {
@@ -429,8 +508,8 @@ export function deleteSkinToneAnalysis() {
 // çağıran taraf görseli hiç göstermez.
 export async function fetchSkinTonePhoto() {
   const token = getToken()
-  const response = await fetch(`${API_BASE_URL}/users/skin-tone-analysis/photo`, {
-    headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+  const response = await fetchWithAuth(`${API_BASE_URL}/users/skin-tone-analysis/photo`, {
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
   })
 
   if (response.status === 404) return null
