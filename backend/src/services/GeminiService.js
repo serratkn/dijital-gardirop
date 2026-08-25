@@ -40,6 +40,48 @@ Kurallar:
 // eksik göstermek doğru.
 const TEN_TONLARI = new Set(['Sıcak', 'Soğuk', 'Nötr'])
 
+// KOMBİN ÖNER — serbest metin yorumlama. Bu liste frontend'deki
+// `lib/occasions.js > OCCASIONS` ile BİREBİR AYNI tutulmalıdır: ikisi de
+// "hazır durum" kavramının aynı altı üyesini temsil eder (biri pill etiketi,
+// diğeri Gemini'nin eşleyebileceği hedef küme). Biri değişirse diğeri de
+// güncellenmelidir — tek bir paylaşılan modül olmadığı için bu senkronizasyon
+// ELLE yapılıyor.
+const OUTFIT_REQUEST_CATEGORIES = ['Üniversite', 'İş', 'Akşam Yemeği', 'Buluşma', 'Spor', 'Özel Davet']
+
+// Kullanıcının serbest metnini standart bir duruma ve kısa bir özete çevirir.
+// Diğer promptlardan farklı olarak GÖRSEL DEĞİL yalnızca metin alır (bkz.
+// #generateFromText). "Diğer" seçeneği BİLEREK var: kullanıcının anlattığı
+// durum altı kategoriden hiçbirine uymayabilir; modeli zorla birine
+// sığdırmak yanlış bir occasion etiketi üretirdi.
+const OUTFIT_REQUEST_PROMPT = `Kullanıcı bir kombin önerisi almak için kendi cümleleriyle durumunu anlatıyor.
+Bu metni analiz et ve SADECE aşağıdaki şemaya birebir uyan bir JSON döndür. Açıklama, selamlama veya markdown ekleme.
+
+Standart durum kategorileri: ${OUTFIT_REQUEST_CATEGORIES.join(', ')}.
+
+{
+  "occasion": "bu kategorilerden EN YAKIN olanı; hiçbiri uymuyorsa 'Diğer'",
+  "stil_tercihi": "kullanıcının belirttiği stil eğilimi, kısa bir etiket (örn. 'Sade ve Şık', 'Rahat', 'İddialı')",
+  "kacinilmasi_gerekenler": ["kullanıcının istemediği şeyler, kısa etiketler (belirtilmediyse boş dizi)"],
+  "onem_verilen_ozellikler": ["kullanıcının vurguladığı öncelikler, kısa etiketler (belirtilmediyse boş dizi)"],
+  "arama_metni": "kullanıcının isteğini özetleyen, TEK CÜMLELİK doğal dil özeti"
+}
+
+KURALLAR:
+- occasion MUTLAKA yukarıdaki 6 kategoriden biri ya da "Diğer" olsun, başka bir değer YAZMA.
+- Metinden emin olamadığın alanlar için boş dizi ya da null kullan, TAHMİN UYDURMA.
+- Tüm değerler TÜRKÇE olsun.
+- "arama_metni" tek bir cümle olsun, madde işareti veya liste OLMASIN.
+
+Kullanıcının metni:
+"`
+
+// Kullanıcı serbestçe yazdığı için sınırsız uzunlukta bir istek gönderebilir;
+// bu, hem gereksiz yere büyük bir prompt hem de kötüye kullanım (spam/çok
+// uzun metin) riski taşır. Bu metin HİÇBİR ZAMAN veritabanına yazılmaz
+// (yalnızca Gemini'ye gidip atılır), bu yüzden utils/validators.js'teki
+// FIELD_LIMITS'e değil buraya ait bir sınır.
+const MAX_INTERPRETATION_TEXT_LENGTH = 500
+
 // Ten tonu listeleri kıyafet şemasından DAHA UZUN olabilir: prompt 6-8 uyumlu
 // renk istiyor. Kıyafet şemasının 4'lük sınırı buraya uygulanmamalı.
 const MAX_TEN_RENK_SAYISI = 8
@@ -379,6 +421,35 @@ class GeminiService {
     return { model, vectors }
   }
 
+  // KOMBİN ÖNER — serbest metin yorumlama. Kullanıcının kendi cümleleriyle
+  // anlattığı durumu standart bir occasion'a ve kısa bir özete çevirir.
+  //
+  // FIRLATIR (analyzeSkinTone/analyzeClothingItem gibi) — ama burada ÇAĞIRAN
+  // (OutfitController) hatayı yutup mevcut pill akışına SESSİZCE düşer;
+  // servisin kendisi bunu bilmez, yalnızca dürüstçe fırlatır. Retry YOK
+  // (diğer Gemini akışlarının aksine): burada başarısızlığın zaten zararsız
+  // bir geri dönüşü var (ham metin occasion olarak kullanılır), bu basit
+  // "tek deneme, olmazsa sessiz düşüş" ilk sürüm için yeterli — CLAUDE.md'de
+  // bilinçli bir sadeleştirme olarak not edildi.
+  async interpretOutfitRequest(text) {
+    const trimmed = String(text ?? '').trim()
+    if (!trimmed) {
+      throw new ValidationError('Yorumlanacak bir metin gönderilmedi')
+    }
+    if (trimmed.length > MAX_INTERPRETATION_TEXT_LENGTH) {
+      throw new ValidationError(`Metin en fazla ${MAX_INTERPRETATION_TEXT_LENGTH} karakter olabilir`)
+    }
+
+    // Basit birleştirme kullanılıyor (String.replace DEĞİL): replace'in
+    // ikinci argümanı bir kullanıcı metniyken "$&", "$$" gibi özel değiştirme
+    // dizilerini yorumlar — kullanıcı metninde tesadüfen böyle bir dizi
+    // geçerse promptu bozardı.
+    const prompt = `${OUTFIT_REQUEST_PROMPT}${trimmed}"`
+    const { text: responseText, model } = await this.#generateFromText(prompt)
+
+    return this.#normalizeOutfitInterpretation(this.#parseJson(responseText), model)
+  }
+
   // Modelin çıktısını şemaya oturtur. Anahtar SIRASI şemadan gelir.
   #normalizeToSchema(parsed, schemaKey) {
     const { alanlar, uyumluluk } = SEMALAR[schemaKey]
@@ -407,6 +478,28 @@ class GeminiService {
     return veri
   }
 
+  // occasion, altı standart kategoriden BİRİ ya da "Diğer" DIŞINDA bir şey
+  // olamaz — model kuralı görmezden gelip serbest bir kategori uydurursa
+  // (örn. "Piknik") bu "Diğer"e düşer. Uydurma bir kategori kabul etmek,
+  // frontend'in "Üniversite" pill'ini yanlışlıkla aktif göstermesi gibi
+  // sessiz ama yanıltıcı bir hataya yol açardı.
+  #normalizeOutfitInterpretation(parsed, model) {
+    const kaynak = parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {}
+
+    const occasionRaw = metniNormalize(kaynak.occasion, MAX_TEXT_LENGTH)
+    const occasion =
+      occasionRaw && OUTFIT_REQUEST_CATEGORIES.includes(occasionRaw) ? occasionRaw : 'Diğer'
+
+    return {
+      model,
+      occasion,
+      stil_tercihi: metniNormalize(kaynak.stil_tercihi, MAX_TEXT_LENGTH),
+      kacinilmasi_gerekenler: listeyiNormalize(kaynak.kacinilmasi_gerekenler),
+      onem_verilen_ozellikler: listeyiNormalize(kaynak.onem_verilen_ozellikler),
+      arama_metni: metniNormalize(kaynak.arama_metni, MAX_DESCRIPTION_LENGTH),
+    }
+  }
+
   #parseJson(text) {
     try {
       return JSON.parse(stripCodeFence(text))
@@ -429,6 +522,25 @@ class GeminiService {
       throw new ValidationError('Analiz edilecek bir görsel gönderilmedi')
     }
 
+    return this.#callGemini([
+      // Görsel diskte tutulmaz; tampon doğrudan base64'e çevrilip gönderilir.
+      { inlineData: { mimeType: file.mimetype, data: file.buffer.toString('base64') } },
+      { text: prompt },
+    ])
+  }
+
+  // #generate'in GÖRSELSİZ karşılığı — yalnızca metin gönderir (Kombin Öner'in
+  // serbest metin yorumlaması gibi görsel taşımayan istekler için). İkisi de
+  // aynı #callGemini'yi kullanır: hata çevirisi, zaman aşımı ve anahtar
+  // kontrolü tek yerde kalır, iki kopya hâlinde bakım gerekmez.
+  async #generateFromText(prompt) {
+    return this.#callGemini([{ text: prompt }])
+  }
+
+  // #generate ve #generateFromText'in PAYLAŞTIĞI çekirdek: istemciyi kurar,
+  // isteği atar, hatayı çevirir, boş yanıtı reddeder. Parçaları (image/text)
+  // hazırlamak çağıranın işi — bu metod yalnızca "gönder ve çevir" yapar.
+  async #callGemini(parts) {
     // Anahtar yoksa dış servise HİÇ GİDİLMEZ (WeatherService ile aynı kural).
     if (!isConfigured()) {
       throw new ServiceUnavailableError(
@@ -443,21 +555,7 @@ class GeminiService {
     try {
       response = await client.models.generateContent({
         model,
-        contents: [
-          {
-            role: 'user',
-            parts: [
-              // Görsel diskte tutulmaz; tampon doğrudan base64'e çevrilip gönderilir.
-              {
-                inlineData: {
-                  mimeType: file.mimetype,
-                  data: file.buffer.toString('base64'),
-                },
-              },
-              { text: prompt },
-            ],
-          },
-        ],
+        contents: [{ role: 'user', parts }],
         config: {
           // Modelden DOĞRUDAN JSON istiyoruz: aksi hâlde açıklama cümleleri ve
           // markdown çitleri arasından ayıklamak gerekirdi.
@@ -558,3 +656,6 @@ module.exports.KATEGORI_SEMASI = KATEGORI_SEMASI
 module.exports.SKIN_TONE_PROMPT = SKIN_TONE_PROMPT
 module.exports.TEN_TONLARI = TEN_TONLARI
 module.exports.MAX_TEN_RENK_SAYISI = MAX_TEN_RENK_SAYISI
+module.exports.OUTFIT_REQUEST_PROMPT = OUTFIT_REQUEST_PROMPT
+module.exports.OUTFIT_REQUEST_CATEGORIES = OUTFIT_REQUEST_CATEGORIES
+module.exports.MAX_INTERPRETATION_TEXT_LENGTH = MAX_INTERPRETATION_TEXT_LENGTH

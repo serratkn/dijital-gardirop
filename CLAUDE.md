@@ -317,6 +317,7 @@ olduğu için iskelet oraya taşındı, kombin üretimi istemci tarafında anlı
 | **Fotoğraf değişince analiz KENDİLİĞİNDEN güncellenmez** | Maliyet koruması "dolu `ai_analysis` varsa tekrar analiz etme" der. Artık **elle tetiklenebiliyor**: Kıyafet Detay'daki "Yeniden Analiz Et" düğmesi (`POST /clothing-items/:id/analyze`) ve fotoğraf değiştirildiğinde çıkan hatırlatma. Otomatik yapılmıyor çünkü her çağrı gerçek para harcıyor. |
 | **Öneri kalitesi indekslenmiş parça sayısına bağlı** | Vektör eşleştirmesi yalnızca `ai_analysis` (dolayısıyla fotoğrafı) olan parçalar için çalışır. Analizsiz bir gardıropta Kombin Öner sessizce eskisi gibi rastgele seçim yapar ve rozet hiç görünmez — hatalı değil ama "akıllı" da değildir. Toplu doldurma `analyze-existing-items.js` + `create-embeddings.js` ile elle yapılır. |
 | **Durum (occasion) vektör aramasına GİRMİYOR** | "Üniversite" ile "Özel Davet" aynı adayları getirir; durum yalnızca kaydedilen kombinin etiketidir. Başlangıç parçası rastgele seçildiği için sonuç yine de her seferinde değişir. Durumu prompt'a/sorguya katmak ayrı bir aşamanın işi. |
+| **Serbest metin yorumlamasının `arama_metni`si vektör aramasına HİÇ girmiyor** | `POST /outfits/interpret` yalnızca `occasion`'ı üretir ve kombin kurma bunu kullanır; `arama_metni`/`stil_tercihi`/`kacinilmasi_gerekenler`/`onem_verilen_ozellikler` yalnızca kullanıcıya GÖSTERİLİR, `outfitBuilder.js`'in seçim mantığına hiç katılmaz. Bilinçli bir ilk-sürüm sadeleştirmesi; CLAUDE.md §8'de iki genişletme seçeneği (ek ağırlık vs. yeni bir embedding sorgusu) tartışılıyor ama hiçbiri uygulanmadı. |
 | **Chroma ile Postgres arasında işlem bütünlüğü yok** | İki ayrı depo, dağıtık işlem yok. Kıyafet silinince vektörü de silinir ama bu çağrı başarısız olursa öksüz vektör kalır. `/similar` bunu okurken filtreler (silinmiş parça yanıta düşmez) ve `cleanup.js` öksüzleri toplu siler. |
 | **Embedding modeli değişirse koleksiyon geçersiz olur** | Farklı modellerin vektörleri aynı uzayda değildir. Model değiştirildiğinde `create-embeddings.js --sifirla --uygula` çalıştırılmalıdır; bunu hatırlatan otomatik bir kontrol yok. |
 | **Makyaj önerisi durumdan (occasion) bağımsız** | Öneri yalnızca başlangıç parçasına olan vektör yakınlığına bakar; "Spor" ile "Özel Davet" aynı ürünü getirebilir. Aynı sınırlama kombinin kendisinde de var. |
@@ -865,9 +866,47 @@ tekrar yüklemek yeni bir Gemini çağrısı doğurmaz.
 | `DELETE` | `/outfits/:id` | Hard delete → `204` |
 | `PATCH` | `/outfits/:id/favorite` | Favori toggle |
 | `PATCH` | `/outfits/:id/worn` | `times_worn` +1 |
+| `POST` | `/outfits/interpret` | `{ text* }` → serbest metni standart bir occasion'a ve özete çevirir |
 
 `clothingItemIds` en az bir parça içermeli, tekrar barındıramaz ve **yalnızca o kullanıcıya
 ait, silinmemiş** parçalar olabilir — aksi hâlde `400`.
+
+**`POST /outfits/interpret` — Kombin Öner'deki serbest metin kutusu.** Kullanıcının
+kendi cümleleriyle anlattığı durumu Gemini'ye yorumlatır. Hiçbir şey KAYDETMEZ —
+sahiplik/kaynak kavramı yoktur, yalnızca metin gidip yorumlanmış hâliyle döner.
+
+```json
+{"model":"gemini-3.6-flash","occasion":"Akşam Yemeği","stil_tercihi":"Sade ve Şık",
+ "kacinilmasi_gerekenler":["Aşırı gösterişli","Çok rahat/spor"],
+ "onem_verilen_ozellikler":["Dengeli görünüm"],
+ "arama_metni":"Şık ama abartısız, dengeli bir akşam yemeği kombini"}
+```
+
+- **`occasion` MUTLAKA altı standart kategoriden biri (`Üniversite`, `İş`,
+  `Akşam Yemeği`, `Buluşma`, `Spor`, `Özel Davet`) ya da `"Diğer"`dir** —
+  `GeminiService` modelin döndürdüğü değeri bu kümeyle karşılaştırır, uymayan
+  her şeyi `"Diğer"`e indirger. Bu liste frontend'deki `lib/occasions.js >
+  OCCASIONS` ile BİREBİR AYNI tutulmalıdır (elle senkron — paylaşılan bir
+  paket yok); biri değişirse diğeri de güncellenmelidir.
+- **Metin en fazla 500 karakter** (`GeminiService.MAX_INTERPRETATION_TEXT_LENGTH`).
+  Bu sınır `outfits.occasion`'ın VARCHAR(50)'siyle KARIŞTIRILMAMALI — bu metin
+  veritabanına hiç yazılmaz, yalnızca Gemini'ye gidip atılır.
+- **FIRLATIR, sessizce boş dönmez** (`analyzeSkinTone`/`analyzeClothingItem` ile
+  aynı ilke): kullanıcı "Anlıyorum..." durumuna bakıp bekliyor. **"Sessizce mevcut
+  pill akışına düş" kararı FRONTEND'e aittir** — `OutfitSuggestion.jsx` bu isteği
+  başarısız olursa ham metni doğrudan occasion olarak kullanmaya devam eder,
+  kullanıcıya hiçbir hata göstermez (bkz. §8).
+- **Retry YOK** — bu ailedeki diğer Gemini akışlarının (`ClothingAnalysisService`,
+  `SkinToneService`) aksine bilinçli bir sadeleştirme: başarısızlığın zaten
+  zararsız bir geri dönüşü var (ham metin occasion olur), "basit başlangıç"
+  için tek deneme yeterli.
+- **Hız sınırlıdır** (`geminiLimiter`, diğer Gemini uçlarıyla aynı): kullanıcı
+  başına saatte 10 istek.
+- **`kacinilmasi_gerekenler` ve `onem_verilen_ozellikler` şimdilik SADECE
+  GÖSTERİM AMAÇLIDIR** — kombin kurma mantığına (`outfitBuilder.js`) hiç
+  girmezler, yalnızca kullanıcıya geri gösterilirler. `arama_metni` de aynı
+  şekilde vektör aramasına DAHİL EDİLMEZ (bkz. §8 için gelecekteki
+  genişletme seçenekleri).
 
 **`clothingItemId` filtresi.** Verilirse yalnızca o parçanın geçtiği kombinler döner
 (Kıyafet Detay sayfasını besler). Filtre SQL'de `EXISTS` alt sorgusuyla yazılır; `JOIN`
@@ -1077,6 +1116,13 @@ node test-scripts/test-outfit-rag.js
 node test-scripts/test-outfit-rag.js --birim
 node test-scripts/test-outfit-rag.js --cleanup
 
+# Kombin Öner'deki serbest metin (mood) yorumlaması (15 kontrol: 13 birim/HTTP
+# + 3 gerçek örnek metin, kota izin verirse). --birim: yalnızca birim bölümü
+# (sunucu/anahtar GEREKMEZ). --kotasiz: gerçek örnek metinler bölümünü atlar.
+node test-scripts/test-outfit-interpret.js
+node test-scripts/test-outfit-interpret.js --birim
+node test-scripts/test-outfit-interpret.js --kotasiz
+
 # Vektör veritabanı — Gemini Aşama 3 (82 kontrol: 46 birim + 4 bağlantı + 32 uçtan uca).
 # --birim: yalnızca birim bölümü (Chroma, anahtar ve kota GEREKTİRMEZ)
 # Bölüm 3 ai_analysis'i ELLE yazar (sentetik): "iki beyaz üst yakın çıkmalı"
@@ -1236,11 +1282,51 @@ anahtarla büyür. **Sayımlar her zaman `::int` ile daraltılmalıdır** (`pg` 
 döndürür) ve "en çok" sorguları eşitlik için ikincil sıralama taşımalıdır.
 
 **Gemini katmanı.** `config/gemini.js` istemciyi kurar (database.js ile
-aynı rol), `GeminiService` görseli gönderip JSON yanıtı çözer. Repository
+aynı rol), `GeminiService` görseli/metni gönderip JSON yanıtı çözer. Repository
 yoktur: kalıcı veri yok, yalnızca dış çağrı. **Kendi controller/route'u
-yoktur** — yalnızca `ClothingAnalysisService` ve `SkinToneService` üzerinden,
-onların çağırdığı bir alt bileşen olarak kullanılır (bkz. aşağıdaki "AŞAMA 1
+yoktur** — `ClothingAnalysisService`, `SkinToneService` ve (Kombin Öner'in
+serbest metin yorumlaması için) doğrudan `OutfitController` tarafından
+çağrılan bir alt bileşen olarak kullanılır (bkz. aşağıdaki "AŞAMA 1
 ucu KALDIRILDI" notu).
+
+**Görsel/metin ayrımı: `#generate` vs `#generateFromText`, ortak çekirdek
+`#callGemini`.** İlk üç Gemini metodu (`analyzeClothingItem`, `analyzeSkinTone`,
+eski `analyzeClothingImage`) hep GÖRSEL gönderiyordu; serbest metin yorumlaması
+(`interpretOutfitRequest`) YALNIZCA METİN gönderir — inlineData'sı yoktur.
+İkisi de artık `#callGemini(parts)` adlı PAYLAŞILAN bir özel metodu kullanır
+(istemci kurulumu, hata çevirisi, zaman aşımı, boş yanıt kontrolü tek yerde);
+`#generate(file, prompt)` image+text parçalarını hazırlayıp `#callGemini`'yi
+çağırır, `#generateFromText(prompt)` yalnızca text parçasıyla aynısını yapar.
+Bu refactor `interpretOutfitRequest` eklenirken yapıldı ve MEVCUT görsel
+tabanlı metodların davranışını DEĞİŞTİRMEDİ — regresyon testleriyle
+(`test-gemini.js`, gerçek bir Gemini çağrısıyla) doğrulandı.
+
+**Kombin Öner'in serbest metin yorumlaması (`interpretOutfitRequest`).**
+Kullanıcının kendi cümleleriyle anlattığı durumu (`"Akşam yemeğine gidiyorum
+ama overdress olmak istemiyorum..."` gibi) standart bir occasion'a ve kısa bir
+özete çevirir. `analyzeSkinTone`/`analyzeClothingItem` gibi **FIRLATIR** —
+kullanıcı "Anlıyorum..." durumuna bakıp bekliyor, sessizce boş dönmek yanlış
+olurdu. Ama bu ailedeki DİĞER akışlardan iki noktada BİLİNÇLİ olarak ayrılır:
+
+- **RETRY YOK.** `ClothingAnalysisService`/`SkinToneService` geçici hataları
+  (zaman aşımı, 503) `MAX_ATTEMPTS = 2` ile yeniden dener. Burada denenmiyor:
+  başarısızlığın zaten zararsız bir geri dönüşü var (frontend ham metni
+  occasion olarak kullanmaya devam eder), bu yüzden "basit başlangıç" için
+  tek deneme yeterli görüldü — CLAUDE.md'de bilinçli bir sadeleştirme olarak
+  işaretli, ileride gerekirse eklenebilir.
+- **"Sessizce geri düş" kararı SERVİSTE DEĞİL, FRONTEND'DE.** Diğer akışlarda
+  (ör. `/companions`) backend bilerek dürüst kalır ve hatayı fırlatır,
+  "rastgeleye düş" kararını istemci verir — burada da AYNI ilke uygulanıyor:
+  `GeminiService`/`OutfitController` hatayı OLDUĞU GİBİ fırlatır (503/400),
+  `OutfitSuggestion.jsx` bu isteği yakalayıp ham metni occasion olarak
+  kullanmaya devam eder. Servis "bu hatanın önemli olup olmadığını" hiç bilmez.
+
+`occasion` normalizasyonu (`#normalizeOutfitInterpretation`) **altı standart
+kategori + "Diğer" DIŞINDA bir değeri asla kabul etmez** — model kuralı
+görmezden gelip serbest bir kategori uydurursa (ör. "Piknik") bu "Diğer"e
+düşer. `OUTFIT_REQUEST_CATEGORIES` sabiti frontend'deki `lib/occasions.js >
+OCCASIONS` ile BİREBİR AYNI tutulmalıdır — paylaşılan bir modül olmadığı için
+bu senkronizasyon ELLE yapılıyor, biri değişirse diğeri de güncellenmelidir.
 
 **Otomatik analiz orkestrasyonu `ClothingAnalysisService`'tedir** (Aşama 2) ve
 `GeminiService`'ten AYRI tutulmuştur: `GeminiService` "görseli modele gönder,
@@ -1620,6 +1706,63 @@ Akış:
    sezon önceliğini uygular. **Vektör benzerliği bu filtreleri atlamaz.** Bir
    kategoride aday kalmazsa YALNIZCA O SLOT `buildRandomOutfit` mantığına düşer.
 
+**Serbest metin (mood) kutusu — `handleCustomSubmit`.** Hazır durum pill'lerinin
+altındaki metin kutusu artık YALNIZCA ham metni occasion olarak kullanmıyor:
+önce `POST /outfits/interpret` ile Gemini'ye gidip standart bir occasion + kısa
+bir özet alıyor, SONRA mevcut `runSuggestion(occasion)` akışına (yukarıdaki 1-3
+adımlarına) AYNEN devam ediyor. Bu bilinçli bir tasarım kararı: **Gemini
+yalnızca "hangi hazır durum" sorusunu yanıtlıyor, kombin kurma mantığına hiç
+karışmıyor** — `runSuggestion` bir pill tıklamasıyla gelen occasion ile
+Gemini'nin ürettiği occasion'ı AYIRT EDEMEZ, ikisi de aynı string.
+
+- **"Anlıyorum..." yükleme durumu** gönder butonunun kendisinde gösterilir
+  (`isInterpreting`) — ayrı bir modal/overlay değil, `ShareButton`'ın
+  "Hazırlanıyor..." desenindeki gibi buton içi bir durum değişimi.
+  Sonuç geldiğinde (ya da başarısız olduğunda) normal "Kombin Öner" metnine
+  döner.
+- **SESSİZ GERİ DÜŞÜŞ tamamen frontend'dedir.** `interpretOutfitRequest` hata
+  fırlatırsa (`catch` bloğunda) `occasionToUse` DEĞİŞTİRİLMEZ — başlangıç
+  değeri zaten ham metnin kendisidir (`OCCASION_MAX_LENGTH`'e kırpılmış hâli,
+  VARCHAR(50) taşmasını önlemek için). Kullanıcıya hiçbir hata gösterilmez,
+  yalnızca `console.warn` ile loglanır. Bu, `fetchCompanions`/hava
+  durumu/ten tonu ile AYNI aile: API dürüst kalır (fırlatır), "rastgeleye/ham
+  değere düş" kararını istemci verir.
+- **`interpretation` state'i YALNIZCA gösterim içindir.** Başarılı olursa
+  "Anladığım kadarıyla: {arama_metni}" özeti (+ varsa "Kaçınılacaklar"/
+  "Öncelikler" etiketleri) render edilir; bir hazır durum pill'i seçilince
+  (`handlePillSelect`) hemen temizlenir — aksi hâlde başka bir durumun
+  sonuçlarının yanında eski, artık ilgisiz bir özet görünür kalırdı.
+- **`kacinilmasi_gerekenler` / `onem_verilen_ozellikler` kombin kurma
+  mantığına HİÇ katılmaz** — yalnızca özet kutusunda okunabilir etiketler
+  olarak listelenirler. Bu bilinçli bir "basit başlangıç" sınırı; aşağıdaki
+  not bunu genişletmenin iki yolunu tartışıyor.
+
+**GELECEK — `arama_metni` vektör aramasına NASIL dahil edilebilir (henüz
+YAPILMADI, yalnızca mimari not).** İki makul yaklaşım var:
+
+1. **Ek ağırlık olarak** — mevcut `fetchCompanions` akışı aynen kalır
+  (başlangıç parçasının embedding'ine en yakın adaylar), ama
+  `buildOutfitFromCandidates`'a `arama_metni`nin KENDİ embedding'i ile
+  hesaplanan ikinci bir benzerlik skoru eklenir ve iki skor ağırlıklı
+  birleştirilir (ör. %70 parça-parça benzerliği + %30 metin-parça
+  benzerliği). Artısı: mevcut "başlangıç parçası" mimarisini bozmaz, yalnızca
+  sıralamayı ince ayarlar. Eksisi: `arama_metni` için AYRI bir Gemini
+  embedding çağrısı gerekir (maliyet) ve iki farklı embedding UZAYININ
+  (kıyafet özeti vs. serbest metin) doğrudan karşılaştırılabilir olduğu
+  varsayımı test edilmemiştir.
+2. **Tamamen yeni bir sorgu olarak** — `arama_metni`nin embedding'i Chroma'ya
+  DOĞRUDAN sorgu vektörü olarak verilir (bugün `/companions`'ın yaptığı gibi
+  "başlangıç parçasının vektörü" yerine "metnin vektörü" kullanılır) ve HER
+  kategoriden bu metne en yakın parçalar aday olur. Artısı: kullanıcının
+  isteğini (ör. "sade bir şıklık") doğrudan aramaya sokar, kavramsal olarak
+  daha güçlü. Eksisi: mevcut "önce bir başlangıç parçası seç, sonra ona yakın
+  diğerlerini bul" akışını YERİNDEN EDER — `pickSeedItem`'in rolü ortadan
+  kalkar, `outfitBuilder.js`'in test edilmiş mantığının büyük kısmı yeniden
+  yazılmayı gerektirir.
+
+Bu sürüm İKİSİNİ DE yapmıyor — yalnızca (1)'in daha ucuz ve daha az riskli
+olduğu, ileride denenirse önce onunla başlanması gerektiği not ediliyor.
+
 **İsteğe bağlı makyaj bölümü (`pickMakeupItem`).** Makyaj, `OUTFIT_CATEGORIES`'e
 **bilerek eklenmedi**: kombinin slotu değil, üstüne konan bir öneri. Bunun yerine
 `CANDIDATE_CATEGORIES` (= kombin kategorileri + `Makyaj`) sorgulanır; ızgarayı kuran
@@ -1985,6 +2128,145 @@ tamamlayıp kaldırıldı:
 > Bundan sonraki her çalışma buraya tarihiyle işlenir: eklenen özellikler, düzeltilen
 > hatalar, alınan mimari kararlar. En yeni kayıt en üstte.
 
+### 2026-08-25 — Kombin Öner: serbest metin (doğal dil) mood/durum anlatımı
+- **Ne eklendi:** Kombin Öner'deki hazır durum pill'lerinin altındaki metin
+  kutusu artık ham metni doğrudan occasion olarak kullanmıyor — kullanıcı
+  kendi cümleleriyle durumunu anlatabiliyor (ör. "Akşam yemeğine gidiyorum
+  ama overdress ya da underdress olmak istemiyorum, sade bir şıklık
+  istiyorum.") ve bu metin Gemini'ye gidip standart bir occasion'a + kısa bir
+  özete çevriliyor. Kutunun KENDİSİ zaten vardı (`customText` state'i, önceki
+  bir aşamadan kalma) — eksik olan yorumlama adımıydı, bu çalışma onu ekledi.
+
+**BACKEND — `GeminiService.interpretOutfitRequest(text)`**
+- Yeni prompt: `OUTFIT_REQUEST_PROMPT` + `OUTFIT_REQUEST_CATEGORIES` (altı
+  standart kategori: Üniversite/İş/Akşam Yemeği/Buluşma/Spor/Özel Davet).
+  **Bu liste frontend'deki `lib/occasions.js > OCCASIONS` ile BİREBİR AYNI
+  tutulmalıdır** — paylaşılan bir modül olmadığı için senkronizasyon ELLE
+  yapılıyor, `test-outfit-interpret.js`'teki bir birim kontrolü bunu ayrıca
+  doğruluyor (JSON.stringify karşılaştırması).
+- **`occasion` normalizasyonu KATI:** model altı kategoriden biri ya da
+  "Diğer" dışında bir şey döndürürse (ör. modelin uydurduğu "Piknik" gibi bir
+  kategori) `#normalizeOutfitInterpretation` bunu sessizce "Diğer"e indirger.
+  Uydurma bir kategori kabul etmek, frontend'in var olmayan bir pill'i aktif
+  göstermeye çalışması gibi sessiz ama yanıltıcı bir hataya yol açardı.
+- **REFACTOR — `#generate` → paylaşılan `#callGemini(parts)` çekirdeği.**
+  Önceki `#generate(file, prompt)` yalnızca GÖRSEL+metin gönderebiliyordu
+  (inlineData zorunluydu). Serbest metin yorumlaması görsel taşımadığı için
+  bu, `#generate`'i doğrudan kullanamıyordu. İstemci kurulumu + hata çevirisi
+  + zaman aşımı + boş yanıt kontrolünü tekrar yazmak yerine ortak çekirdek
+  `#callGemini(parts)`'a çıkarıldı; `#generate` artık image+text parçalarını
+  hazırlayıp buna devrediyor, yeni `#generateFromText(prompt)` yalnızca text
+  parçasıyla aynısını yapıyor. **Mevcut görsel tabanlı metodların
+  (`analyzeClothingItem`, `analyzeSkinTone`) davranışı DEĞİŞMEDİ** — gerçek
+  bir Gemini çağrısıyla (`test-gemini.js`, 15/15) doğrulandı.
+- **FIRLATIR, retry YOK.** `analyzeSkinTone`/`analyzeClothingItem` gibi
+  sessizce boş dönmez (kullanıcı "Anlıyorum..." durumuna bakıp bekliyor) ama
+  bu ailedeki diğer akışların aksine (`MAX_ATTEMPTS = 2`) **hiç yeniden
+  denemez** — bilinçli bir sadeleştirme: başarısızlığın zaten zararsız bir
+  geri dönüşü var (frontend ham metni occasion olarak kullanmaya devam
+  eder), "basit başlangıç" için tek deneme yeterli görüldü.
+- **Metin en fazla 500 karakter** (`MAX_INTERPRETATION_TEXT_LENGTH`) —
+  Gemini'ye gitmeden ÖNCE reddedilir. Bu sınır `outfits.occasion`'ın
+  VARCHAR(50)'siyle karıştırılmamalı: bu serbest metin veritabanına HİÇ
+  yazılmaz, yalnızca Gemini'ye gidip atılır.
+- Basit string birleştirme kullanıldı, `String.replace(placeholder, metin)`
+  DEĞİL — `replace`'in ikinci argümanı kullanıcı metniyken `$&`/`$$` gibi özel
+  değiştirme dizilerini yorumlar; kullanıcı metninde tesadüfen böyle bir dizi
+  geçseydi prompt'u sessizce bozardı.
+
+**Yeni uç `POST /outfits/interpret`** (`OutfitController.interpretRequest`,
+`outfitRoutes.js`). Sahiplik/kaynak kavramı YOK — hiçbir şey kaydedilmez,
+yalnızca metin gidip yorumlanmış hâliyle döner. `OutfitController` artık
+ikinci bir bağımlılık (`geminiService`) alıyor — `ClothingItemController`'ın
+`vectorService`/`clothingAnalysisService`'i `OutfitService`'ten AYRI tutmasıyla
+aynı desen (biri veritabanı katmanı, diğeri dış bir çağrı). **Hız
+sınırlıdır** (`geminiLimiter`, diğer Gemini uçlarıyla aynı — saatte 10 istek).
+`/outfits/:id` rotalarıyla YOL ÇAKIŞMASI yok: "interpret" farklı bir HTTP
+metoduna (POST, `/outfits/:id` yalnızca GET/PUT/DELETE tanımlıyor) düşüyor;
+yine de bir regresyon testi bu isteğin yanlışlıkla `POST /outfits`
+(kombin kaydetme) ile karışıp bir kayıt YARATMADIĞINI ayrıca doğruluyor.
+
+**FRONTEND — `OutfitSuggestion.jsx`**
+- `handleCustomSubmit` artık `async`: önce `interpretOutfitRequest(text)`
+  çağrılır ("Anlıyorum..." durumu — gönder butonunun İÇİNDE, `ShareButton`'ın
+  "Hazırlanıyor..." desenindeki gibi, ayrı bir modal/overlay DEĞİL), sonra
+  dönen `occasion` ile mevcut `runSuggestion(occasion)` akışına AYNEN devam
+  edilir. **Gemini yalnızca "hangi hazır durum" sorusunu yanıtlar** —
+  `runSuggestion` bir pill tıklamasıyla gelen occasion ile Gemini'nin
+  ürettiği occasion'ı ayırt edemez, ikisi de aynı string; kombin kurma
+  mantığına (`outfitBuilder.js`) hiçbir yeni kavram eklenmedi.
+- **SESSİZ GERİ DÜŞÜŞ tamamen frontend'dedir** (backend'in "GeminiService
+  fırlatır" sözleşmesiyle uyumlu): `interpretOutfitRequest` hata fırlatırsa
+  `occasionToUse` ham metnin KENDİSİ olarak kalır (VARCHAR(50) taşmasını
+  önlemek için `OCCASION_MAX_LENGTH`'e kırpılmış) — bu, bu özellikten ÖNCEKİ
+  davranışın BİREBİR AYNISI. Kullanıcıya hiçbir hata gösterilmez, yalnızca
+  `console.warn` ile loglanır.
+- **`interpretation` state'i "Anladığım kadarıyla: {arama_metni}" özetini
+  besler** (+ varsa "Kaçınılacaklar"/"Öncelikler" etiketleri, virgülle
+  ayrılmış). Yalnızca yorumlama BAŞARILI olduysa render edilir; başarısızlıkta
+  `interpretation` null kalır ve kullanıcı hiçbir özet görmez. Bir hazır durum
+  pill'i seçilince (`handlePillSelect`) hemen temizlenir — aksi hâlde başka
+  bir durumun sonuçlarının yanında eski, artık ilgisiz bir özet asılı kalırdı.
+- **`kacinilmasi_gerekenler`/`onem_verilen_ozellikler` yalnızca gösterim
+  amaçlıdır** — kombin kurma mantığına hiç girmezler (kullanıcının isteği
+  gereği: "kombin mantığını karmaşıklaştırmadan").
+- Metin kutusunun `maxLength`'i 50'den (eski, occasion'a özgü sınır)
+  **500'e** çıkarıldı (`CUSTOM_TEXT_MAX_LENGTH`, backend'in
+  `MAX_INTERPRETATION_TEXT_LENGTH`'iyle AYNI) — artık tek kelimelik bir
+  occasion değil, gerçek bir cümle/paragraf yazılabiliyor. Placeholder
+  "Ya da kendi durumunu yaz..."tan "Ya da durumunu kendi cümlelerinle
+  anlat..."a güncellendi.
+
+**Kapsam dışı bırakılan (bilinçli, "basit başlangıç" ilkesiyle):**
+`arama_metni` vektör aramasına HİÇ dahil edilmedi — yalnızca `occasion`
+kullanılıyor, `arama_metni` sadece kullanıcıya geri gösteriliyor. CLAUDE.md
+§8'e iki gelecek genişletme seçeneği (ek ağırlık olarak vs. tamamen yeni bir
+embedding sorgusu olarak) mimari not olarak yazıldı, ikisi de UYGULANMADI.
+
+**Doğrulama:**
+- **Gerçek Gemini ile 3 farklı serbest metin** (elle, `node -e` ile):
+  "Akşam yemeğine gidiyorum ama overdress..." → `Akşam Yemeği` / "Sade ve Şık";
+  "Yarın sabah spor salonuna gidicem, rahat bir şeyler lazım." → `Spor` /
+  "Rahat"; "Bugün üniversitede sunum yapıcam, ciddi ama fazla resmi olmasın."
+  → `Üniversite` / "Yarı Resmi". Üçünde de occasion beklenenle birebir
+  eşleşti, `arama_metni` doğal ve isabetli bir özetti.
+- **Yeni `test-scripts/test-outfit-interpret.js`, 15 kontrol** (birim + HTTP,
+  --birim ve --kotasiz bayraklarıyla): prompt'un altı kategoriyi de içerdiği,
+  "Diğer" kuralı, şema alan adları, frontend `OCCASIONS` ile birebir eşleşme;
+  boş/çok uzun metin → Gemini'ye hiç gitmeden `ValidationError`; anahtar
+  yokken 503; HTTP: token'sız 401, boş/eksik/çok uzun metin 400, **`POST
+  /outfits/interpret`'in yanlışlıkla bir kombin KAYDETMEDİĞİ** (regresyon
+  kontrolü). Gerçek Gemini bölümü bu koşuda GÜNLÜK KOTA TÜKENDİĞİ için
+  atlandı (yukarıdaki elle yapılan 3 örnek zaten kotayı kullanmıştı) — kod
+  bunu "kota dolu" olarak nazikçe raporlayıp başarısız SAYMADI.
+- **Gerçek tarayıcıda 15 kontrol** (Playwright + sistem Chrome):
+  - **BAŞARILI senaryo** (`/outfits/interpret` yanıtı Playwright route
+    interception ile mocklandı — backend'in KENDİSİ ayrı, gerçek Gemini
+    çağrılarıyla doğrulandığı için bu yalnızca UI mantığını sınıyor):
+    metin kutusunun doğru placeholder'la görünmesi, "Anlıyorum..." durumunun
+    gerçekten görünmesi, özetin "Anladığım kadarıyla" ile başlaması ve
+    `arama_metni`/kaçınılacaklar/öncelikler içermesi, DOĞRU occasion'la
+    (`Akşam Yemeği`) öneri üretilmesi, o pill'in görsel olarak aktif
+    görünmesi (arka plan rengiyle doğrulandı — `FilterPills` `aria-pressed`
+    KULLANMIYOR), başka bir pill seçilince özetin kaybolması, temiz konsol.
+  - **BAŞARISIZ senaryo (GERÇEK 503 — kota tükendi, mock DEĞİL):** yorumlama
+    başarısız olsa da önerinin YİNE DE üretildiği (ham metin occasion oldu),
+    özetin hiç gösterilmediği, kullanıcıya hiçbir hata mesajı çıkmadığı,
+    konsolda beklenmeyen bir hata olmadığı (yalnızca uygulamanın kendi
+    `console.warn`'ı ve tarayıcının 503 için kendiliğinden bastığı ağ
+    logu hariç tutuldu — bunlar birer hata değil, tam da test edilen
+    senaryonun beklenen izleri).
+- Regresyon: `test-all-endpoints` 77/77, `test-auth` 48/48, `test-stats`
+  60/60, `test-item-outfits` 27/27, `test-clean-status` 26/26,
+  `test-file-cleanup` 12/12, `test-image-upload` 29/29, `test-vector --birim`
+  46/46, `test-outfit-rag --birim` 36/36, `test-ai-analysis --birim` 48/48,
+  `test-skin-tone --kotasiz` 58/58, frontend `test-outfit-builder.mjs` 73/73,
+  lint + build temiz.
+- **Not:** `test-gemini.js`'in gerçek-analiz bölümü bu oturumda BİR KEZ
+  başarısız oldu — kod hatası DEĞİL, günlük Gemini kotası (20/gün) bu
+  çalışma sırasındaki yoğun test kullanımıyla (3 gerçek örnek metin + birden
+  fazla `test-gemini.js` koşusu) tükendi. Aynı script bu oturumda DAHA ÖNCE
+  15/15 geçmişti; kota ertesi gün sıfırlanır.
 ### 2026-08-25 — Güvenlik Sertleştirmesi ve Kod Temizliği
 - **Bağlam:** Önceki bir tarama (bkz. bir önceki oturumun raporu) CLAUDE.md'nin
   Eksikler tablosunda hâlâ duran maddeleri, kod içi ölü kod/eskimiş yorumları,

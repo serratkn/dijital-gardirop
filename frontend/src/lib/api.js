@@ -316,6 +316,25 @@ export function createOutfit(payload) {
   return request('/outfits', { method: 'POST', body: payload })
 }
 
+// Kombin Öner'deki serbest metin kutusunun ucu. Kullanıcının kendi
+// cümlelerini standart bir occasion'a ve kısa bir özete çevirir.
+//
+// ÇAĞIRAN HATAYI YUTMALIDIR: Gemini erişilemezse/kota dolduysa/anahtar yoksa
+// bu 503 (ya da metin çok uzunsa 400) fırlatır — bu bir kırılma değil,
+// "ham metni occasion olarak kullanmaya devam et" işaretidir (fetchCompanions
+// ile aynı ilke: API dürüst kalır, "sessizce geri düş" kararı istemcinindir).
+// Retry YOK (tek deneme) — sunucunun kendi tek denemesiyle eşleşen bir zaman
+// aşımı yeterli, `reanalyzeClothingItem`'in retry'lı 90 sn'sine gerek yok.
+const INTERPRET_OUTFIT_TIMEOUT_MS = 40000
+
+export function interpretOutfitRequest(text) {
+  return request('/outfits/interpret', {
+    method: 'POST',
+    body: { text },
+    timeoutMs: INTERPRET_OUTFIT_TIMEOUT_MS,
+  })
+}
+
 export function toggleOutfitFavorite(id) {
   return request(`/outfits/${encodeURIComponent(id)}/favorite`, { method: 'PATCH' })
 }

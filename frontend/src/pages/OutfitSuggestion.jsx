@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useLocation } from 'react-router-dom'
-import { Brush, Check, CloudSun, Sparkles } from 'lucide-react'
+import { Brush, Check, CloudSun, Loader2, Sparkles } from 'lucide-react'
 import PageHeader from '../components/ui/PageHeader'
 import FilterPills from '../components/ui/FilterPills'
 import EmptyState from '../components/ui/EmptyState'
@@ -15,6 +15,7 @@ import {
   fetchMe,
   fetchSkinToneAnalysis,
   fetchWeather,
+  interpretOutfitRequest,
 } from '../lib/api'
 import { toCategoryIdMap, toCategoryNameMap, toClothingItems } from '../lib/transformers'
 import { OCCASIONS, OCCASION_STATE_KEY } from '../lib/occasions'
@@ -33,8 +34,17 @@ import {
 } from '../lib/outfitBuilder'
 
 // outfits.occasion kolonu VARCHAR(50); daha uzun metin veritabanı
-// hatasına düşeceği için girişte sınırlanıyor.
+// hatasına düşeceği için girişte sınırlanıyor. Bu sınır artık yalnızca
+// GERİ DÜŞÜŞ yoluna uygulanır (Gemini yorumlaması başarısız olursa) —
+// normal akışta occasion Gemini'nin döndürdüğü kısa bir kategoridir.
 const OCCASION_MAX_LENGTH = 50
+
+// Serbest metin kutusunun kendi sınırı: artık tek kelimelik bir occasion
+// değil, tam bir cümle/paragraf yazılabiliyor. Backend'deki
+// GeminiService.MAX_INTERPRETATION_TEXT_LENGTH ile AYNI tutulmalıdır —
+// istemci sınırı sunucununkinden büyük olsaydı kullanıcı "gönder"e bastıktan
+// SONRA 400 alırdı, küçük olsaydı gereksiz yere kısıtlardı.
+const CUSTOM_TEXT_MAX_LENGTH = 500
 
 // Kategori başına kaç aday istenecek. 1 değil N: "Başka Öneri Göster" aynı
 // başlangıç parçasıyla bu havuzda ilerliyor (en yakın, ikinci en yakın…).
@@ -57,6 +67,13 @@ function OutfitSuggestion() {
 
   const [selectedOccasion, setSelectedOccasion] = useState('')
   const [customText, setCustomText] = useState('')
+  // Gemini'nin serbest metni yorumlaması sürerken kısa bir "Anlıyorum..."
+  // durumu gösterilir (birkaç saniye, senkron bir çağrı — reanalyze/ten tonu
+  // analizindeki aynı desen). interpretation dolarsa "Anladığım kadarıyla"
+  // özeti render edilir; başarısızlıkta null kalır ve hiçbir özet gösterilmez
+  // (SESSİZ geri düşüş — bkz. handleCustomSubmit).
+  const [isInterpreting, setIsInterpreting] = useState(false)
+  const [interpretation, setInterpretation] = useState(null)
   const [suggestionItems, setSuggestionItems] = useState([])
   // Kombinde vektör aramasının getirdiği en az bir parça var mı? Rozet
   // yalnızca bu doğruyken görünür — rastgele seçime düşülmüşse kullanıcıya
@@ -342,10 +359,42 @@ function OutfitSuggestion() {
     runSuggestion(requestedOccasion)
   }, [isLoading, hasError, requestedOccasion, runSuggestion])
 
-  const handleCustomSubmit = (event) => {
+  // Hazır durum pill'i seçildiğinde önceki serbest metin yorumunun özeti
+  // ekranda kalmamalı — başka bir durumun sonuçlarıyla birlikte gösterilirse
+  // yanlış eşleşmiş görünürdü.
+  const handlePillSelect = (occasion) => {
+    setInterpretation(null)
+    runSuggestion(occasion)
+  }
+
+  const handleCustomSubmit = async (event) => {
     event.preventDefault()
-    if (!customText.trim()) return
-    runSuggestion(customText.trim())
+    const trimmed = customText.trim()
+    if (!trimmed || isInterpreting) return
+
+    setIsInterpreting(true)
+    setInterpretation(null)
+
+    // Gemini yorumlayamazsa HAM METİN occasion olarak kullanılır — bu
+    // özellikten ÖNCEKİ davranışın birebir aynısı. VARCHAR(50) sınırını
+    // aşmasın diye kırpılır (normal akışta occasion zaten Gemini'nin kısa
+    // kategorisidir, bu kırpma yalnızca geri düşüş yolunda devreye girer).
+    let occasionToUse = trimmed.slice(0, OCCASION_MAX_LENGTH)
+
+    try {
+      const result = await interpretOutfitRequest(trimmed)
+      occasionToUse = result.occasion
+      setInterpretation(result)
+    } catch (error) {
+      // SESSİZ GERİ DÜŞÜŞ: anahtar yok, kota doldu, zaman aşımı, ağ hatası —
+      // hiçbiri kullanıcıya gösterilmez. Yorumlama sonucu yok sayılır,
+      // mevcut occasion-pill akışı (ham metin) aynen çalışmaya devam eder.
+      console.warn('Serbest metin yorumlanamadı, ham metin occasion olarak kullanılıyor:', error.message)
+    } finally {
+      setIsInterpreting(false)
+    }
+
+    runSuggestion(occasionToUse)
   }
 
   const showAnother = () => {
@@ -456,7 +505,7 @@ function OutfitSuggestion() {
                 <FilterPills
                   options={OCCASIONS}
                   active={selectedOccasion}
-                  onChange={(occasion) => runSuggestion(occasion)}
+                  onChange={handlePillSelect}
                 />
               </div>
 
@@ -471,14 +520,58 @@ function OutfitSuggestion() {
                   type="text"
                   value={customText}
                   onChange={(event) => setCustomText(event.target.value)}
-                  maxLength={OCCASION_MAX_LENGTH}
-                  placeholder="Ya da kendi durumunu yaz..."
-                  className="flex-1 rounded-full border border-ink/15 bg-surface px-5 py-3 text-sm text-ink placeholder:text-ink/40 focus:border-dusty-rose focus:outline-none"
+                  maxLength={CUSTOM_TEXT_MAX_LENGTH}
+                  disabled={isInterpreting}
+                  placeholder="Ya da durumunu kendi cümlelerinle anlat..."
+                  className="flex-1 rounded-full border border-ink/15 bg-surface px-5 py-3 text-sm text-ink placeholder:text-ink/40 focus:border-dusty-rose focus:outline-none disabled:opacity-60"
                 />
-                <Button type="submit" variant="primary">
-                  Kombin Öner
+                <Button type="submit" variant="primary" disabled={isInterpreting}>
+                  {isInterpreting ? (
+                    <span className="inline-flex items-center gap-2">
+                      <Loader2 size={15} strokeWidth={1.75} className="animate-spin" />
+                      Anlıyorum...
+                    </span>
+                  ) : (
+                    'Kombin Öner'
+                  )}
                 </Button>
               </form>
+
+              {/* Gemini'nin serbest metni ANLADIĞINI gösteren özet. Yalnızca
+                  yorumlama BAŞARILI olduysa render edilir — başarısızlıkta
+                  interpretation null kalır ve kullanıcı hiçbir şey görmez
+                  (sessiz geri düşüş, hata YOK). kacinilmasi_gerekenler ve
+                  onem_verilen_ozellikler şimdilik SADECE gösterim amaçlıdır;
+                  kombin mantığına hiç karışmazlar (bkz. CLAUDE.md). */}
+              {interpretation && (
+                <div
+                  className="mt-6 rounded-2xl border border-dusty-rose/30 bg-dusty-rose/5 p-5"
+                  data-testid="yorumlama-ozeti"
+                >
+                  <p className="flex items-start gap-2.5 text-sm text-ink/70">
+                    <Sparkles size={15} strokeWidth={1.75} className="mt-0.5 shrink-0 text-accent-ink" />
+                    <span>
+                      <span className="font-medium text-ink">Anladığım kadarıyla:</span>{' '}
+                      {interpretation.arama_metni}
+                    </span>
+                  </p>
+                  {(interpretation.kacinilmasi_gerekenler?.length > 0 ||
+                    interpretation.onem_verilen_ozellikler?.length > 0) && (
+                    <div className="mt-3 flex flex-wrap gap-x-6 gap-y-1 pl-[26px] text-xs text-ink/50">
+                      {interpretation.kacinilmasi_gerekenler?.length > 0 && (
+                        <p>
+                          Kaçınılacaklar: {interpretation.kacinilmasi_gerekenler.join(', ')}
+                        </p>
+                      )}
+                      {interpretation.onem_verilen_ozellikler?.length > 0 && (
+                        <p>
+                          Öncelikler: {interpretation.onem_verilen_ozellikler.join(', ')}
+                        </p>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
 
             {selectedOccasion && (
