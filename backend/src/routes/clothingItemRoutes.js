@@ -99,5 +99,13 @@ router.get('/clothing-items/:id/similar', (req, res) =>
 router.get('/clothing-items/:id/companions', (req, res) =>
   clothingItemController.getCompanions(req, res),
 )
+// AŞAMA 5 — serbest metin (mood) yorumlamasının ikinci retrieval ucu. Bir
+// başlangıç PARÇASI değil, kullanıcının kendi cümlesini (arama_metni) alır;
+// bu yüzden `/clothing-items/:id/...` desenine UYMAZ, kendi düz yoludur.
+// geminiLimiter: HER ÇAĞRIDA gerçek bir Gemini embedding isteği atar
+// (getSimilar/getCompanions atmaz, yalnızca Chroma okur).
+router.post('/clothing-items/search-by-text', geminiLimiter, (req, res) =>
+  clothingItemController.searchByText(req, res),
+)
 
 module.exports = router

@@ -52,6 +52,13 @@ const COMPANION_TIMEOUT_MS = 3000
 const COMPANION_DEFAULT_LIMIT = 5
 const COMPANION_MAX_LIMIT = 20
 
+// Serbest metin araması (findByText) TEK bir kategoriye değil, kullanıcının
+// TÜM indekslenmiş gardırobuna bakar (seed parça herhangi bir kombin
+// kategorisinden gelebilir) — bu yüzden companion'lardan daha geniş bir
+// varsayılan sınır makul.
+const TEXT_SEARCH_DEFAULT_LIMIT = 30
+const TEXT_SEARCH_MAX_LIMIT = 50
+
 // Toplu embedding isteğinde bir partide kaç metin gönderileceği. Tek bir
 // devasa istek hem zaman aşımına yaklaşır hem de tek hatada TÜM partiyi
 // düşürürdü; 20 makul bir orta yol.
@@ -627,6 +634,82 @@ class VectorService {
     return { id: itemId, indekslendi: true, adaylar }
   }
 
+  // AŞAMA 5 — Kombin Öner'in serbest metin (mood) yorumlamasını besleyen ikinci
+  // RETRIEVAL yolu. findCompanions/findSimilar'dan TEMEL bir farkı var: onlar
+  // VAR OLAN bir parçanın Chroma'da zaten duran vektörünü OKUR; bu metod
+  // kullanıcının serbest metnini (arama_metni) YENİ bir embedding'e çevirir ve
+  // kullanıcının TÜM indekslenmiş gardırobunu bu embedding'e yakınlığa göre
+  // sıralar. Bu yüzden HER ÇAĞRIDA gerçek bir Gemini embedding isteği atar —
+  // findSimilar/findCompanions ise hiç Gemini çağırmaz (yalnızca Chroma okur).
+  //
+  // Kategoriye göre GRUPLANMAZ (findCompanions'ın aksine): çağıran (seed parça
+  // seçimi) "hangi kategoriden" değil "genel olarak en yakın hangi parça"
+  // sorusuna cevap arıyor — düz, mesafeye göre sıralı bir liste yeterli.
+  //
+  // SÖZLEŞME aynı aile: FIRLATIR (okuma yolu). "Sessizce ham/rastgele seçime
+  // düş" kararı yine ÇAĞIRANINDIR (OutfitSuggestion.jsx) — API dürüst kalır.
+  async findByText(userId, text, { limit = TEXT_SEARCH_DEFAULT_LIMIT } = {}) {
+    const trimmed = String(text ?? '').trim()
+    if (!trimmed) {
+      throw new ValidationError('Aranacak bir metin gönderilmedi')
+    }
+
+    if (!isEnabled()) {
+      throw new ServiceUnavailableError('Vektör veritabanı devre dışı (CHROMA_ENABLED=false)')
+    }
+    if (!isConfigured()) {
+      throw new ServiceUnavailableError(
+        'Gemini API anahtarı tanımlı değil. backend/.env içine GEMINI_API_KEY ekleyin.',
+      )
+    }
+
+    const sinir = Math.min(
+      Math.max(Math.floor(Number(limit)) || TEXT_SEARCH_DEFAULT_LIMIT, 1),
+      TEXT_SEARCH_MAX_LIMIT,
+    )
+
+    let vektor
+    try {
+      const { vectors } = await this.#withDeadline(
+        this.geminiService.createEmbeddings([trimmed]),
+        'metin embedding',
+      )
+      vektor = vectors[0]
+    } catch (error) {
+      if (error instanceof ServiceUnavailableError) throw error
+      console.error('Serbest metin embedding\'i üretilemedi:', error.message)
+      throw new ServiceUnavailableError('Vektör araması şu anda yapılamıyor')
+    }
+
+    // KULLANICI FİLTRESİ ZORUNLU (findSimilar/findCompanions ile aynı gerekçe):
+    // filtresiz bir vektör sorgusu başka kullanıcıların gardıroplarından
+    // sonuç döndürürdü.
+    let komsular
+    try {
+      komsular = await this.#withDeadline(
+        this.vectorRepository.query({ embedding: vektor, limit: sinir, where: { user_id: userId } }),
+        'benzerlik sorgusu',
+      )
+    } catch (error) {
+      if (error instanceof ServiceUnavailableError) throw error
+      console.error('Serbest metin araması başarısız:', error.message)
+      throw new ServiceUnavailableError('Vektör veritabanına şu anda ulaşılamıyor')
+    }
+
+    // Postgres zenginleştirmesi YOK: çağıran (OutfitSuggestion.jsx) gardırobu
+    // zaten tamamen belleğinde tutuyor — yalnızca id + benzerlik skoru yeterli,
+    // ekstra bir veritabanı turu gereksiz olurdu.
+    return {
+      indekslendi: true,
+      sonuclar: komsular.map((row) => ({
+        id: row.id,
+        category_id: row.metadata?.category_id ?? null,
+        mesafe: row.distance,
+        benzerlik: row.distance === null ? null : Number((1 - row.distance).toFixed(4)),
+      })),
+    }
+  }
+
   // "1,2,4" ya da [1, 2, 4] → [1, 2, 4]. Geçersiz/yinelenen değerler düşer.
   #parseCategoryIds(raw) {
     const parcalar = Array.isArray(raw) ? raw : String(raw ?? '').split(',')
@@ -684,3 +767,5 @@ module.exports.BATCH_SIZE = BATCH_SIZE
 module.exports.COMPANION_TIMEOUT_MS = COMPANION_TIMEOUT_MS
 module.exports.COMPANION_DEFAULT_LIMIT = COMPANION_DEFAULT_LIMIT
 module.exports.COMPANION_MAX_LIMIT = COMPANION_MAX_LIMIT
+module.exports.TEXT_SEARCH_DEFAULT_LIMIT = TEXT_SEARCH_DEFAULT_LIMIT
+module.exports.TEXT_SEARCH_MAX_LIMIT = TEXT_SEARCH_MAX_LIMIT

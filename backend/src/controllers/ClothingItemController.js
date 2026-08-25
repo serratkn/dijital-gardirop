@@ -188,6 +188,27 @@ class ClothingItemController extends BaseController {
     return Math.min(Math.floor(value), 20)
   }
 
+  // AŞAMA 5 — Kombin Öner'in serbest metin yorumlamasını besleyen ikinci
+  // RETRIEVAL ucu. getCompanions'tan farkı: bir başlangıç PARÇASI değil,
+  // kullanıcının serbest metnini (arama_metni) alır ve kullanıcının TÜM
+  // indekslenmiş gardırobunu bu metne yakınlığa göre sıralar — HER ÇAĞRIDA
+  // gerçek bir Gemini embedding isteği atar (getSimilar/getCompanions atmaz).
+  // Bu yüzden geminiLimiter'ın ARKASINDA mount edilir (bkz. clothingItemRoutes.js).
+  async searchByText(req, res) {
+    try {
+      if (!this.vectorService) {
+        return res.status(503).json({ error: 'Vektör veritabanı bu kurulumda etkin değil' })
+      }
+
+      const result = await this.vectorService.findByText(req.userId, req.body?.text, {
+        limit: req.body?.limit,
+      })
+      res.status(200).json(result)
+    } catch (error) {
+      this.handleError(error, res)
+    }
+  }
+
   async toggleFavorite(req, res) {
     try {
       const item = await this.clothingItemService.toggleFavorite(req.params.id, req.userId)

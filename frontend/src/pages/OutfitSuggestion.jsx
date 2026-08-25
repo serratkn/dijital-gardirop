@@ -16,6 +16,7 @@ import {
   fetchSkinToneAnalysis,
   fetchWeather,
   interpretOutfitRequest,
+  searchClothingItemsByText,
 } from '../lib/api'
 import { toCategoryIdMap, toCategoryNameMap, toClothingItems } from '../lib/transformers'
 import { OCCASIONS, OCCASION_STATE_KEY } from '../lib/occasions'
@@ -27,6 +28,7 @@ import {
   OUTFIT_CATEGORIES,
   buildOutfitFromCandidates,
   buildRandomOutfit,
+  createMoodContext,
   isSameOutfit,
   pickMakeupItem,
   pickSeedItem,
@@ -219,6 +221,22 @@ function OutfitSuggestion() {
   // yeni öneriyi ezmemeli.
   const requestIdRef = useRef(0)
 
+  // Serbest metin (mood) bağlamı — YALNIZCA handleCustomSubmit'ten dolar.
+  // Hazır durum pill'i seçildiğinde (handlePillSelect) İKİSİ DE null'a
+  // döner: bu, "stil tercihi olmadan yapılan eski akış hâlâ aynı şekilde
+  // çalışıyor" regresyon garantisinin doğrudan karşılığıdır — pickSeedItem/
+  // buildRandomOutfit/buildOutfitFromCandidates moodContext `null` iken
+  // davranışlarını hiç değiştirmez (bkz. lib/outfitBuilder.js).
+  //
+  // useRef (useState DEĞİL): bu değerler kombin ÜRETİMİNİ etkiler ama
+  // kendileri render tetiklememeli — poolRef/variantRef ile aynı gerekçe.
+  const moodContextRef = useRef(null)
+  // Chroma'dan dönen id -> benzerlik skoru haritası (arama_metni'ne göre).
+  // Yalnızca seed parça SEÇİMİNİ önceliklendirir; interpretOutfitRequest
+  // veya searchClothingItemsByText başarısız olursa null kalır ve
+  // pickSeedItem sessizce rastgele seçime düşer (bkz. lib/api.js).
+  const textRankingRef = useRef(null)
+
   // ---- Vektör aday havuzu ----
 
   // Başlangıç parçasına en yakın adayları DİĞER kategorilerden çeker.
@@ -275,7 +293,7 @@ function OutfitSuggestion() {
       // Havuz yoksa MEVCUT rastgele mantık aynen çalışır. Makyaj için geri
       // düşüş YOKTUR: vektör konuşamıyorsa bölüm hiç gösterilmez.
       if (!pool) {
-        setSuggestionItems(buildRandomOutfit(cleanItems, preferredSeasons))
+        setSuggestionItems(buildRandomOutfit(cleanItems, preferredSeasons, moodContextRef.current))
         setIsSmart(false)
         setMakeupItemId(null)
         return
@@ -289,6 +307,7 @@ function OutfitSuggestion() {
         cleanItems,
         seasons: preferredSeasons,
         variant,
+        moodContext: moodContextRef.current,
       })
 
       setSuggestionItems(next)
@@ -307,7 +326,11 @@ function OutfitSuggestion() {
       setIsSaved(false)
       setSaveError('')
 
-      const seedItem = pickSeedItem(cleanItems, preferredSeasons, { excludeId: excludeSeedId })
+      const seedItem = pickSeedItem(cleanItems, preferredSeasons, {
+        excludeId: excludeSeedId,
+        textRanking: textRankingRef.current,
+        moodContext: moodContextRef.current,
+      })
 
       // Hiç temiz parça yok: mevcut "Şu an temiz parçan yok" ekranı devreye girer.
       if (!seedItem) {
@@ -364,6 +387,13 @@ function OutfitSuggestion() {
   // yanlış eşleşmiş görünürdü.
   const handlePillSelect = (occasion) => {
     setInterpretation(null)
+    // Hazır durum pill'i, önceki serbest metin çağrısından kalan mood
+    // bağlamını MİRAS ALMAMALI — aksi hâlde "sade bir şıklık istiyorum"
+    // sonrası "Spor" pill'ine tıklamak hâlâ akşam yemeği kısıtlarını
+    // uygulardı. Bu satır, "stil tercihi olmadan yapılan eski akış hâlâ
+    // aynı şekilde çalışıyor" regresyon garantisinin doğrudan karşılığıdır.
+    moodContextRef.current = null
+    textRankingRef.current = null
     runSuggestion(occasion)
   }
 
@@ -374,6 +404,8 @@ function OutfitSuggestion() {
 
     setIsInterpreting(true)
     setInterpretation(null)
+    moodContextRef.current = null
+    textRankingRef.current = null
 
     // Gemini yorumlayamazsa HAM METİN occasion olarak kullanılır — bu
     // özellikten ÖNCEKİ davranışın birebir aynısı. VARCHAR(50) sınırını
@@ -385,10 +417,38 @@ function OutfitSuggestion() {
       const result = await interpretOutfitRequest(trimmed)
       occasionToUse = result.occasion
       setInterpretation(result)
+
+      // Yorumlama başarılı: kaçınılması gerekenler ve stil tercihi artık
+      // kombin kurma mantığına da aktarılıyor (bkz. lib/outfitBuilder.js >
+      // applyMoodPreferences). Bu, önceki sürümün "yalnızca gösterim
+      // amaçlı" sınırlamasını kapatır.
+      moodContextRef.current = createMoodContext(result)
+
+      // arama_metni'ni embedding'e çevirip seed parça seçimini önceliklendir.
+      // SESSİZ GERİ DÜŞÜŞ: Chroma kapalı, kota dolu, ağ hatası — hiçbiri
+      // kullanıcıya gösterilmez; textRankingRef null kalır ve pickSeedItem
+      // rastgele seçime döner (fetchCompanions ile AYNI ilke).
+      if (result.arama_metni) {
+        try {
+          const arama = await searchClothingItemsByText(result.arama_metni)
+          if (arama?.indekslendi && arama.sonuclar.length > 0) {
+            textRankingRef.current = new Map(
+              arama.sonuclar.map((row) => [row.id, row.benzerlik]),
+            )
+          }
+        } catch (error) {
+          console.warn(
+            'Serbest metin araması kullanılamadı, seed parça rastgele seçilecek:',
+            error.message,
+          )
+        }
+      }
     } catch (error) {
       // SESSİZ GERİ DÜŞÜŞ: anahtar yok, kota doldu, zaman aşımı, ağ hatası —
       // hiçbiri kullanıcıya gösterilmez. Yorumlama sonucu yok sayılır,
       // mevcut occasion-pill akışı (ham metin) aynen çalışmaya devam eder.
+      // moodContextRef/textRankingRef null kalır: Gemini erişilemezken bile
+      // sistem eskisi gibi (daha basit ama) mantıklı bir kombin üretir.
       console.warn('Serbest metin yorumlanamadı, ham metin occasion olarak kullanılıyor:', error.message)
     } finally {
       setIsInterpreting(false)
@@ -403,11 +463,11 @@ function OutfitSuggestion() {
     // Rastgele mod (vektör kullanılamadı): eski davranış birebir korunur.
     if (!pool) {
       setSuggestionItems((previous) => {
-        let next = buildRandomOutfit(cleanItems, preferredSeasons)
+        let next = buildRandomOutfit(cleanItems, preferredSeasons, moodContextRef.current)
         let attempts = 0
         // Aynı kombinin üst üste gelmemesi için birkaç kez yeniden dener.
         while (attempts < 5 && isSameOutfit(next, previous)) {
-          next = buildRandomOutfit(cleanItems, preferredSeasons)
+          next = buildRandomOutfit(cleanItems, preferredSeasons, moodContextRef.current)
           attempts += 1
         }
         return next

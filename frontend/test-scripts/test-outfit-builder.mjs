@@ -16,6 +16,7 @@ import {
   OUTFIT_CATEGORIES,
   buildOutfitFromCandidates,
   buildRandomOutfit,
+  createMoodContext,
   isSameOutfit,
   pickMakeupItem,
   pickSeedItem,
@@ -430,7 +431,216 @@ console.log('\n9) Makyaj kombin ızgarasına SIZMIYOR')
 }
 
 // ---------------------------------------------------------------
-console.log('\n10) isSameOutfit')
+console.log('\n10) Serbest metin (mood) bağlamı — GERÇEK VAKA: "parmak arası terlik"')
+console.log('    (bkz. deneme@gmail.com gardırobu: sneaker + terlik + babet + stiletto)')
+
+{
+  // --- createMoodContext ---
+  check('interpretation yoksa moodContext null', createMoodContext(null) === null)
+  check('interpretation yoksa moodContext null (undefined)', createMoodContext(undefined) === null)
+
+  const context = createMoodContext({
+    occasion: 'Akşam Yemeği',
+    stil_tercihi: 'Sade ve Şık',
+    kacinilmasi_gerekenler: ['Aşırı gösterişli', 'Çok rahat/spor'],
+    onem_verilen_ozellikler: ['Dengeli görünüm'],
+    arama_metni: 'Şık ama abartısız, dengeli bir akşam yemeği kombini',
+  })
+  check('occasion doğru taşınıyor', context.occasion === 'Akşam Yemeği')
+  check('stilTercihi doğru taşınıyor (camelCase)', context.stilTercihi === 'Sade ve Şık')
+  check(
+    'kacinilanKelimeler "rahat" VE "spor" kelimelerini içeriyor',
+    context.kacinilanKelimeler.has('rahat') && context.kacinilanKelimeler.has('spor'),
+    [...context.kacinilanKelimeler].join(', '),
+  )
+  check(
+    'Durak kelimeler ("çok", "aşırı") kacinilanKelimeler\'e GİRMİYOR',
+    !context.kacinilanKelimeler.has('çok') && !context.kacinilanKelimeler.has('aşırı'),
+  )
+
+  // --- Gerçek gardıropla BİREBİR AYNI ai_analysis şekli ---
+  const terlik = parca({
+    name: 'parmak arası terlik',
+    category: 'Ayakkabı',
+    aiAnalysis: { veri: { stil: 'Plaj', ayakkabi_turu: 'Terlik' } },
+  })
+  const sneaker = parca({
+    name: 'New balance 530',
+    category: 'Ayakkabı',
+    aiAnalysis: { veri: { stil: 'Spor', ayakkabi_turu: 'Sneaker' } },
+  })
+  const stiletto = parca({
+    name: 'stradivarius bordo stiletto',
+    category: 'Ayakkabı',
+    aiAnalysis: { veri: { stil: 'Klasik', ayakkabi_turu: 'Stiletto' } },
+  })
+  const babet = parca({
+    name: 'stradivarius babet',
+    category: 'Ayakkabı',
+    aiAnalysis: { veri: { stil: 'Klasik', ayakkabi_turu: 'Babet' } },
+  })
+
+  console.log('\n   a) preferFormalShoes — resmi durum + stil tercihi VARKEN')
+  {
+    const seed = parca({ name: 'seed-ust', category: 'Üst' })
+    const cleanItems = [seed, terlik, sneaker, stiletto, babet]
+    const havuz = new Map([['Ayakkabı', [terlik, sneaker, stiletto, babet]]])
+
+    const sonuc = buildOutfitFromCandidates({
+      seedItem: seed,
+      candidatesByCategory: havuz,
+      cleanItems,
+      seasons: null,
+      moodContext: context,
+    })
+    const secilenAyakkabi = sonuc.items.find((item) => item.category === 'Ayakkabı')?.name
+    check(
+      'KRİTİK — Akşam Yemeği + "Sade ve Şık" iken parmak arası terlik SEÇİLMİYOR',
+      secilenAyakkabi !== 'parmak arası terlik',
+      secilenAyakkabi,
+    )
+    check(
+      'KRİTİK — sneaker de seçilmiyor (formal değil)',
+      secilenAyakkabi !== 'New balance 530',
+      secilenAyakkabi,
+    )
+    check(
+      'Bunun yerine RESMİ etiketli bir ayakkabı (stiletto/babet) seçildi',
+      secilenAyakkabi === 'stradivarius bordo stiletto' || secilenAyakkabi === 'stradivarius babet',
+      secilenAyakkabi,
+    )
+  }
+
+  console.log('\n   b) preferFormalShoes — moodContext YOKKEN (regresyon: eski davranış)')
+  {
+    const seed = parca({ name: 'seed-ust', category: 'Üst' })
+    const cleanItems = [seed, terlik]
+    const havuz = new Map([['Ayakkabı', [terlik]]])
+
+    // moodContext verilmiyor: terlik TEK aday olduğu için normalde seçilir.
+    const sonuc = buildOutfitFromCandidates({
+      seedItem: seed,
+      candidatesByCategory: havuz,
+      cleanItems,
+      seasons: null,
+    })
+    check(
+      'moodContext YOKKEN tek aday (terlik) yine seçiliyor — davranış DEĞİŞMEDİ',
+      sonuc.items.some((item) => item.name === 'parmak arası terlik'),
+    )
+  }
+
+  console.log('\n   c) preferFormalShoes — resmi olmayan durumda (ör. Spor) etkisiz')
+  {
+    const sporContext = createMoodContext({
+      occasion: 'Spor',
+      stil_tercihi: 'Rahat',
+      kacinilmasi_gerekenler: [],
+    })
+    const seed = parca({ name: 'seed-ust', category: 'Üst' })
+    const cleanItems = [seed, sneaker]
+    const havuz = new Map([['Ayakkabı', [sneaker]]])
+
+    const sonuc = buildOutfitFromCandidates({
+      seedItem: seed,
+      candidatesByCategory: havuz,
+      cleanItems,
+      seasons: null,
+      moodContext: sporContext,
+    })
+    check(
+      '"Spor" durumunda sneaker GERİ İTİLMİYOR (resmi kural yalnızca formal occasion\'larda)',
+      sonuc.items.some((item) => item.name === 'New balance 530'),
+    )
+  }
+
+  console.log('\n   d) preferAvoidingKeywords — ÖNCELİKLENDİRİR, ELEMEZ')
+  {
+    const seed = parca({ name: 'seed-ust', category: 'Üst' })
+    // Ayakkabı kategorisinde TEK seçenek terlik: eleme OLSAYDI kombin
+    // kurulamazdı; öncelik düşürme davranışında yine de seçilmeli.
+    const cleanItems = [seed, terlik]
+    const havuz = new Map([['Ayakkabı', [terlik]]])
+
+    const sonuc = buildOutfitFromCandidates({
+      seedItem: seed,
+      candidatesByCategory: havuz,
+      cleanItems,
+      seasons: null,
+      moodContext: context,
+    })
+    check(
+      'Tek seçenek terlik olsa BİLE kombin kuruluyor (tamamen ELENMİYOR)',
+      sonuc.items.some((item) => item.name === 'parmak arası terlik'),
+    )
+  }
+
+  console.log('\n   e) pickSeedItem — textRanking ile en yakın parça seed olarak seçiliyor')
+  {
+    const uzakUst = parca({ name: 'uzak-ust', category: 'Üst', aiAnalysis: { veri: {} } })
+    const yakinUst = parca({ name: 'yakin-ust', category: 'Üst', aiAnalysis: { veri: {} } })
+    const indekssizAlt = parca({ name: 'indekssiz-alt', category: 'Alt' }) // aiAnalysis yok
+
+    const textRanking = new Map([
+      [uzakUst.id, 0.65],
+      [yakinUst.id, 0.91],
+    ])
+
+    const secilen = pickSeedItem([uzakUst, yakinUst, indekssizAlt], null, { textRanking })
+    check(
+      'textRanking varken EN YÜKSEK benzerlikli parça deterministik seçiliyor',
+      secilen?.name === 'yakin-ust',
+      secilen?.name,
+    )
+
+    // textRanking BOŞSA (Chroma erişilemedi) sessizce rastgele davranışa düşülür.
+    const bosRanking = new Map()
+    const rastgeleSecimler = Array.from({ length: 30 }, () =>
+      pickSeedItem([uzakUst, yakinUst], null, { textRanking: bosRanking }),
+    )
+    check(
+      'Boş textRanking → sessizce rastgele seçime düşülüyor (hata yok)',
+      rastgeleSecimler.every((s) => s?.name === 'uzak-ust' || s?.name === 'yakin-ust'),
+    )
+    check(
+      'Boş textRanking gerçekten RASTGELE (tek bir isim değil)',
+      new Set(rastgeleSecimler.map((s) => s.name)).size === 2,
+    )
+
+    // textRanking'te olmayan bir parça havuzda TEK başınaysa yine seçilebilir
+    // (elenmiyor, yalnızca ranking'te öncelikli değil).
+    const sadeceIndekssiz = pickSeedItem([indekssizAlt], null, { textRanking })
+    check(
+      'Ranking\'te olmayan tek parça ELENMİYOR, yine seçiliyor',
+      sadeceIndekssiz?.name === 'indekssiz-alt',
+    )
+  }
+
+  console.log('\n   f) buildRandomOutfit — moodContext rastgele geri düşüşte de ÇALIŞIYOR')
+  {
+    // Chroma tamamen erişilemez olsa bile (candidatesByCategory hiç yok),
+    // kaçınılan kelimeler ai_analysis'ten okunduğu için hâlâ uygulanabilir.
+    const cleanItems = [terlik, stiletto]
+    const kombinler = Array.from({ length: 30 }, () =>
+      buildRandomOutfit(cleanItems, null, context),
+    )
+    check(
+      'Rastgele geri düşüşte BİLE terlik yerine stiletto tercih ediliyor',
+      kombinler.every((k) => k.some((item) => item.name === 'stradivarius bordo stiletto')),
+    )
+
+    // moodContext YOKSA (eski çağrı imzası) davranış deterministik değil,
+    // ikisi de çıkabilir — bu REGRESYONUN kanıtı.
+    const eskiDavranis = Array.from({ length: 30 }, () => buildRandomOutfit(cleanItems, null))
+    check(
+      'moodContext verilmezse ESKİ (tamamen rastgele) davranış korunuyor',
+      new Set(eskiDavranis.map((k) => k[0]?.name)).size === 2,
+    )
+  }
+}
+
+// ---------------------------------------------------------------
+console.log('\n11) isSameOutfit')
 
 {
   const a = parca()
@@ -441,7 +651,7 @@ console.log('\n10) isSameOutfit')
 }
 
 // ---------------------------------------------------------------
-console.log('\n11) matchesSkinTone — ten tonu işareti (yalnızca bilgilendirici)')
+console.log('\n12) matchesSkinTone — ten tonu işareti (yalnızca bilgilendirici)')
 
 {
   const parcaTon = (tonlar) => ({ aiAnalysis: { veri: { uyumluluk: { ten_tonu: tonlar } } } })

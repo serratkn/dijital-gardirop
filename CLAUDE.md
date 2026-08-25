@@ -317,7 +317,7 @@ olduğu için iskelet oraya taşındı, kombin üretimi istemci tarafında anlı
 | **Fotoğraf değişince analiz KENDİLİĞİNDEN güncellenmez** | Maliyet koruması "dolu `ai_analysis` varsa tekrar analiz etme" der. Artık **elle tetiklenebiliyor**: Kıyafet Detay'daki "Yeniden Analiz Et" düğmesi (`POST /clothing-items/:id/analyze`) ve fotoğraf değiştirildiğinde çıkan hatırlatma. Otomatik yapılmıyor çünkü her çağrı gerçek para harcıyor. |
 | **Öneri kalitesi indekslenmiş parça sayısına bağlı** | Vektör eşleştirmesi yalnızca `ai_analysis` (dolayısıyla fotoğrafı) olan parçalar için çalışır. Analizsiz bir gardıropta Kombin Öner sessizce eskisi gibi rastgele seçim yapar ve rozet hiç görünmez — hatalı değil ama "akıllı" da değildir. Toplu doldurma `analyze-existing-items.js` + `create-embeddings.js` ile elle yapılır. |
 | **Durum (occasion) vektör aramasına GİRMİYOR** | "Üniversite" ile "Özel Davet" aynı adayları getirir; durum yalnızca kaydedilen kombinin etiketidir. Başlangıç parçası rastgele seçildiği için sonuç yine de her seferinde değişir. Durumu prompt'a/sorguya katmak ayrı bir aşamanın işi. |
-| **Serbest metin yorumlamasının `arama_metni`si vektör aramasına HİÇ girmiyor** | `POST /outfits/interpret` yalnızca `occasion`'ı üretir ve kombin kurma bunu kullanır; `arama_metni`/`stil_tercihi`/`kacinilmasi_gerekenler`/`onem_verilen_ozellikler` yalnızca kullanıcıya GÖSTERİLİR, `outfitBuilder.js`'in seçim mantığına hiç katılmaz. Bilinçli bir ilk-sürüm sadeleştirmesi; CLAUDE.md §8'de iki genişletme seçeneği (ek ağırlık vs. yeni bir embedding sorgusu) tartışılıyor ama hiçbiri uygulanmadı. |
+| **`variantDepth` moodContext'i saymaz** | "Başka Öneri Göster" derinliği hâlâ HAM aday sayısına bakar; `preferAvoidingKeywords`/`preferFormalShoes` bir kategoriyi daralttığında (elemeden, yalnızca önceliklendirerek) gerçek "yeni ve anlamlı" varyant sayısı bu tahminden az olabilir. Zararsız (modulo indeksleme sınır içinde kalır) ama "Başka Öneri Göster" bazen bir varyantı bir kez tekrarlayıp SONRA yeni bir başlangıç parçasına geçebilir. `variantDepth`'i mood-farkında yapmak eklenen karmaşıklığa değmedi, bilinçli olarak dokunulmadı. |
 | **Chroma ile Postgres arasında işlem bütünlüğü yok** | İki ayrı depo, dağıtık işlem yok. Kıyafet silinince vektörü de silinir ama bu çağrı başarısız olursa öksüz vektör kalır. `/similar` bunu okurken filtreler (silinmiş parça yanıta düşmez) ve `cleanup.js` öksüzleri toplu siler. |
 | **Embedding modeli değişirse koleksiyon geçersiz olur** | Farklı modellerin vektörleri aynı uzayda değildir. Model değiştirildiğinde `create-embeddings.js --sifirla --uygula` çalıştırılmalıdır; bunu hatırlatan otomatik bir kontrol yok. |
 | **Makyaj önerisi durumdan (occasion) bağımsız** | Öneri yalnızca başlangıç parçasına olan vektör yakınlığına bakar; "Spor" ile "Özel Davet" aynı ürünü getirebilir. Aynı sınırlama kombinin kendisinde de var. |
@@ -605,6 +605,46 @@ başına aday sayısıdır (varsayılan 5, en fazla 20).
   (silinmiş/başkasına ait parça yanıta sızmaz). Bozuk biçimli id `400`.
 - Henüz indekslenmemiş başlangıç parçası hata değildir:
   `{"indekslendi": false, "sebep": "analiz-yok", "adaylar": {}}`.
+
+### Serbest metin araması (vektör veritabanı — Aşama 5)
+
+| Metod | Yol | Açıklama |
+|---|---|---|
+| `POST` | `/clothing-items/search-by-text` | `{ text*, limit? }` — kullanıcının serbest metnini gardırobun TAMAMIYLA karşılaştırır |
+
+**Kombin Öner'in serbest metin (mood) kutusunun seed parça seçimini besleyen
+ikinci retrieval ucu.** `/companions`'tan temel farkı: bir başlangıç PARÇASI
+almaz, kullanıcının kendi cümlesini (`interpretOutfitRequest`'in ürettiği
+`arama_metni`) alır ve bu metni **HER ÇAĞRIDA gerçek bir Gemini embedding
+isteğine çevirip** kullanıcının TÜM indekslenmiş gardırobunu bu embedding'e
+yakınlığa göre sıralar. `/companions`/`/similar` hiç Gemini çağırmaz (yalnızca
+Chroma'da zaten duran bir vektörü okur) — bu uç FARKLI, gerçek bir embedding
+maliyeti taşır; bu yüzden `geminiLimiter`'ın arkasında mount edilir.
+
+```json
+{"indekslendi":true,
+ "sonuclar":[{"id":"b25ab24e-…","category_id":5,"mesafe":0.1382,"benzerlik":0.8618}]}
+```
+
+- **`/clothing-items/:id/...` desenine UYMAZ, kendi düz yoludur** — bir
+  parça id'si değil doğrudan bir cümle alır.
+- **Kategoriye göre GRUPLANMAZ** (`/companions`'ın aksine): çağıran (seed
+  parça seçimi) "hangi kategoriden" değil "genel olarak en yakın hangi
+  parça" sorusuna cevap arar — düz, mesafeye göre sıralı bir liste yeterli.
+- **Postgres zenginleştirmesi YOKTUR** (`/similar`'ın aksine): çağıran
+  (`OutfitSuggestion.jsx`) gardırobu zaten tamamen belleğinde tutuyor —
+  yalnızca `id` + `benzerlik` yeterli, ekstra bir veritabanı turu gereksiz
+  olurdu.
+- Sorgu daima `user_id` ile filtrelenir (`/similar`/`/companions` ile aynı
+  gerekçe: filtresiz bir vektör sorgusu başka kullanıcıların gardıroplarından
+  sonuç döndürürdü).
+- **FIRLATIR, sessizce boş dönmez** — aynı aile (`/companions`/`/similar`):
+  boş metin `400`; Chroma kapalıysa/anahtar yoksa `503`. "Sessizce rastgele
+  seed seçimine düş" kararı yine İSTEMCİNİNDİR (`OutfitSuggestion.jsx`,
+  `handleCustomSubmit` içindeki `try/catch`).
+- `limit` opsiyoneldir (varsayılan 30, en fazla 50) — `/companions`'ın
+  kategori başına aday sayısından KASITLI olarak daha büyük: bu sorgu tek
+  seferde TÜM gardırobu tarar, kategoriye bölünmez.
 
 ### Benzer parçalar (vektör veritabanı — Aşama 3)
 
@@ -902,11 +942,12 @@ sahiplik/kaynak kavramı yoktur, yalnızca metin gidip yorumlanmış hâliyle d�
   için tek deneme yeterli.
 - **Hız sınırlıdır** (`geminiLimiter`, diğer Gemini uçlarıyla aynı): kullanıcı
   başına saatte 10 istek.
-- **`kacinilmasi_gerekenler` ve `onem_verilen_ozellikler` şimdilik SADECE
-  GÖSTERİM AMAÇLIDIR** — kombin kurma mantığına (`outfitBuilder.js`) hiç
-  girmezler, yalnızca kullanıcıya geri gösterilirler. `arama_metni` de aynı
-  şekilde vektör aramasına DAHİL EDİLMEZ (bkz. §8 için gelecekteki
-  genişletme seçenekleri).
+- **`kacinilmasi_gerekenler` ve `stil_tercihi` artık GÖSTERİMİN YANI SIRA
+  kombin kurma mantığına da girer** (`outfitBuilder.js > createMoodContext` /
+  `applyMoodPreferences`, bkz. §8) — bu uçta hiçbir değişiklik gerekmedi,
+  yalnızca frontend'in bu alanları nasıl kullandığı değişti. `arama_metni`
+  ayrıca **ikinci bir gerçek Gemini çağrısını** (embedding) tetikler:
+  bkz. `POST /clothing-items/search-by-text` aşağıda.
 
 **`clothingItemId` filtresi.** Verilirse yalnızca o parçanın geçtiği kombinler döner
 (Kıyafet Detay sayfasını besler). Filtre SQL'de `EXISTS` alt sorgusuyla yazılır; `JOIN`
@@ -1732,36 +1773,89 @@ Gemini'nin ürettiği occasion'ı AYIRT EDEMEZ, ikisi de aynı string.
   "Öncelikler" etiketleri) render edilir; bir hazır durum pill'i seçilince
   (`handlePillSelect`) hemen temizlenir — aksi hâlde başka bir durumun
   sonuçlarının yanında eski, artık ilgisiz bir özet görünür kalırdı.
-- **`kacinilmasi_gerekenler` / `onem_verilen_ozellikler` kombin kurma
-  mantığına HİÇ katılmaz** — yalnızca özet kutusunda okunabilir etiketler
-  olarak listelenirler. Bu bilinçli bir "basit başlangıç" sınırı; aşağıdaki
-  not bunu genişletmenin iki yolunu tartışıyor.
+- **`kacinilmasi_gerekenler` ve `stil_tercihi` artık kombin kurma mantığına
+  da katılır** (aşağıdaki "Mood bağlamı" bölümüne bakın) — `onem_verilen_ozellikler`
+  ise hâlâ SADECE gösterim amaçlıdır, hiçbir filtreye girmez (kullanıcının
+  "önem verdiği" bir özelliği negatif değil pozitif bir sinyaldir ve
+  "öncelik ver" ile "kaçın"ı aynı mekanizmada karıştırmak riskli olurdu —
+  bu bilinçli olarak kapsam dışında bırakıldı).
 
-**GELECEK — `arama_metni` vektör aramasına NASIL dahil edilebilir (henüz
-YAPILMADI, yalnızca mimari not).** İki makul yaklaşım var:
+**Mood bağlamı — `createMoodContext` / `applyMoodPreferences`
+(`outfitBuilder.js`).** İlk sürümde `arama_metni`/`kacinilmasi_gerekenler`
+yalnızca özet kutusunda gösteriliyordu, kombin seçimine hiç karışmıyordu.
+Gerçek kullanımda bu bir HATAYA yol açtı: "sade bir şıklık istiyorum"
+dendiğinde sistem parmak arası terlik önerdi — occasion doğru anlaşılmıştı
+("Akşam Yemeği"/"Özel Davet") ama stil kısıtı hiçbir yere gitmiyordu. Çözüm
+üç ayrı, birbirini tamamlayan mekanizma:
 
-1. **Ek ağırlık olarak** — mevcut `fetchCompanions` akışı aynen kalır
-  (başlangıç parçasının embedding'ine en yakın adaylar), ama
-  `buildOutfitFromCandidates`'a `arama_metni`nin KENDİ embedding'i ile
-  hesaplanan ikinci bir benzerlik skoru eklenir ve iki skor ağırlıklı
-  birleştirilir (ör. %70 parça-parça benzerliği + %30 metin-parça
-  benzerliği). Artısı: mevcut "başlangıç parçası" mimarisini bozmaz, yalnızca
-  sıralamayı ince ayarlar. Eksisi: `arama_metni` için AYRI bir Gemini
-  embedding çağrısı gerekir (maliyet) ve iki farklı embedding UZAYININ
-  (kıyafet özeti vs. serbest metin) doğrudan karşılaştırılabilir olduğu
-  varsayımı test edilmemiştir.
-2. **Tamamen yeni bir sorgu olarak** — `arama_metni`nin embedding'i Chroma'ya
-  DOĞRUDAN sorgu vektörü olarak verilir (bugün `/companions`'ın yaptığı gibi
-  "başlangıç parçasının vektörü" yerine "metnin vektörü" kullanılır) ve HER
-  kategoriden bu metne en yakın parçalar aday olur. Artısı: kullanıcının
-  isteğini (ör. "sade bir şıklık") doğrudan aramaya sokar, kavramsal olarak
-  daha güçlü. Eksisi: mevcut "önce bir başlangıç parçası seç, sonra ona yakın
-  diğerlerini bul" akışını YERİNDEN EDER — `pickSeedItem`'in rolü ortadan
-  kalkar, `outfitBuilder.js`'in test edilmiş mantığının büyük kısmı yeniden
-  yazılmayı gerektirir.
+1. **`createMoodContext(interpretation)`** — `interpretOutfitRequest`'in
+   ham yanıtını `{ occasion, stilTercihi, kacinilanKelimeler }` şekline
+   sıkıştırır. `kacinilanKelimeler` bir `Set<string>`tir: her
+   `kacinilmasi_gerekenler` ifadesi ("Aşırı gösterişli", "Çok rahat/spor")
+   kelimelerine bölünür, 3 karakterden kısa olanlar ve bir DURAK KELİME
+   listesi ("çok", "aşırı", "biraz", "gibi", "veya" vb.) elenir — aksi
+   hâlde neredeyse her ifadede geçen bu kelimeler örtüşme testini anlamsız
+   hâle getirirdi. `interpretation` `null`/`undefined` ise (Gemini
+   erişilemedi, kullanıcı hazır durum pill'i seçti) `createMoodContext`
+   `null` döner ve aşağıdaki HİÇBİR mekanizma devreye girmez — bu, "Gemini
+   erişilemezken hâlâ (daha basit ama) mantıklı bir kombin üretiliyor" ve
+   "stil tercihi olmadan eski akış aynen çalışıyor" garantilerinin doğrudan
+   kaynağıdır.
+2. **`preferAvoidingKeywords(pool, kacinilanKelimeler)`** — TÜM kategorilerde
+   uygulanır (yalnızca ayakkabıda değil). Bir parçanın `ai_analysis.veri`
+   içindeki metin alanları (`stil`, `genel_aciklama`, `alt_kategori`,
+   `kesim_tipi`, `urun_turu`, `ayakkabi_turu`, `canta_turu`, `bitis_efekti`)
+   kaçınılan kelimelerden birini İÇERİYORSA parça **öncelik dışına atılır,
+   ELENMEZ** — `preferSeason` ile AYNI "önceliklendir, eleme" deseni. Eleme
+   olsaydı küçük bir gardıropta (tek ayakkabı, tek çanta) kombin hiç
+   kurulamayabilirdi; bu yüzden havuzda tercih edilen alt küme boşsa
+   fonksiyon sessizce TÜM havuzu geri verir.
+3. **`preferFormalShoes(pool, category, moodContext)`** — yalnızca
+   `category === 'Ayakkabı'` VE `moodContext.stilTercihi` VE
+   `moodContext.occasion` `FORMAL_OCCASIONS = ['Akşam Yemeği', 'İş', 'Özel Davet']`
+   içindeyken devreye girer. `ayakkabiFormalligi(item)` iki ayrı regex ile
+   `ayakkabi_turu`/`stil`/`topuk_yuksekligi` metnini sınıflandırır:
+   `RESMI_AYAKKABI_DESENI` (topuk, stiletto, oxford, klasik, rugan, deri
+   bot, **babet**, makosen) ve `GUNLUK_AYAKKABI_DESENI` (terlik, sandalet,
+   sneaker, spor ayakkabı, crocs, flip-flop). Resmi etiketli bir aday
+   varsa o tercih edilir; yoksa en azından KESİNLİKLE günlük olanlar
+   havuzdan (önceliklendirerek, yine ELEMEDEN) çıkarılır; hiçbiri
+   sınıflandırılamıyorsa havuz değişmeden döner. **NEDEN AYRI BİR
+   MEKANİZMA (2)'ye ek olarak):** gerçek gardırop verisiyle ölçüldüğünde
+   saf embedding benzerliği TEK BAŞINA yetersiz çıktı — "Şık ama abartısız,
+   dengeli bir akşam yemeği kombini" sorgusunda parmak arası terlik en
+   dipte kalsa da (4 ayakkabı içinde son sırada) bir SPOR sneaker (New
+   Balance 530), hem stiletto hem babetin ÜSTÜNE çıktı; embedding
+   "resmiyet" kavramını güvenilir biçimde kodlamıyor, deterministik bir
+   regex kuralı gerekliydi.
+   **`babet` BİLEREK `RESMI_AYAKKABI_DESENI`'NDEDİR, günlük listesinde
+   DEĞİL** — ilk taslakta tersiydi; gerçek demo gardırobunda
+   `stradivarius babet`in `ai_analysis.veri.stil` alanı `"Klasik"` olarak
+   dönüyor (bkz. §5 `ai_analysis` biçimi). Bu uygulamanın kendi
+   sözlüğünde babet resmi/klasik bir kategoridir — onu "günlük" sayıp
+   öncelik dışına atmak gerçek veriyle çelişir ve iyi bir resmi seçeneği
+   haksız yere geri plana iterdi. Bu, kod yazılmadan ÖNCE gerçek veriyle
+   doğrulanıp düzeltilen bir tasarım kararıdır.
+4. **`findByText` + deterministik seed seçimi** — `pickSeedItem`
+   `textRanking` (bkz. `POST /clothing-items/search-by-text` yukarıda)
+   verildiğinde, `preferAvoidingKeywords` uygulandıktan SONRA kalan
+   havuzda RASTGELE değil **deterministik olarak en yüksek benzerlik
+   skorlu** parçayı seçer. Rastgelelik burada bilerek terk edildi:
+   amaç kullanıcının GERÇEKTEN yazdığı cümleye en yakın parçayı başlangıç
+   yapmak; "Başka Öneri Göster" çeşitliliği zaten mevcut `excludeSeedId`
+   mekanizmasıyla korunur (bir önceki en iyi eşleşme dışlanınca doğal
+   olarak ikinci en iyi eşleşme öne çıkar). `textRanking` boşsa ya da
+   havuzdaki hiçbir parça onda yoksa `pickSeedItem` sessizce ESKİ (tam
+   rastgele) davranışına döner — yeni bir hata yolu YOKTUR.
 
-Bu sürüm İKİSİNİ DE yapmıyor — yalnızca (1)'in daha ucuz ve daha az riskli
-olduğu, ileride denenirse önce onunla başlanması gerektiği not ediliyor.
+**Geriye dönük uyumluluk yapısal olarak garanti edilir**: `buildRandomOutfit`,
+`pickSeedItem` ve `buildOutfitFromCandidates`'ın hepsi `moodContext`/
+`textRanking`'i OPSİYONEL, varsayılanı `null` olan son parametreler olarak
+alır; bu değerler yoksa (hazır durum pill'i seçildiğinde `handlePillSelect`
+her ikisini de bilerek `null`'a çeker) üç fonksiyon da ESKİ davranışını
+BİREBİR korur. 73 önceden var olan test — hiçbiri yeni parametreleri
+geçirmeden — bu iddiayı doğruluyor; üstüne mood bağlamına özgü 18 yeni
+kontrol eklendi (bkz. `test-outfit-builder.mjs`).
 
 **İsteğe bağlı makyaj bölümü (`pickMakeupItem`).** Makyaj, `OUTFIT_CATEGORIES`'e
 **bilerek eklenmedi**: kombinin slotu değil, üstüne konan bir öneri. Bunun yerine
@@ -2127,6 +2221,102 @@ tamamlayıp kaldırıldı:
 
 > Bundan sonraki her çalışma buraya tarihiyle işlenir: eklenen özellikler, düzeltilen
 > hatalar, alınan mimari kararlar. En yeni kayıt en üstte.
+
+### 2026-08-25 — Serbest metin (mood) bağlamı artık GERÇEKTEN kombin seçimine katılıyor
+- **Düzeltilen gerçek hata:** bir önceki çalışma (`interpretOutfitRequest`,
+  hemen aşağıdaki kayıt) Gemini'ye `occasion`'ı doğru buldurdu ama
+  `arama_metni`/`kacinilmasi_gerekenler`/`stil_tercihi` yalnızca özet
+  kutusunda GÖSTERİLİYORDU, kombin kurma mantığına hiç girmiyordu — o
+  kaydın kendi notu bunu bilinçli bir "basit başlangıç" sınırı olarak
+  işaretlemişti. Gerçek kullanıcı testinde bu somut bir hataya yol açtı:
+  "sade bir şıklık istiyorum" dendiğinde sistem **parmak arası terlik**
+  önerdi. Bu çalışma o boşluğu kapatıyor.
+- **Kök neden ölçümle doğrulandı:** gerçek demo gardırobuyla (`deneme@gmail.com`)
+  `arama_metni`'nin embedding'i tüm ayakkabılarla karşılaştırıldığında terlik
+  gerçekten en dipte kaldı (4 ayakkabı içinde son sırada) ama **saf embedding
+  benzerliği tek başına yetersizdi**: bir spor sneaker (New Balance 530), hem
+  stiletto'nun hem babetin ÜSTÜNE çıktı — yani salt vektör yakınlığı
+  "resmiyet" kavramını güvenilir şekilde kodlamıyor. Bu, kullanıcının önerdiği
+  üçüncü mekanizmanın (deterministik resmi-ayakkabı kuralı) neden GEREKLİ
+  olduğunu (fazladan değil) kanıtladı.
+- **Üç tamamlayıcı mekanizma eklendi** (`frontend/src/lib/outfitBuilder.js`):
+  1. `createMoodContext(interpretation)` — Gemini yanıtını
+     `{ occasion, stilTercihi, kacinilanKelimeler }`'e sıkıştırır;
+     `kacinilmasi_gerekenler` ifadeleri kelimelere bölünür, durak kelimeler
+     ("çok", "aşırı", "biraz"…) ve 3 karakterden kısa kelimeler elenir.
+     `interpretation` yoksa (pill seçimi, Gemini erişilemedi) `null` döner.
+  2. `preferAvoidingKeywords(pool, kacinilanKelimeler)` — bir parçanın
+     `ai_analysis.veri` metin alanları kaçınılan bir kelimeyle örtüşüyorsa
+     parça **öncelik dışına atılır, ELENMEZ** (`preferSeason` ile aynı
+     "önceliklendir, eleme" deseni — küçük bir gardıropta tam eleme kombini
+     hiç kurulamaz hâle getirebilirdi).
+  3. `preferFormalShoes(pool, category, moodContext)` — yalnızca Ayakkabı
+     kategorisinde, yalnızca `stilTercihi` VARSA ve occasion
+     `FORMAL_OCCASIONS = ['Akşam Yemeği', 'İş', 'Özel Davet']` içindeyse
+     devreye girer; iki regex (`RESMI_AYAKKABI_DESENI` / `GUNLUK_AYAKKABI_DESENI`)
+     ile `ayakkabi_turu`/`stil` metnini sınıflandırıp resmi etiketli bir
+     adayı önceliklendirir.
+     **Tasarım sırasında yakalanan hata:** ilk taslakta `babet`
+     `GUNLUK_AYAKKABI_DESENI`'NDEYDİ; kod yazılmadan önce gerçek gardırop
+     verisiyle doğrulama yapılınca `stradivarius babet`in `ai_analysis.veri.stil`
+     alanının `"Klasik"` olduğu görüldü — bu uygulamanın kendi sözlüğünde
+     babet resmi/klasik sayılıyor. Regex, kod yazılmadan ÖNCE düzeltilip
+     `babet` yalnızca `RESMI_AYAKKABI_DESENI`'NE taşındı.
+  4. **Yeni retrieval ucu `POST /clothing-items/search-by-text`**
+     (`VectorService.findByText`, bkz. §6) — `arama_metni`'ni embedding'e
+     çevirip kullanıcının TÜM indekslenmiş gardırobunu buna yakınlığa göre
+     sıralar. `pickSeedItem` bu sıralama (`textRanking`) verildiğinde seed
+     parçayı RASTGELE değil **deterministik olarak en yüksek benzerlikli**
+     adaydan seçer — çeşitlilik "Başka Öneri Göster"in mevcut
+     `excludeSeedId` mekanizmasıyla korunur (bkz. §8 "Mood bağlamı").
+- **Geriye dönük uyumluluk YAPISAL olarak garanti edildi:**
+  `buildRandomOutfit`, `pickSeedItem`, `buildOutfitFromCandidates` yeni
+  bağlamı OPSİYONEL, varsayılanı `null` olan son parametreler olarak alır;
+  `handlePillSelect` (hazır durum pill'i seçimi) bu iki ref'i (`moodContextRef`,
+  `textRankingRef`) BİLEREK `null`'a çeker — "stil tercihi olmadan yapılan
+  eski akış" bu sayede birebir eskisi gibi çalışmaya devam eder.
+- **Doğrulama — `frontend/test-scripts/test-outfit-builder.mjs` 73 → 91
+  kontrol.** Yeni 18 kontrol gerçek gardırop verisinin AYNI şeklini kullanıyor
+  (`stil: 'Plaj'/'Terlik'`, `'Klasik'/'Stiletto'`, `'Klasik'/'Babet'`,
+  `'Spor'/'Sneaker'`): kritik senaryo ("Akşam Yemeği" + "Sade ve Şık" iken
+  terlik VE sneaker'ın seçilmemesi, resmi bir ayakkabının seçilmesi),
+  moodContext yokken eski davranışın korunması (tek aday terlikse yine
+  seçilmesi), yalnızca FORMAL_OCCASIONS'ta devreye girmesi ("Spor" durumunda
+  sneaker'ın geri itilmemesi), öncelik-eleme değil davranışı (tek seçenek
+  kacinilan kelimeyle örtüşse bile kombin kuruluyor), `pickSeedItem`
+  deterministik seçimi + boş `textRanking`'de sessiz rastgele geri düşüş,
+  ve rastgele geri düşüşte (Chroma tamamen erişilemez varsayımıyla) BİLE
+  kaçınılan kelimelerin uygulanması.
+- **Doğrulama — CANLI, gerçek gardıropla (`deneme@gmail.com`, JWT kendi
+  imzalandı, backend/Gemini/Chroma GERÇEK).** `generateContent` günlük kotası
+  (20/gün) doluydu; adım 1 (occasion yorumlama) bu yüzden kullanıcının
+  bildirdiği SENARYOYU birebir yansıtan gerçekçi bir yorumla taklit edildi,
+  ama adım 2'den (embedding araması) itibaren HER ŞEY gerçek — embedding
+  kotası `generateContent`'ten AYRI olduğu için (CLAUDE.md'de daha önce de
+  doğrulanmış bir gözlem) bu adım gerçekten Gemini'ye gitti:
+  - `search-by-text` gerçekten `stradivarius bordo stiletto`'yu ayakkabılar
+    arasında en yakın 2. sıraya koydu (benzerlik 0.8521, en yakının hemen
+    ardından).
+  - `pickSeedItem` bu stiletto'yu deterministik seed olarak seçti;
+    `buildOutfitFromCandidates` tam kombini kurdu (trençkot + siyah pantolon
+    + **stiletto** + siyah çanta) — **terlik seçilmedi**.
+  - moodContext OLMADAN aynı adaylarla kurulan eski akış farklı (rastgele)
+    bir seed seçti — davranış farkı doğrulandı (regresyon KANITI: eski yol
+    hâlâ çalışıyor, yalnızca artık moodContext varken FARKLI davranıyor).
+  - Rastgele geri düşüşte (20 deneme, moodContext ile) seçilen ayakkabı
+    HER ZAMAN {stiletto, babet} kümesinden çıktı — terlik ve sneaker HİÇ
+    seçilmedi. Bu, "Gemini/Chroma erişilemezken sistem hâlâ mantıklı bir
+    kombin üretiyor" gereksinimini gerçek koşullarda kanıtlıyor.
+- Regresyon: `test-outfit-builder.mjs` 91/91 (73 eski + 18 yeni),
+  `test-all-endpoints` 77/77, `test-auth` 48/48, `test-vector --birim` 46/46,
+  `test-outfit-rag --birim` 36/36, `test-outfit-interpret --birim` 10/10,
+  `test-item-outfits` 27/27, `test-clean-status` 26/26, `test-stats` 60/60,
+  `test-file-cleanup` 12/12, lint + build temiz.
+- **Bilinçli olarak DOKUNULMAYAN bir nokta:** `variantDepth()` hâlâ ham aday
+  sayısına bakar, mood filtresinin daralttığı havuzu saymaz — "Başka Öneri
+  Göster" nadiren bir varyantı tekrarlayıp SONRA yeni bir başlangıç
+  parçasına geçebilir. Zararsız (indeksleme sınır içinde kalır), eklenen
+  karmaşıklığa değmedi; "Eksikler" tablosuna işlendi.
 
 ### 2026-08-25 — Kombin Öner: serbest metin (doğal dil) mood/durum anlatımı
 - **Ne eklendi:** Kombin Öner'deki hazır durum pill'lerinin altındaki metin

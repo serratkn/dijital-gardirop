@@ -303,6 +303,29 @@ export function fetchSimilarItems(id, { categoryId, limit } = {}) {
   })
 }
 
+// AŞAMA 5 — serbest metin (mood) kutusunun seed parça seçimini besleyen çağrı.
+// fetchCompanions/fetchSimilarItems'tan farkı: bir başlangıç parçasına değil,
+// kullanıcının kendi cümlesine (arama_metni) bakar ve TÜM indekslenmiş
+// gardırobu bu cümleye yakınlığa göre sıralar. Bu yüzden HER ÇAĞRIDA gerçek
+// bir Gemini embedding isteği atar (fetchCompanions/fetchSimilarItems atmaz,
+// yalnızca Chroma okur) — zaman aşımı bilerek daha CÖMERTTİR
+// (VECTOR_REQUEST_TIMEOUT_MS'in aksine): backend iki ayrı adımı (embedding +
+// sorgu) art arda çalıştırıyor, her biri kendi 3 sn'lik payını kullanabilir.
+//
+// ÇAĞIRAN HATAYI YUTMALIDIR: bu istek başarısız olursa (Gemini/Chroma
+// erişilemez, kota dolu, metin boş) seed parça seçimi sessizce rastgele
+// moda düşer — "sessizce geri düş" kararı yine istemcinindir
+// (bkz. lib/outfitBuilder.js > pickSeedItem, textRanking opsiyonel).
+const TEXT_SEARCH_TIMEOUT_MS = 8000
+
+export function searchClothingItemsByText(text, { limit } = {}) {
+  return request('/clothing-items/search-by-text', {
+    method: 'POST',
+    body: { text, limit },
+    timeoutMs: TEXT_SEARCH_TIMEOUT_MS,
+  })
+}
+
 // clothingItemId verilirse yalnızca o parçanın geçtiği kombinler döner
 // (Kıyafet Detay sayfasındaki "Bu Kıyafetle Yapılan Kombinler" bölümü).
 export function fetchOutfits(clothingItemId) {
