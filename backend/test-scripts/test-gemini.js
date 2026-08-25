@@ -1,21 +1,29 @@
-// Gemini entegrasyonu — AŞAMA 1 testleri.
-// POST /api/gemini/test-analyze ucunu ve GeminiService'i doğrular.
+// Gemini entegrasyonu — AŞAMA 1 testleri: GeminiService'in anahtar/bağlantı
+// yollarını doğrular.
 //
 // Kullanım (backend/ klasöründen):
 //   node test-scripts/test-gemini.js
 //   node test-scripts/test-gemini.js --image ../yol/kiyafet.jpg
 //
-// Görsel verilmezse uploads/ içindeki EN BÜYÜK dosya kullanılır (gerçek kıyafet
-// fotoğrafları oradadır). Klasör boşsa script bunu söyleyip HTTP bölümünü atlar.
+// NOT (2026-08-24): `POST /gemini/test-analyze` ucu KALDIRILDI (kullanılmayan
+// bir teşhis ucuydu, ürün akışı zaten otomatik analizdir). Bu script artık
+// SUNUCUYA HİÇ HTTP İSTEĞİ ATMAZ — GeminiService'i DOĞRUDAN çağırır. Anahtar/
+// hata-çevirisi yolları `analyzeClothingItem()` üzerinden sınanır (Aşama 2'nin
+// gerçek, hâlâ kullanılan metodu); bu metod, kaldırılan ucun kullandığı
+// `#generate()` özel yardımcısını AYNI ŞEKİLDE çağırır, yani doğrulanan
+// davranış (anahtar yok → 503, geçersiz anahtar → 503, ham SDK hatası
+// sızmıyor) birebir korunur.
 //
-// Bölüm 1 (servis) GEÇERLİ ANAHTAR OLMADAN da çalışır: eksik/geçersiz anahtar
-// yollarını sürer. Bölüm 2 gerçek bir anahtar ve çalışan sunucu ister.
+// Görsel verilmezse uploads/ içindeki EN BÜYÜK dosya kullanılır (gerçek kıyafet
+// fotoğrafları oradadır). Klasör boşsa gerçek analiz bölümü atlanır.
+//
+// Anahtar/hata yolları GEÇERLİ BİR ANAHTAR OLMADAN da çalışır. Gerçek analiz
+// bölümü (Bölüm 2) çalışan bir GEMINI_API_KEY ister.
 
 const path = require('node:path')
 const fs = require('node:fs')
 require('dotenv').config({ path: path.join(__dirname, '..', '.env') })
 
-const BASE_URL = `http://localhost:${process.env.PORT || 3001}/api`
 const UPLOAD_DIR = path.join(__dirname, '..', 'uploads')
 
 let passed = 0
@@ -31,27 +39,7 @@ function check(label, condition, detail = '') {
   }
 }
 
-async function call(method, endpoint, { body, token } = {}) {
-  const headers = {}
-  if (body) headers['Content-Type'] = 'application/json'
-  if (token) headers.Authorization = `Bearer ${token}`
-
-  const response = await fetch(BASE_URL + endpoint, {
-    method,
-    headers,
-    body: body ? JSON.stringify(body) : undefined,
-  })
-  const text = await response.text()
-  let data = null
-  if (text) {
-    try {
-      data = JSON.parse(text)
-    } catch {
-      data = text
-    }
-  }
-  return { status: response.status, data }
-}
+const isNonEmptyString = (value) => typeof value === 'string' && value.trim().length > 0
 
 const MIME_BY_EXT = { '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.png': 'image/png', '.webp': 'image/webp' }
 
@@ -74,43 +62,23 @@ function resolveImagePath() {
   return candidates.length ? path.join(UPLOAD_DIR, candidates[0].name) : null
 }
 
-async function uploadForAnalysis(token, imagePath) {
+function toFile(imagePath) {
   const buffer = fs.readFileSync(imagePath)
-  const mime = MIME_BY_EXT[path.extname(imagePath).toLowerCase()] || 'image/png'
-
-  const form = new FormData()
-  form.append('image', new Blob([buffer], { type: mime }), path.basename(imagePath))
-
-  const response = await fetch(`${BASE_URL}/gemini/test-analyze`, {
-    method: 'POST',
-    headers: token ? { Authorization: `Bearer ${token}` } : undefined,
-    body: form,
-  })
-  const text = await response.text()
-  let data = null
-  try {
-    data = text ? JSON.parse(text) : null
-  } catch {
-    data = text
-  }
-  return { status: response.status, data }
+  const mimetype = MIME_BY_EXT[path.extname(imagePath).toLowerCase()] || 'image/png'
+  return { buffer, mimetype }
 }
 
-const isNonEmptyString = (value) => typeof value === 'string' && value.trim().length > 0
-
 async function main() {
-  console.log(`Hedef: ${BASE_URL}\n`)
-
-  // ============ BÖLÜM 1 — Servis (sunucu ve geçerli anahtar gerekmez) ============
-  console.log('1) GeminiService — anahtar yolları')
-
   const GeminiService = require('../src/services/GeminiService')
   const service = new GeminiService()
   const realKey = process.env.GEMINI_API_KEY
 
+  // ============ BÖLÜM 1 — anahtar/hata yolları (anahtar GEREKMEZ) ============
+  console.log('1) GeminiService — anahtar yolları')
+
   // a) Görsel gönderilmediyse 400
   try {
-    await service.analyzeClothingImage(null)
+    await service.analyzeClothingItem(null, 'Üst')
     check('görselsiz istek reddedildi', false, 'hata fırlatmadı')
   } catch (error) {
     check('görselsiz istek 400 ValidationError', error.statusCode === 400, `${error.statusCode} — ${error.message}`)
@@ -121,7 +89,7 @@ async function main() {
   // b) Anahtar YOKSA: 503 ve açıklayıcı mesaj (500 DEĞİL)
   delete process.env.GEMINI_API_KEY
   try {
-    await service.analyzeClothingImage(fakeFile)
+    await service.analyzeClothingItem(fakeFile, 'Üst')
     check('anahtarsız istek reddedildi', false, 'hata fırlatmadı')
   } catch (error) {
     check('anahtarsız → 503 (500 değil)', error.statusCode === 503, `${error.statusCode}`)
@@ -135,7 +103,7 @@ async function main() {
   // c) GEÇERSİZ anahtar: gerçekten Gemini'ye gidip reddedilmeli, yine 503
   process.env.GEMINI_API_KEY = 'gecersiz-anahtar-test-icin-123'
   try {
-    await service.analyzeClothingImage(fakeFile)
+    await service.analyzeClothingItem(fakeFile, 'Üst')
     check('geçersiz anahtar reddedildi', false, 'hata fırlatmadı')
   } catch (error) {
     check('geçersiz anahtar → 503 (500 değil)', error.statusCode === 503, `${error.statusCode}`)
@@ -155,46 +123,10 @@ async function main() {
   if (realKey) process.env.GEMINI_API_KEY = realKey
   else delete process.env.GEMINI_API_KEY
 
-  // ============ BÖLÜM 2 — HTTP ucu ============
-  console.log('\n2) POST /gemini/test-analyze — yetkilendirme')
-
-  const email = `gemini-${Date.now()}-${Math.random().toString(36).slice(2, 6)}@example.com`
-  const registered = await call('POST', '/auth/register', {
-    body: { name: 'Gemini Test', email, password: 'GucluSifre123' },
-  })
-  if (registered.status !== 201) {
-    throw new Error(`Test kullanıcısı oluşturulamadı: ${JSON.stringify(registered.data)}`)
-  }
-  const { token, user } = registered.data
+  // ============ BÖLÜM 2 — gerçek kıyafet fotoğrafıyla analiz ============
+  console.log('\n2) Gerçek kıyafet fotoğrafıyla analiz (GeminiService doğrudan)')
 
   const imagePath = resolveImagePath()
-
-  // Token'sız istek reddedilmeli (uç korumalı)
-  if (imagePath) {
-    const anonymous = await uploadForAnalysis(null, imagePath)
-    check('token olmadan 401', anonymous.status === 401, `gelen: ${anonymous.status}`)
-  }
-
-  // Dosyasız istek → 400
-  const noFile = await fetch(`${BASE_URL}/gemini/test-analyze`, {
-    method: 'POST',
-    headers: { Authorization: `Bearer ${token}` },
-    body: new FormData(),
-  })
-  check('dosyasız istek 400', noFile.status === 400, `gelen: ${noFile.status}`)
-
-  // Görsel olmayan dosya → 400 (fileFilter)
-  const badForm = new FormData()
-  badForm.append('image', new Blob([Buffer.from('bu bir metin')], { type: 'text/plain' }), 'a.txt')
-  const badType = await fetch(`${BASE_URL}/gemini/test-analyze`, {
-    method: 'POST',
-    headers: { Authorization: `Bearer ${token}` },
-    body: badForm,
-  })
-  check('geçersiz dosya tipi 400', badType.status === 400, `gelen: ${badType.status}`)
-
-  // --- Gerçek analiz ---
-  console.log('\n3) Gerçek kıyafet fotoğrafıyla analiz')
 
   if (!imagePath) {
     console.log('   ! uploads/ içinde görsel yok — analiz bölümü atlandı.')
@@ -205,50 +137,46 @@ async function main() {
   } else {
     console.log(`   görsel: ${path.basename(imagePath)}`)
     const started = Date.now()
-    const result = await uploadForAnalysis(token, imagePath)
+    let result
+    let error
+    try {
+      result = await service.analyzeClothingItem(toFile(imagePath), 'Üst')
+    } catch (caught) {
+      error = caught
+    }
     const elapsed = Date.now() - started
 
-    check('HTTP 200', result.status === 200, `gelen: ${result.status} ${JSON.stringify(result.data).slice(0, 120)}`)
+    check('Analiz başarıyla döndü (hata fırlatmadı)', Boolean(result), error?.message)
 
-    if (result.status === 200) {
-      const { model, analysis, raw } = result.data
-      check('yanıtta model adı var', isNonEmptyString(model), model)
-      check('yanıtta ham metin var', isNonEmptyString(raw))
-      check('analysis bir nesne', analysis && typeof analysis === 'object' && !Array.isArray(analysis))
+    if (result) {
+      check('yanıtta model adı var', isNonEmptyString(result.model), result.model)
+      check('yanıtta şema anahtarı var', isNonEmptyString(result.sema), result.sema)
+      check('veri bir nesne', result.veri && typeof result.veri === 'object')
 
-      // İstenen üç alan: kategori, renk, stil
-      check('kategori alanı dolu', isNonEmptyString(analysis?.kategori), String(analysis?.kategori))
-      check('renk alanı dolu', isNonEmptyString(analysis?.renk), String(analysis?.renk))
-      check('stil alanı dolu', isNonEmptyString(analysis?.stil), String(analysis?.stil))
+      // Giyim şemasının temel alanları: kategori, renk, stil
+      check('alt_kategori alanı dolu', isNonEmptyString(result.veri?.alt_kategori), String(result.veri?.alt_kategori))
+      check('renk alanı dolu', isNonEmptyString(result.veri?.renk), String(result.veri?.renk))
+      check('stil alanı dolu', isNonEmptyString(result.veri?.stil), String(result.veri?.stil))
 
-      // "Mantıklı cevap": alanlar kısa etiketler olmalı, paragraf değil;
-      // ayrıca modelin hata metni döndürmediğini doğrular.
-      const sane = (v) => isNonEmptyString(v) && v.trim().length <= 60
+      // "Mantıklı cevap": alanlar kısa etiketler olmalı, paragraf değil.
+      const sane = (v) => isNonEmptyString(v) && v.trim().length <= 120
       check(
         'değerler makul uzunlukta etiketler',
-        sane(analysis?.kategori) && sane(analysis?.renk) && sane(analysis?.stil),
-        `kategori=${analysis?.kategori} | renk=${analysis?.renk} | stil=${analysis?.stil}`,
+        sane(result.veri?.alt_kategori) && sane(result.veri?.renk) && sane(result.veri?.stil),
+        `alt_kategori=${result.veri?.alt_kategori} | renk=${result.veri?.renk} | stil=${result.veri?.stil}`,
       )
-
-      // Ham yanıt gerçekten JSON olmalı (markdown çiti kalmamalı)
-      check('ham yanıt markdown çiti içermiyor', !String(raw).trim().startsWith('```'))
 
       check('yanıt süresi makul (<30sn)', elapsed < 30000, `${(elapsed / 1000).toFixed(1)} sn`)
 
-      console.log(`\n   → Gemini yanıtı: ${JSON.stringify(analysis)}`)
+      console.log(`\n   → Gemini yanıtı: ${JSON.stringify(result.veri)}`)
     }
+
+    // Analiz görselleri BELLEKTE işlenir; uploads/ altına yeni dosya yazılmaz.
+    const uploadCountAfter = fs.existsSync(UPLOAD_DIR)
+      ? fs.readdirSync(UPLOAD_DIR).filter((n) => MIME_BY_EXT[path.extname(n).toLowerCase()]).length
+      : 0
+    console.log(`   uploads/ içindeki görsel sayısı: ${uploadCountAfter} (analiz dosya YAZMAZ)`)
   }
-
-  // --- Temizlik ---
-  console.log('\n4) Temizlik')
-  const deleted = await call('DELETE', `/users/${user.id}`, { token })
-  check('test hesabı silindi', deleted.status === 204, `${deleted.status}`)
-
-  // Analiz görselleri BELLEKTE işlenir; uploads/ altına yazılmamalı.
-  const uploadCountAfter = fs.existsSync(UPLOAD_DIR)
-    ? fs.readdirSync(UPLOAD_DIR).filter((n) => MIME_BY_EXT[path.extname(n).toLowerCase()]).length
-    : 0
-  console.log(`   uploads/ içindeki görsel sayısı: ${uploadCountAfter} (analiz dosya YAZMAZ)`)
 
   console.log('\n' + '='.repeat(46))
   console.log(`BAŞARILI: ${passed}   BAŞARISIZ: ${failed}`)
@@ -258,11 +186,6 @@ async function main() {
 }
 
 main().catch((error) => {
-  if (error.cause?.code === 'ECONNREFUSED') {
-    console.error(`\nHATA: ${BASE_URL} adresine bağlanılamadı.`)
-    console.error('Sunucu çalışmıyor olabilir — backend/ klasöründe "npm run dev" ile başlatın.')
-  } else {
-    console.error('\nHATA:', error.message)
-  }
+  console.error('\nHATA:', error.message)
   process.exitCode = 1
 })

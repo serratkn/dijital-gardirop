@@ -135,17 +135,6 @@ export function resolveImageUrl(imageUrl) {
   return `${API_ORIGIN}${imageUrl.startsWith('/') ? '' : '/'}${imageUrl}`
 }
 
-// GEÇİCİ TANI LOGU — Android'de gerçekte hangi <img src> denendiğini ve
-// yüklenip yüklenmediğini görmek için. Logcat'ten okuma:
-//   adb logcat | grep DG_IMG
-// Fotoğraf yükleme sorunu doğrulandıktan sonra bu fonksiyon ve çağrıları
-// (ClothingCard.jsx, ClothingDetail.jsx) kaldırılabilir.
-export function logImageOutcome(context, src, outcome) {
-  const pageOrigin = typeof window !== 'undefined' ? window.location.origin : '-'
-  console.log(
-    `DG_IMG ${outcome} | ${context} | src=${src} | sayfa=${pageOrigin}`,
-  )
-}
 
 // Dosya yükleyen tüm çağrıların ortak yolu.
 //

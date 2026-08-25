@@ -2,6 +2,7 @@ require('dotenv').config()
 
 const express = require('express')
 const cors = require('cors')
+const helmet = require('helmet')
 
 const pool = require('./src/config/database')
 const { UPLOAD_DIR } = require('./src/config/upload')
@@ -19,12 +20,56 @@ const stylePreferenceRoutes = require('./src/routes/stylePreferenceRoutes')
 const clothingItemRoutes = require('./src/routes/clothingItemRoutes')
 const outfitRoutes = require('./src/routes/outfitRoutes')
 const weatherRoutes = require('./src/routes/weatherRoutes')
-const geminiRoutes = require('./src/routes/geminiRoutes')
 
 const app = express()
 const PORT = process.env.PORT || 3001
 
-app.use(cors())
+// helmet'in VARSAYILANI Cross-Origin-Resource-Policy'yi 'same-origin' yapar;
+// bu, kıyafet fotoğraflarının FARKLI bir origin'den (web :5173, Android
+// 10.0.2.2) <img> ile yüklenmesini KIRAR. Fotoğraflar zaten bilinçli olarak
+// cross-origin ve token'sız servis ediliyor (tahmin edilemez UUID adı) — bu
+// yeni bir zayıflatma değil, MEVCUT tasarımın doğal sonucu. Geri kalan tüm
+// helmet varsayılanları (CSP, X-Frame-Options, HSTS vb.) olduğu gibi kalır.
+app.use(helmet({ crossOriginResourcePolicy: { policy: 'cross-origin' } }))
+
+// CORS artık SINIRLI: eskiden cors() hiçbir origin kısıtlaması yapmıyordu
+// (herhangi bir web sitesi tarayıcıdan bu API'ye istek atabilirdi). İzin
+// verilen origin'ler .env'deki CORS_ALLOWED_ORIGINS'ten (virgülle ayrılmış)
+// okunur ve geliştirme + Capacitor varsayılanlarına EKLENİR — üzerine
+// YAZILMAZ, aksi hâlde .env'i eksik dolduran biri kendi web ya da Android
+// bağlantısını koparırdı.
+const DEFAULT_ALLOWED_ORIGINS = [
+  'http://localhost:5173', // web geliştirme (Vite dev sunucusu)
+  'http://localhost', // Capacitor Android (capacitor.config.json > androidScheme: 'http')
+  'capacitor://localhost', // Capacitor iOS varsayılan şeması
+]
+
+function resolveAllowedOrigins() {
+  const fromEnv = (process.env.CORS_ALLOWED_ORIGINS || '')
+    .split(',')
+    .map((origin) => origin.trim())
+    .filter(Boolean)
+
+  return Array.from(new Set([...DEFAULT_ALLOWED_ORIGINS, ...fromEnv]))
+}
+
+const allowedOrigins = resolveAllowedOrigins()
+
+app.use(
+  cors({
+    origin(origin, callback) {
+      // Origin header'ı OLMAYAN istekler (curl, sunucu-sunucu çağrıları,
+      // Postman) reddedilmez: CORS zaten yalnızca TARAYICI kaynaklı isteklere
+      // uygulanan bir tarayıcı davranışıdır, bu istemciler onun kapsamı dışında.
+      if (!origin || allowedOrigins.includes(origin)) {
+        callback(null, true)
+        return
+      }
+      callback(new Error('CORS: bu origin için izin verilmiyor'))
+    },
+  }),
+)
+
 app.use(express.json())
 
 // Auth altyapısı uygulamada tek örnektir: token'ı imzalayan ve doğrulayan
@@ -69,9 +114,20 @@ app.use('/api', authenticate, outfitRoutes)
 // Hava durumu da korumalı: aksi hâlde API anahtarımız herkese açık bir
 // hava durumu vekiline dönüşürdü.
 app.use('/api', authenticate, weatherRoutes)
-// GEÇİCİ (Gemini Aşama 1): yalnızca bağlantıyı doğrulayan test ucu.
-// Korumalı — aksi hâlde API anahtarımız herkese açık bir Gemini vekiline dönüşürdü.
-app.use('/api', authenticate, geminiRoutes)
+
+// CORS reddi Express'in varsayılan hata işleyicisine düşerse çıplak bir 500
+// (HTML gövdeli) dönerdi — bu hem yanıltıcı (500 "bizim kodumuz patladı"
+// demektir, oysa bu beklenen bir ret) hem de istemci için JSON olmayan bir
+// gövde. Cors middleware'inin fırlattığı hatayı burada yakalayıp anlamlı bir
+// 403 + JSON'a çeviriyoruz. Dört parametreli imza ZORUNLU — Express bunu
+// yalnızca bu şekilde bir hata işleyici olarak tanır.
+app.use((error, req, res, next) => {
+  if (error?.message?.startsWith('CORS:')) {
+    res.status(403).json({ error: 'Bu origin için erişim izni yok' })
+    return
+  }
+  next(error)
+})
 
 app.listen(PORT, () => {
   console.log(`Sunucu ${PORT} portunda çalışıyor`)

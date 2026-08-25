@@ -67,17 +67,6 @@ const uploadSelfieImage = multer({
   limits: { fileSize: MAX_FILE_SIZE, files: 1 },
 })
 
-// BELLEKTE tutan varyant: dosyayı diske YAZMAZ, `req.file.buffer` verir.
-// Gemini analizi gibi "oku, kullan, at" akışları içindir — diskStorage
-// kullanılsaydı analiz edilen her görsel uploads/ altında hiçbir kaydın
-// referans vermediği öksüz bir dosya olarak kalırdı.
-// Aynı fileFilter ve boyut sınırını paylaşır.
-const uploadImageToMemory = multer({
-  storage: multer.memoryStorage(),
-  fileFilter,
-  limits: { fileSize: MAX_FILE_SIZE, files: 1 },
-})
-
 // Diskteki dosyayı sessizce siler. Dosya yoksa hata fırlatmaz —
 // silme işlemleri idempotent olmalı. YALNIZCA UPLOAD_DIR KÖKÜ içindir
 // (kıyafet fotoğrafları); selfie'ler için removeSelfieFile kullanılır.
@@ -141,7 +130,6 @@ module.exports = {
   MAX_FILE_SIZE,
   ALLOWED_MIME_TYPES,
   uploadImage,
-  uploadImageToMemory,
   uploadSelfieImage,
   removeUploadedFile,
   removeSelfieFile,

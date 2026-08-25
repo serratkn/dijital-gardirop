@@ -14,7 +14,6 @@ import {
   fetchClothingItem,
   fetchOutfits,
   fetchSimilarItems,
-  logImageOutcome,
   reanalyzeClothingItem,
   resolveImageUrl,
   toggleClothingItemCleanStatus,
@@ -472,13 +471,7 @@ function ClothingDetail() {
                 <img
                   src={resolveImageUrl(item.imageUrl)}
                   alt={item.name}
-                  onLoad={() =>
-                    logImageOutcome(item.name, resolveImageUrl(item.imageUrl), 'YUKLENDI')
-                  }
-                  onError={() => {
-                    logImageOutcome(item.name, resolveImageUrl(item.imageUrl), 'HATA')
-                    setImageFailed(true)
-                  }}
+                  onError={() => setImageFailed(true)}
                   className="h-full min-h-[24rem] w-full object-cover md:min-h-[32rem]"
                 />
               )}

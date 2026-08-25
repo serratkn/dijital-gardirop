@@ -80,8 +80,28 @@ const TINY_PNG = Buffer.from(
 const email = (tag) => `img-${tag}-${Date.now()}-${Math.random().toString(36).slice(2, 6)}@example.com`
 const fileExists = (fileName) => fs.existsSync(path.join(UPLOAD_DIR, path.basename(fileName)))
 
+// uploads/ MUTLAK olarak sayılmaz — klasör gerçek kullanıcı fotoğraflarıyla
+// paylaşılır, mutlak bir sayı (".gitkeep + N" gibi) gerçek veri varken haksız
+// yere kırılırdı. Bunun yerine script BAŞLANGIÇTAKİ dosya kümesini alır ve
+// her kontrol noktasında yalnızca KENDİ EKLEDİĞİ dosya sayısını (baseline'a
+// göre fark) doğrular — 'selfies' alt klasörü bu sayıma hiç girmez (ayrı bir
+// dizin, kıyafet fotoğraflarıyla ilgisi yok).
+function currentUploadFiles() {
+  return new Set(fs.readdirSync(UPLOAD_DIR).filter((f) => f !== '.gitkeep' && f !== 'selfies'))
+}
+
 async function main() {
   console.log(`Hedef: ${BASE_URL}\n`)
+
+  const baselineFiles = currentUploadFiles()
+  const newFileCount = () => {
+    const current = currentUploadFiles()
+    let count = 0
+    for (const name of current) {
+      if (!baselineFiles.has(name)) count += 1
+    }
+    return count
+  }
 
   // Hesap ve kıyafet hazırla
   const owner = await call('POST', '/auth/register', {
@@ -133,8 +153,11 @@ async function main() {
   check('6 MB reddedildi (400)', big.status === 400, `${big.status}`)
   check('boyut mesajı anlamlı', String(big.data?.error).includes('MB'), big.data?.error)
 
-  const uploadDirBefore = fs.readdirSync(UPLOAD_DIR).length
-  check('reddedilen dosyalar diskte kalmadı', uploadDirBefore === 2, `${uploadDirBefore} dosya (.gitkeep + 1 foto)`)
+  check(
+    'reddedilen dosyalar diskte kalmadı',
+    newFileCount() === 1,
+    `${newFileCount()} yeni dosya (yalnızca 1. adımdaki geçerli foto beklenir)`,
+  )
 
   // ---------------- 3. Değiştirme: eski dosya silinmeli ----------------
   console.log('\n3) Fotoğraf değiştirme')
@@ -163,8 +186,11 @@ async function main() {
   })
   check('403 döndü', forbidden.status === 403, `${forbidden.status}`)
   check('sahibin fotoğrafı değişmedi', (await call('GET', `/clothing-items/${itemId}`, { token: ownerToken })).data?.image_url === secondUrl)
-  const afterForbidden = fs.readdirSync(UPLOAD_DIR).length
-  check('reddedilen yüklemenin dosyası silindi', afterForbidden === 2, `${afterForbidden} dosya`)
+  check(
+    'reddedilen yüklemenin dosyası silindi',
+    newFileCount() === 1,
+    `${newFileCount()} yeni dosya (hâlâ yalnızca ${secondUrl} beklenir)`,
+  )
 
   check(
     'token\'sız yükleme 401',
@@ -198,8 +224,8 @@ async function main() {
   await call('DELETE', `/users/${owner.data.user.id}`, { token: ownerToken })
   await call('DELETE', `/users/${intruder.data.user.id}`, { token: intruderToken })
 
-  const leftover = fs.readdirSync(UPLOAD_DIR).filter((f) => f !== '.gitkeep')
-  check('uploads klasöründe artık dosya yok', leftover.length === 0, leftover.join(', ') || 'boş')
+  const leftover = [...currentUploadFiles()].filter((name) => !baselineFiles.has(name))
+  check('bu scriptin oluşturduğu dosyalardan geriye kalan yok', leftover.length === 0, leftover.join(', ') || 'boş')
 
   console.log(`\n${'='.repeat(46)}`)
   console.log(`BAŞARILI: ${passed}   BAŞARISIZ: ${failed}`)

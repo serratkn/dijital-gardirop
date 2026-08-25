@@ -2,6 +2,7 @@ const { Router } = require('express')
 const multer = require('multer')
 const pool = require('../config/database')
 const { uploadSelfieImage, MAX_FILE_SIZE } = require('../config/upload')
+const { geminiLimiter } = require('../middleware/rateLimiters')
 const UserRepository = require('../repositories/UserRepository')
 const GeminiService = require('../services/GeminiService')
 const SkinToneService = require('../services/SkinToneService')
@@ -42,7 +43,9 @@ function handleUpload(req, res, next) {
 // userRoutes'ta `GET /users/:id` var; sonra mount edilseydi Express
 // "skin-tone-analysis" metnini bir id sanıp o handler'a düşürürdü.
 router.get('/users/skin-tone-analysis', (req, res) => skinToneController.get(req, res))
-router.post('/users/skin-tone-analysis', handleUpload, (req, res) =>
+// geminiLimiter: gerçek para harcayan bir çağrı; in-flight muhafızı yalnızca
+// AYNI ANDA gelen ikinci isteği engeller, ardışık istekleri değil.
+router.post('/users/skin-tone-analysis', geminiLimiter, handleUpload, (req, res) =>
   skinToneController.analyze(req, res),
 )
 router.delete('/users/skin-tone-analysis', (req, res) => skinToneController.remove(req, res))

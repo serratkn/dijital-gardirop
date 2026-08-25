@@ -3,7 +3,6 @@ import { Link } from 'react-router-dom'
 import { WashingMachine } from 'lucide-react'
 import { CATEGORY_ICONS } from '../lib/categoryIcons'
 import {
-  logImageOutcome,
   resolveImageUrl,
   toggleClothingItemCleanStatus,
   toggleClothingItemFavorite,
@@ -93,11 +92,7 @@ function ClothingCard({ item, onFavoriteChange, onCleanChange }) {
             src={photoUrl}
             alt={item.name}
             loading="lazy"
-            onLoad={() => logImageOutcome(item.name, photoUrl, 'YUKLENDI')}
-            onError={() => {
-              logImageOutcome(item.name, photoUrl, 'HATA')
-              setImageFailed(true)
-            }}
+            onError={() => setImageFailed(true)}
             className="h-full w-full object-cover"
           />
         )}

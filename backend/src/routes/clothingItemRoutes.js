@@ -2,6 +2,7 @@ const { Router } = require('express')
 const multer = require('multer')
 const pool = require('../config/database')
 const { uploadImage, MAX_FILE_SIZE } = require('../config/upload')
+const { geminiLimiter } = require('../middleware/rateLimiters')
 const ClothingItemRepository = require('../repositories/ClothingItemRepository')
 const CategoryRepository = require('../repositories/CategoryRepository')
 const ClothingItemService = require('../services/ClothingItemService')
@@ -84,7 +85,9 @@ router.delete('/clothing-items/:id/image', (req, res) =>
 // Yeniden analiz: mevcut ai_analysis'in üzerine yazar. Fotoğraf yüklemenin
 // yan etkisi olan otomatik analizden farklı olarak SENKRONDUR — kullanıcı
 // düğmeye basıp sonucu bekliyor (bkz. ClothingItemController.reanalyze).
-router.post('/clothing-items/:id/analyze', (req, res) =>
+// geminiLimiter: gerçek para harcayan bir çağrı; in-flight muhafızı yalnızca
+// AYNI ANDA gelen ikinci isteği engeller, ardışık istekleri değil.
+router.post('/clothing-items/:id/analyze', geminiLimiter, (req, res) =>
   clothingItemController.reanalyze(req, res),
 )
 // AŞAMA 3 doğrulama ucu — hiçbir ürün akışına bağlı değil (elle inceleme için).

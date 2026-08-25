@@ -8,14 +8,6 @@ const {
   isConfigured,
 } = require('../config/gemini')
 
-// AŞAMA 1 — bağlantıyı kanıtlayan test ucunun kullandığı basit prompt.
-// AŞAMA 2 (otomatik analiz) buildPromptForCategory() ile kategoriye özgü
-// prompt üretir; bu sabit yalnızca /gemini/test-analyze içindir ve o uçla
-// birlikte kaldırılacaktır.
-const ANALYZE_PROMPT =
-  'Bu bir kıyafet fotoğrafı. Kısaca şu bilgileri JSON formatında döndür: ' +
-  '{ kategori, renk, stil }'
-
 // TEN TONU ANALİZİ — kullanıcının selfie'sinden ten tonu ve ona yakışan
 // renkler. Kıyafet analizinden AYRI bir şema: girdi kıyafet değil insan.
 //
@@ -253,14 +245,6 @@ class GeminiService {
       govde,
       '}',
     ].join('\n')
-  }
-
-  // AŞAMA 1 — /gemini/test-analyze ucunun kullandığı serbest analiz.
-  // Ham JSON'ı olduğu gibi döndürür (şemaya oturtmaz).
-  async analyzeClothingImage(file) {
-    const { text, model } = await this.#generate(file, ANALYZE_PROMPT)
-
-    return { model, analysis: this.#parseJson(text), raw: text }
   }
 
   // AŞAMA 2 — otomatik analiz. Kategoriye özgü prompt kullanır ve sonucu

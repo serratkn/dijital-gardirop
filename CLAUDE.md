@@ -60,9 +60,11 @@ Lint: **oxlint** (depodaki tek otomatik kontrol).
 
 ### Backend
 
-Express 4, `pg` (PostgreSQL sürücüsü), `cors`, `dotenv`, `@google/genai`
-(Gemini: görsel analizi + embedding), `chromadb` (vektör veritabanı istemcisi),
-`bcrypt`, `jsonwebtoken`, `multer`. CommonJS (`require`).
+Express 4, `pg` (PostgreSQL sürücüsü), `cors` (sınırlı origin listesiyle),
+`helmet` (güvenlik başlıkları), `express-rate-limit` (auth + Gemini uçları için
+hız sınırlama), `dotenv`, `@google/genai` (Gemini: görsel analizi + embedding),
+`chromadb` (vektör veritabanı istemcisi), `bcrypt`, `jsonwebtoken`, `multer`.
+CommonJS (`require`).
 
 ### Veritabanı
 
@@ -313,7 +315,6 @@ olduğu için iskelet oraya taşındı, kombin üretimi istemci tarafında anlı
 | **Android paylaşım akışı gerçek cihaz/emülatörde henüz DENENMEDİ** | Kod tarafı tamamlandı: `downloadBlob` artık `Capacitor.isNativePlatform()` ile dallanıyor, Android'de Filesystem + Share ile native paylaşım menüsünü açıyor (bkz. §8). Bu makinede yerel `./gradlew` çağrısı, ortamdaki JDK sürümleriyle (26 ve Android Studio JBR 25) Gradle 8.14.3 uyumsuzluğu yüzünden çalışmıyor (`Unsupported class file major version`) — bu, koddan bağımsız bir ortam sorunu. Doğrulama şu ana kadar yalnızca **kaynak kod seviyesinde** yapıldı (Capacitor'ın `SharePlugin`/`FilesystemPlugin` Android kaynağı okunarak `Directory.Cache` + mevcut `FileProvider` yapılandırmasının doğru çalışacağı doğrulandı) ve **web regresyonuyla** (`<a download>` yolunun bozulmadığı kanıtlandı). Gerçek bir Android Studio/emülatör çalıştırması hâlâ gerekiyor. |
 | **Gemini ücretsiz kotası günde 20 istek** | Ölçüldü (`GenerateRequestsPerDayPerProjectPerModel-FreeTier`, limit 20, `gemini-3.6-flash`). Kota dolduğunda analiz sessizce atlanır ve parça analizsiz kalır; **kendiliğinden yeniden deneyen bir mekanizma yoktur** — `analyze-existing-items.js --uygula` ertesi gün elle çalıştırılır. Gerçek kullanım ücretli plan ister. |
 | **Fotoğraf değişince analiz KENDİLİĞİNDEN güncellenmez** | Maliyet koruması "dolu `ai_analysis` varsa tekrar analiz etme" der. Artık **elle tetiklenebiliyor**: Kıyafet Detay'daki "Yeniden Analiz Et" düğmesi (`POST /clothing-items/:id/analyze`) ve fotoğraf değiştirildiğinde çıkan hatırlatma. Otomatik yapılmıyor çünkü her çağrı gerçek para harcıyor. |
-| **`/gemini/test-analyze` hâlâ duruyor** | Aşama 1'den kalan teşhis ucudur; ürün akışı artık otomatik analizdir. Kaldırılmadı çünkü `test-gemini.js` bağlantı/anahtar yollarını bunun üzerinden doğruluyor. |
 | **Öneri kalitesi indekslenmiş parça sayısına bağlı** | Vektör eşleştirmesi yalnızca `ai_analysis` (dolayısıyla fotoğrafı) olan parçalar için çalışır. Analizsiz bir gardıropta Kombin Öner sessizce eskisi gibi rastgele seçim yapar ve rozet hiç görünmez — hatalı değil ama "akıllı" da değildir. Toplu doldurma `analyze-existing-items.js` + `create-embeddings.js` ile elle yapılır. |
 | **Durum (occasion) vektör aramasına GİRMİYOR** | "Üniversite" ile "Özel Davet" aynı adayları getirir; durum yalnızca kaydedilen kombinin etiketidir. Başlangıç parçası rastgele seçildiği için sonuç yine de her seferinde değişir. Durumu prompt'a/sorguya katmak ayrı bir aşamanın işi. |
 | **Chroma ile Postgres arasında işlem bütünlüğü yok** | İki ayrı depo, dağıtık işlem yok. Kıyafet silinince vektörü de silinir ama bu çağrı başarısız olursa öksüz vektör kalır. `/similar` bunu okurken filtreler (silinmiş parça yanıta düşmez) ve `cleanup.js` öksüzleri toplu siler. |
@@ -460,6 +461,16 @@ Parola en az 8 karakter, en fazla 72 bayt (bcrypt sınırı) olmalıdır; `bcryp
 10 tur hash'lenir. Giriş hatalarında "kullanıcı yok" ile "şifre yanlış" **aynı** mesajı
 döner (`E-posta veya şifre hatalı`) — hangi e-postaların kayıtlı olduğu sızmasın diye.
 
+**`/auth/register` ve `/auth/login` hız sınırlıdır** (`middleware/rateLimiters.js` >
+`authLimiter`): aynı IP'den **15 dakikada en fazla 5 deneme**, aşılırsa `429` +
+`{ "error": "Çok fazla deneme yapıldı..." }`. Brute-force ve otomatik kayıt
+denemelerine karşı; `Retry-After` yerine standart `RateLimit-*` başlıkları döner
+(`standardHeaders: true`). **LOOPBACK (127.0.0.1/::1) muaftır** — bir saldırgan
+bağlantısının kaynağını uzaktan bu adres gibi gösteremeyeceği için bu güvenliği
+zayıflatmaz, yalnızca aynı makineden art arda hesap oluşturan test scriptlerinin
+(`test-all-endpoints.js` tek başına 6 kayıt atıyor) birbirinin kotasını
+tüketmesini önler.
+
 ### Hata biçimi
 
 Tüm hatalar `{ "error": "Türkçe mesaj" }` döner.
@@ -470,6 +481,7 @@ Tüm hatalar `{ "error": "Türkçe mesaj" }` döner.
 | `401` | `UnauthorizedError` — token yok/geçersiz/süresi dolmuş, ya da şifre hatalı |
 | `404` | `NotFoundError` — kayıt yok **veya** başkasına ait |
 | `409` | `ConflictError` — benzersizlik ihlali (`23505`), örn. tekrarlı e-posta |
+| `429` | Hız sınırı aşıldı — `/auth/*` (15 dk'da 5) veya Gemini uçları (saatte 10) |
 | `500` | Beklenmeyen hata → `{ "error": "Sunucu hatası" }` |
 
 ### Health
@@ -517,8 +529,6 @@ durumu vekiline dönüşürdü. `WEATHER_API_KEY` tanımlı değilse dış servi
 gidilmez**; sunucu `JWT_SECRET`'ten farklı olarak **patlamaz** — hava durumu opsiyonel
 bir özelliktir, uygulamanın geri kalanı anahtarsız da tam çalışır.
 
-### Gemini
-
 ### Yeniden analiz
 
 | Metod | Yol | Açıklama |
@@ -544,6 +554,10 @@ bırakırdı (kolon zaten dolu, null kontrolü işe yaramaz).
 - Servisin `sebep` kodları Türkçe mesajlara çevrilir; **ham kod dışarı sızmaz**:
   `409` zaten analiz ediliyor · `400` fotoğraf yok / okunamıyor ·
   `404` kayıt yok · `503` anahtar yok, kota dolu, Gemini erişilemiyor.
+- **Hız sınırlıdır** (`geminiLimiter`): kullanıcı başına **saatte 10 istek**.
+  In-flight muhafızı yalnızca AYNI ANDA gelen ikinci isteği engeller; bu limiter
+  ardışık/sıralı istekleri de sınırlayıp günlük Gemini kotasının tek bir
+  kullanıcı tarafından hızla tüketilmesini önler. Aşılırsa `429`.
 
 **Otomatik analizin AYRI BİR UCU YOKTUR.** Aşama 2'de analiz, mevcut fotoğraf
 yükleme ucunun (`POST /clothing-items/:id/image`) **yan etkisi** olarak arka
@@ -551,35 +565,6 @@ planda çalışır: yanıt önce gönderilir, analiz sonra yapılır ve tamamlan
 `ai_analysis` kolonuna yazılır. İstemci sonucu `GET /clothing-items/:id`
 yoklayarak öğrenir. Ayrı bir uç, kullanıcıyı bekletmeden aynı işi yapan ikinci
 bir çağrı demekti; tetikleyici zaten fotoğrafın kendisidir.
-
-| Metod | Yol | Açıklama |
-|---|---|---|
-| `POST` | `/gemini/test-analyze` | **multipart/form-data**, alan adı `image`. Görseli Gemini'ye analiz ettirir |
-
-**Bu uç bir TEŞHİS aracıdır, ürün akışı değildir.** Aşama 1'den kalmıştır ve
-`test-gemini.js` anahtar/bağlantı yollarını bunun üzerinden doğrular.
-Korumalıdır (token ister) — aksi hâlde API anahtarımız herkese açık bir Gemini
-vekiline dönüşürdü.
-
-Dosya kısıtları fotoğraf yüklemeyle aynıdır (jpg/png/webp, en fazla 5 MB) ama
-görsel **diske YAZILMAZ**: `uploadImageToMemory` kullanılır ve tampon doğrudan
-base64'e çevrilip gönderilir. `uploadImage` (diskStorage) kullanılsaydı analiz
-edilen her görsel `uploads/` altında hiçbir kaydın referans vermediği öksüz bir
-dosya olarak kalırdı.
-
-```json
-{"model":"gemini-3.6-flash",
- "analysis":{"kategori":"Crop Top","renk":"Pembe","stil":"Günlük"},
- "raw":"{
-  \"kategori\": \"Crop Top\", …"}
-```
-
-`raw` teşhis içindir: modelin ne döndürdüğünü görmeden hata ayıklamak zordur.
-
-**Hatalar 500 değil `503` döner** (`ServiceUnavailableError`) ve mesaj açıklayıcıdır:
-anahtar yok, anahtar geçersiz, kota doldu, model bulunamadı, zaman aşımı, JSON
-çözümlenemedi. Ham SDK hatası asla dışarı sızmaz — yığın izi ve anahtar parçası
-içerebilir.
 
 ### Kombin adayları (vektör veritabanı — Aşama 4)
 
@@ -733,6 +718,8 @@ gönderilmeyen `city` (`name`, `age` gibi) `NULL` olur. Bu, `clothing-items`'tak
   olsaydı yazma patladığında kullanıcı ikisini birden kaybederdi.
 - **Çift tıklama ikinci Gemini çağrısı yapmaz:** kullanıcı başına in-flight
   muhafızı var, ikinci istek `409` döner (ve o isteğin dosyası geri alınır).
+- **Hız sınırlıdır** (`geminiLimiter`, `/clothing-items/:id/analyze` ile aynı):
+  kullanıcı başına saatte 10 istek, aşılırsa `429`.
 - Dosya kısıtları fotoğraf yüklemeyle aynı (jpg/png/webp, en fazla 5 MB) ve
   dosya adı rastgele UUID'dir. **Fiziksel olarak `backend/uploads/selfies/`
   altına yazılır** (kıyafet fotoğraflarının aksine `uploads/` kökünde DEĞİL).
@@ -1065,6 +1052,13 @@ node test-scripts/test-stats.js
 node test-scripts/test-clothing-items.js
 node test-scripts/test-clothing-items.js --cleanup   # oluşturduğu kaydı sonda siler
 
+# Fotoğraf yükleme uçları (29 kontrol): tip/boyut doğrulaması, sahiplik (403),
+# eski dosyanın silinmesi, kıyafet silinince fotoğrafın da silinmesi.
+# uploads/ MUTLAK olarak SAYILMAZ (gerçek kullanıcı fotoğraflarıyla paylaşılan
+# bir klasörde bu haksız yere kırılırdı) — script kendi BAŞLANGIÇ anlık
+# görüntüsüne göre yalnızca KENDİ oluşturduğu dosyaları sayar.
+node test-scripts/test-image-upload.js
+
 # Otomatik kıyafet analizi + yeniden analiz — Gemini Aşama 2 (104 kontrol:
 # 48 birim + 19 uçtan uca + 37 gerçek).
 # --birim: yalnızca birim bölümü (sunucu, anahtar ve kota GEREKTİRMEZ, saniyeler sürer)
@@ -1116,8 +1110,11 @@ node test-scripts/test-skin-tone.js --kotasiz
 node test-scripts/migrate-selfie-photos.js                # yalnızca listeler
 node test-scripts/migrate-selfie-photos.js --uygula
 
-# Gemini Aşama 1 (20 kontrol). Birinci bölüm GEÇERLİ ANAHTAR OLMADAN da çalışır
-# (eksik/geçersiz anahtar yolları); analiz bölümü anahtar ve görsel ister.
+# GeminiService — anahtar/bağlantı yolları (15 kontrol). SUNUCUYA HTTP İSTEĞİ
+# ATMAZ (2026-08-24'te kaldırılan /gemini/test-analyze ucuna artık bağlı
+# değildir) — GeminiService'i DOĞRUDAN çağırır. Birinci bölüm GEÇERLİ ANAHTAR
+# OLMADAN da çalışır (eksik/geçersiz anahtar yolları); ikinci bölüm anahtar
+# ve uploads/ içinde bir görsel ister.
 node test-scripts/test-gemini.js
 node test-scripts/test-gemini.js --image ../yol/kiyafet.jpg
 
@@ -1239,8 +1236,11 @@ anahtarla büyür. **Sayımlar her zaman `::int` ile daraltılmalıdır** (`pg` 
 döndürür) ve "en çok" sorguları eşitlik için ikincil sıralama taşımalıdır.
 
 **Gemini katmanı.** `config/gemini.js` istemciyi kurar (database.js ile
-aynı rol), `GeminiService` görseli gönderip JSON yanıtı çözer, `GeminiController`
-ince adaptördür. Repository yoktur: kalıcı veri yok, yalnızca dış çağrı.
+aynı rol), `GeminiService` görseli gönderip JSON yanıtı çözer. Repository
+yoktur: kalıcı veri yok, yalnızca dış çağrı. **Kendi controller/route'u
+yoktur** — yalnızca `ClothingAnalysisService` ve `SkinToneService` üzerinden,
+onların çağırdığı bir alt bileşen olarak kullanılır (bkz. aşağıdaki "AŞAMA 1
+ucu KALDIRILDI" notu).
 
 **Otomatik analiz orkestrasyonu `ClothingAnalysisService`'tedir** (Aşama 2) ve
 `GeminiService`'ten AYRI tutulmuştur: `GeminiService` "görseli modele gönder,
@@ -1449,6 +1449,44 @@ tutarsızlık bir hata değil, beklenen bir durumdur ve üç yerde karşılanır
 (`createAuthRoutes(authService, authenticate)`). Yeni korumalı bir kaynak eklerken
 `app.use('/api', authenticate, yeniRoutes)` deyip controller'da `req.userId` kullanın.
 
+**Güvenlik middleware'leri (`server.js`, en üstte, tüm route'lardan önce).**
+
+- **`helmet()`** — varsayılan güvenlik başlıkları (CSP, X-Frame-Options, HSTS
+  vb.), TEK istisnayla: `crossOriginResourcePolicy: { policy: 'cross-origin' }`.
+  Varsayılan `same-origin` CORP, kıyafet fotoğraflarının FARKLI bir origin'den
+  (web `:5173`, Android `10.0.2.2`) `<img>` ile yüklenmesini kırardı — bu, bu
+  fotoğrafların zaten token'sız ve cross-origin servis edilmesi tasarımının
+  (bkz. §4 Eksikler) doğal bir sonucu, yeni bir zayıflatma değil. Gerçek
+  tarayıcıda doğrulandı: cross-origin `<img>` hâlâ decode ediliyor
+  (`naturalWidth > 0`).
+- **`cors({ origin: … })`** — ARTIK SINIRLI. Eskiden `cors()` (parametresiz)
+  HERHANGİ BİR origin'e izin veriyordu. İzin verilen liste, kod içindeki
+  sabit varsayılanlar (`http://localhost:5173` web geliştirme,
+  `http://localhost` Capacitor Android — `androidScheme: 'http'` —,
+  `capacitor://localhost` Capacitor iOS) ile `.env`'deki
+  `CORS_ALLOWED_ORIGINS`'in (virgülle ayrılmış) **birleşimidir**; `.env` değeri
+  varsayılanların ÜZERİNE YAZMAZ, yalnızca EKLER — aksi hâlde `.env`'i eksik
+  dolduran biri kendi web ya da Android bağlantısını koparırdı. Origin
+  header'ı OLMAYAN istekler (curl, sunucu-sunucu) reddedilmez: CORS zaten
+  yalnızca tarayıcı davranışıdır. Reddedilen origin'ler `cors`'un fırlattığı
+  hatayı yakalayan özel bir hata middleware'i (server.js'in sonunda) ile
+  temiz bir `403 + JSON`'a çevrilir — aksi hâlde çıplak, yanıltıcı bir `500`
+  dönerdi.
+- **`authLimiter` / `geminiLimiter`** (`middleware/rateLimiters.js`) —
+  `express-rate-limit` ile. `authLimiter` (`/auth/register`, `/auth/login`;
+  15 dk'da 5, IP bazlı) **LOOPBACK'İ (127.0.0.1/::1) MUAF TUTAR**: bir
+  saldırgan bağlantısının kaynağını uzaktan bu adres gibi gösteremez, bu
+  yüzden muafiyet güvenliği zayıflatmaz — yalnızca aynı makineden art arda
+  hesap oluşturan test scriptlerinin (`test-all-endpoints.js` tek başına 6
+  kayıt atıyor) birbirinin kotasını tüketmesini önler. `geminiLimiter`
+  (`/clothing-items/:id/analyze`, `POST /users/skin-tone-analysis`; saatte 10,
+  **`req.userId` bazlı**) bu muafiyeti BİLEREK PAYLAŞMAZ — amacı uzak bir
+  saldırgandan korunmak değil, gerçek parayla sınırlı günlük Gemini kotasını
+  korumaktır ve bu tehdit sunucunun kendisinden gelen bir istek için de
+  aynen geçerlidir; kullanıcı bazlı anahtarlama zaten test scriptlerinin
+  (her biri kendi taze kullanıcısını oluşturur) bu limite takılmasını
+  önlüyor, ayrı bir muafiyete gerek kalmadı.
+
 `utils/errors.js` içindeki **`ServiceUnavailableError` (503)** dış servis hataları
 içindir: 500 "bizim kodumuz patladı" der ve kullanıcıya hiçbir şey anlatmaz,
 503 ise "bağımlı olduğumuz servis şu an kullanılamıyor" der. `/health` de
@@ -1481,10 +1519,12 @@ Backend ayrı `DB_HOST` / `DB_PORT` / `DB_NAME` / `DB_USER` / `DB_PASSWORD` değ
 gövdedeki `{ error }` mesajını okuyup fırlatır, böylece backend'in Türkçe hataları
 kullanıcıya gösterilebilir. `204` için `null` döner.
 
-**Kullanıcı kimliği:** `getCurrentUserId()` localStorage'daki `dg_user_id` değerini okur
-(onboarding'de `POST /api/users` ile oluşturulan gerçek kullanıcı), yoksa sabit bir yedek
-id'ye düşer. **Sabit değil fonksiyondur** — onboarding sonrası id değişir, bu yüzden her
-çağrıda güncel değer okunmalıdır. Auth geldiğinde ikisi de kaldırılacak.
+**Kullanıcı kimliği:** `getCurrentUserId()` (`lib/api.js`) **saf JWT tabanlıdır**
+— `getUserIdFromToken()` (`lib/auth.js`) ile token payload'ının `sub` alanını
+okur. localStorage'da ayrıca tutulan bir `dg_user_id` YOKTUR ve bir yedek
+değere düşme mekanizması da yoktur; token yoksa/geçersizse boş dize döner ve
+istek zaten `authenticate` middleware'inde `401` ile reddedilir. **Sabit değil
+fonksiyondur** — çağrıda her seferinde güncel token okunur.
 
 **Gardırop favori filtresi.** Kategori pilleriyle AYNI görsel dilde ama ayrı bir
 bileşen: kategoriler karşılıklı dışlayan bir küme, favori ise tek başına açık/kapalı
@@ -1819,7 +1859,8 @@ bir hedef üzerinden), "WhatsApp'ta Paylaş" gibi seçenekler sunar.
   `web-*.js` adlı küçük ek chunk'lar bunun kanıtıdır.
 
 **Kalıcı durum:** `src/lib/onboarding.js` `dg_` önekli localStorage anahtarlarının
-tek sahibidir (onboarding bayrağı, `dg_user_id`, kullanıcı profili, anket cevapları).
+tek sahibidir (onboarding bayrağı, kullanıcı profili önbelleği, anket cevapları —
+`dg_user_id` YOKTUR, kullanıcı kimliği tamamen `dg_token`'daki JWT'den okunur).
 **İki istisna:** `dg_token` `lib/auth.js`'e, `dg_theme` `lib/theme.js`'e aittir.
 Tema bir OTURUM verisi değil CİHAZ tercihidir — bu yüzden çıkışta `clearOnboardingState()`
 ile silinmez, kullanıcı çıkış yapınca teması korunur.
@@ -1924,15 +1965,18 @@ Kategori → lucide ikon eşlemesi `src/lib/categoryIcons.js` içinde merkezidir
 
 ### Geliştirici kaçış kapıları
 
-`api.js` içindeki `logImageOutcome()` **geçicidir**: Android'de hangi `<img src>`
-denendiğini ve yüklenip yüklenmediğini Logcat'ten görmek için eklendi
-(`adb logcat | grep DG_IMG`). `ClothingCard` ve `ClothingDetail` içinden çağrılır;
-fotoğraf sorunu teyit edildikten sonra üç yerden de kaldırılabilir.
+Şu an aktif bir geliştirici kaçış kapısı **yoktur** — üçü de görevlerini
+tamamlayıp kaldırıldı:
 
-`pages/Wardrobe.jsx` içinde boş durumları önizlemek için `DEV_FORCE_EMPTY` ve
-`DEV_FORCE_EMPTY_CATEGORY` sabitleri bulunuyordu; API'ye geçişte kaldırıldılar
-(boş durum artık gerçek veriyle veya ağ mock'uyla test edilir).
-`Navbar`'daki `RotateCcw` butonu onboarding'i yeniden tetikler — **geçicidir**.
+- `pages/Wardrobe.jsx` içindeki `DEV_FORCE_EMPTY` / `DEV_FORCE_EMPTY_CATEGORY`
+  sabitleri (boş durumları önizlemek içindi) API'ye geçişte kaldırıldı — boş
+  durum artık gerçek veriyle test edilir.
+- `Navbar`'daki `RotateCcw` butonu (onboarding'i yeniden tetiklemek içindi)
+  auth eklenirken kaldırıldı.
+- `api.js` içindeki `logImageOutcome()` (Android'de hangi `<img src>`
+  denendiğini Logcat'ten görmek içindi, `ClothingCard`/`ClothingDetail`'den
+  çağrılıyordu) fotoğraf sorunu uzun süre önce teyit edildikten sonra
+  kaldırıldı (2026-08-24).
 
 ---
 
@@ -1941,6 +1985,164 @@ fotoğraf sorunu teyit edildikten sonra üç yerden de kaldırılabilir.
 > Bundan sonraki her çalışma buraya tarihiyle işlenir: eklenen özellikler, düzeltilen
 > hatalar, alınan mimari kararlar. En yeni kayıt en üstte.
 
+### 2026-08-25 — Güvenlik Sertleştirmesi ve Kod Temizliği
+- **Bağlam:** Önceki bir tarama (bkz. bir önceki oturumun raporu) CLAUDE.md'nin
+  Eksikler tablosunda hâlâ duran maddeleri, kod içi ölü kod/eskimiş yorumları,
+  bir bilinen test kırılganlığını ve **üç yeni güvenlik boşluğunu** (kod tabanında
+  Eksikler'e hiç işlenmemiş) tek tek listelemişti. Bu çalışma o listedeki
+  **küçük/kolay** maddelerin TAMAMINI ve **üç güvenlik boşluğunun HEPSİNİ**
+  kapatıyor. Büyük/orta ölçekli maddeler (şifre sıfırlama, e-posta doğrulama,
+  refresh token vb.) BİLEREK kapsam dışı bırakıldı.
+
+## GÜVENLİK (öncelikli)
+
+**1) CORS artık SINIRLI.** `server.js`'teki `cors()` (parametresiz, HERHANGİ
+BİR origin'e izin veren hâli) `cors({ origin: … })`'a çevrildi. İzin verilen
+liste kod içindeki sabit varsayılanlarla (`http://localhost:5173` web
+geliştirme, `http://localhost` Capacitor Android, `capacitor://localhost`
+Capacitor iOS) yeni `.env` değişkeni `CORS_ALLOWED_ORIGINS`'in (virgülle
+ayrılmış) **birleşimidir** — `.env` değeri varsayılanların ÜZERİNE YAZMAZ,
+yalnızca EKLER; aksi hâlde `.env`'i eksik dolduran biri kendi web ya da
+Android bağlantısını koparırdı. Origin header'ı OLMAYAN istekler (curl,
+sunucu-sunucu) reddedilmez — CORS zaten yalnızca tarayıcı davranışıdır.
+Reddedilen origin'ler artık ÇIPLAK bir `500` yerine `server.js`'in sonundaki
+özel bir hata middleware'iyle temiz bir `403 + JSON`'a çevriliyor.
+
+**2) `express-rate-limit` kuruldu** (`middleware/rateLimiters.js`, yeni dosya).
+İki ayrı limiter, İKİ FARKLI GEREKÇEYLE:
+- **`authLimiter`** — `/auth/register` ve `/auth/login`. 15 dakikada 5 deneme,
+  IP bazlı. **LOOPBACK (127.0.0.1/::1) MUAFTIR.** Bu bir güvenlik açığı
+  DEĞİLDİR: bir saldırgan bağlantısının kaynak adresini UZAKTAN 127.0.0.1
+  gibi gösteremez — yalnızca sunucunun KENDİSİNDEN atılan istekler bu adresi
+  taşır. Muafiyet olmadan bu depodaki test scriptleri (aynı makineden onlarca
+  hesap oluşturuyor; `test-all-endpoints.js` TEK BAŞINA 6 kayıt atıyor)
+  birbirinin kotasını dakikalar içinde tüketip regresyon paketini kırardı —
+  bu YAKALANDI: ilk regresyon koşusunda `test-all-endpoints.js` tam bu
+  sebeple başarısız oldu, loopback muafiyeti eklenerek düzeltildi.
+- **`geminiLimiter`** — `POST /clothing-items/:id/analyze` ve
+  `POST /users/skin-tone-analysis`. Saatte 10 istek, **`req.userId` bazlı**
+  (IP değil — aynı ağın arkasındaki farklı kullanıcılar birbirinin kotasını
+  paylaşmasın diye). **LOOPBACK MUAFİYETİ BİLEREK YOK:** buradaki amaç uzak
+  bir saldırgandan korunmak değil, gerçek parayla sınırlı günlük Gemini
+  kotasını korumaktır ve bu tehdit sunucunun kendisinden (yerel bir
+  script/otomasyon) gelse de aynen geçerlidir. Kullanıcı bazlı anahtarlama
+  zaten test scriptlerinin (her biri kendi taze kullanıcısını oluşturur) bu
+  limite takılmasını önlüyor, ayrı bir muafiyete gerek kalmadı.
+
+**3) `helmet` kuruldu**, TEK bir ayarla: `crossOriginResourcePolicy: {
+policy: 'cross-origin' }`. **YAKALANAN RİSK:** helmet'in VARSAYILANI CORP'u
+`same-origin` yapar; bu, kıyafet fotoğraflarının FARKLI bir origin'den (web
+`:5173`, Android `10.0.2.2`) `<img>` ile yüklenmesini KIRARDI — gerçek
+tarayıcıda test edilip doğrulandı (bkz. aşağı). Fotoğraflar zaten bilinçli
+olarak cross-origin ve token'sız servis ediliyor (tahmin edilemez UUID adı,
+CLAUDE.md'de belgeli bir ödünleşme) — bu yüzden CORP'u gevşetmek yeni bir
+zayıflatma değil, MEVCUT tasarımın doğal sonucu. Geri kalan tüm helmet
+varsayılanları (CSP, X-Frame-Options, HSTS vb.) olduğu gibi bırakıldı.
+
+**Doğrulama — gerçek tarayıcıda 6 kontrol (Playwright + sistem Chrome),
+geçici test kullanıcısıyla:** tarayıcıdan (origin `http://localhost:5173`)
+CORS ile kayıt isteğinin başarılı olması (401/403 DEĞİL); Gardırop sayfasının
+açılması; kıyafet + fotoğraf oluşturmanın (multipart CORS isteği) çalışması;
+**kıyafet fotoğrafının CROSS-ORIGIN olarak gerçekten decode edilmesi**
+(`naturalWidth > 0` — CORP `cross-origin` ayarının doğru çalıştığının kanıtı);
+konsol hatası yok; başarısız ağ isteği yok. Ayrıca curl ile: izinli origin'de
+`Access-Control-Allow-Origin` başlığının doğru döndüğü, izinsiz origin'de
+temiz `403 + JSON`, `RateLimit-*` başlıklarının doğru limit/pencere
+değerlerini taşıdığı (`5;w=900` ve `10;w=3600`) ve 6. login denemesinin
+gerçekten `429` döndüğü doğrulandı.
+
+**AÇIK KALAN İŞ — Android tarafı gerçek cihazda denenmedi** (aynı önceden
+bilinen JDK/Gradle ortam kısıtı, CLAUDE.md'nin "Android emülatöründe test
+etme" bölümünde belgeli). CORS'un varsayılan izinli listesi Android'in
+kullandığı `http://localhost` origin'ini (capacitor.config.json >
+`androidScheme: 'http'`) zaten İÇERİYOR ve bu curl ile doğrulandı
+(`Origin: http://localhost` → izinli); gerçek cihaz/emülatör çalıştırması
+hâlâ gerekiyor.
+
+## TEMİZLİK
+
+**4) `logImageOutcome()` teşhis logu kaldırıldı** (`api.js`,
+`ClothingCard.jsx`, `ClothingDetail.jsx`). Kendi yorumunda "geçicidir, sorun
+teyit edildikten sonra kaldırılabilir" diyordu — teyit çoktan yapılmıştı,
+temizlendi. `ClothingCard`'daki `onError` handler'ının `setImageFailed(true)`
+kısmı (işlevsel) KORUNDU, yalnızca log satırı kaldırıldı; `onLoad` handler'ı
+YALNIZCA log yaptığı için tamamen kaldırıldı.
+
+**5) `POST /gemini/test-analyze` kaldırıldı** — Aşama 1'den kalan, ürün
+akışında hiç kullanılmayan bir teşhis ucuydu. Bununla birlikte:
+- `GeminiController.js` ve `geminiRoutes.js` silindi, `server.js`'teki mount
+  satırı kaldırıldı.
+- `GeminiService.analyzeClothingImage()` ve onun `ANALYZE_PROMPT` sabiti de
+  kaldırıldı — bu metodun TEK çağıranı silinen controller'dı, kalsaydı kendisi
+  de ölü kod olurdu.
+- `config/upload.js`'teki `uploadImageToMemory` (yalnızca bu ucun kullandığı
+  bellek-tabanlı multer varyantı) kaldırıldı — başka hiçbir yerden
+  kullanılmıyordu.
+- **`test-gemini.js` YENİDEN YAZILDI, silinmedi.** CLAUDE.md'nin Eksikler
+  tablosu bu ucun "kaldırılmadığı" gerekçesini `test-gemini.js`'in anahtar/
+  bağlantı yollarını onun üzerinden doğrulamasına bağlıyordu. Script artık
+  SUNUCUYA HİÇ HTTP İSTEĞİ ATMIYOR — `GeminiService.analyzeClothingItem()`'ı
+  (Aşama 2'nin hâlâ kullanılan gerçek metodu) DOĞRUDAN çağırıyor. Bu metod,
+  kaldırılan ucun kullandığı `#generate()` özel yardımcısını AYNI ŞEKİLDE
+  çağırdığı için doğrulanan davranış (anahtar yok → 503, geçersiz anahtar →
+  503, ham SDK hatası sızmıyor) birebir korundu. **Gerçek bir Gemini
+  çağrısıyla doğrulandı: 15/15 kontrol geçti**, gerçek kıyafet fotoğrafı
+  doğru analiz edildi (`gemini-3.6-flash`, 9.5 sn).
+
+**6) CLAUDE.md'deki 2 eskimiş belge bölümü güncellendi:**
+- **"Kullanıcı kimliği" paragrafı** (§8) `getCurrentUserId()`'nin localStorage
+  `dg_user_id`'ye "yoksa sabit bir yedek id'ye düşer" dediğini ve "Auth
+  geldiğinde ikisi de kaldırılacak" yazıyordu — bu, auth ÖNCESİ döneme ait,
+  ARTIK YANLIŞ bir açıklamaydı (kod çoktan `getUserIdFromToken()` üzerinden
+  saf JWT tabanlı çalışıyor, hiçbir yedek id yok). Doğru duruma güncellendi;
+  "Kalıcı durum" paragrafındaki `dg_user_id` referansı da düzeltildi.
+- **"Geliştirici kaçış kapıları" bölümü** `Navbar`'daki `RotateCcw` butonundan
+  hâlâ VARMIŞ gibi bahsediyordu — bu buton auth eklenirken ÇOKTAN kaldırılmıştı.
+  Bölüm, üç kaçış kapısının da (DEV_FORCE_EMPTY, RotateCcw, logImageOutcome)
+  artık KALDIRILMIŞ olduğunu netçe belirtecek şekilde yeniden yazıldı.
+
+**7) `onboarding.js`'deki ölü kod temizlendi.** `getUserId()`, `setUserId()`,
+`resetOnboarding()` fonksiyonları ve `USER_ID_STORAGE_KEY` (`dg_user_id`)
+sabiti kaldırıldı — hepsi tanımlıydı ve export ediliyordu ama UYGULAMANIN
+HİÇBİR YERİNDE (test scriptleri dahil) ÇAĞRILMIYORDU; `getUserId`/`setUserId`
+kendi yorumunda "kimlik doğrulama gelene kadarki geçici çözüm" diyordu — auth
+geleli çok oldu. `dg_user_id` artık `clearOnboardingState()`'in temizlediği
+anahtar listesinden de çıkarıldı (zaten hiçbir yerden yazılmıyordu).
+
+**8) `test-image-upload.js`'in bilinen kırılganlığı düzeltildi VE §7'ye geri
+eklendi.** Script `uploads/` klasöründeki dosya sayısını MUTLAK olarak
+sayıyordu (`uploadDirBefore === 2` → ".gitkeep + 1 foto" varsayımı, sonda
+`leftover.length === 0` → klasörün TAMAMEN boş kalması beklentisi) — gerçek
+kullanıcı fotoğrafları klasörde durduğu sürece (şu an 9-20 arası değişen bir
+sayıda gerçek dosya var) bu haksız yere başarısız olurdu. **Düzeltme:** script
+artık BAŞLANGIÇTAKİ dosya kümesinin bir anlık görüntüsünü (`baselineFiles`)
+alıyor ve her kontrol noktasında yalnızca KENDİ EKLEDİĞİ dosya sayısını
+(baseline'a göre fark, `newFileCount()`) doğruluyor — mutlak sayı yerine
+"kendi oluşturduğunu say" mantığı. `selfies/` alt klasörü bu sayıma hiç
+girmiyor (ayrı bir dizin, kıyafet fotoğraflarıyla ilgisi yok). Script
+CLAUDE.md §7'nin komut listesinden bir süredir düşürülmüştü (dosyanın kendisi
+repoda kalmıştı) — `test-clothing-items.js`'in hemen altına geri eklendi.
+**Doğrulama: gerçek (20 dosyalı, dolu) `uploads/` klasörüne karşı 29/29.**
+
+## REGRESYON
+
+Tüm değişikliklerden sonra ilgili testler ayrı ayrı, en sonda TAM regresyon
+paketi çalıştırıldı — hepsi yeşil:
+`test-all-endpoints` 77/77, `test-auth` 48/48, `test-stats` 60/60,
+`test-item-outfits` 27/27, `test-clean-status` 26/26, `test-file-cleanup`
+12/12, `test-image-upload` 29/29 (düzeltme sonrası), `test-gemini` 15/15
+(yeniden yazım sonrası, gerçek Gemini çağrısıyla), `test-vector --birim`
+46/46, `test-outfit-rag --birim` 36/36, `test-ai-analysis --birim` 48/48,
+`test-skin-tone --kotasiz` 58/58, frontend `test-outfit-builder.mjs` 73/73,
+`npm run lint` + `npm run build` (backend script syntax + frontend) temiz.
+
+**Yeni bağımlılıklar:** `express-rate-limit@8.6.2`, `helmet@8.3.0` (backend).
+`npm audit`: 0 yeni zafiyet (mevcut 3 orta seviye uyarı — `@capacitor/cli`'nin
+transitive `uuid` bağımlılığı üzerinden, frontend'de, bu çalışmadan ÖNCE de
+vardı, build-time/iOS-only bir araç zinciri parçası, ilgisiz).
+
+**Temizlik:** önceki oturumdan kalan 4 test kullanıcısı (`@example.com`) ve
+1 öksüz kıyafet fotoğrafı `cleanup.js` ile temizlendi.
 ### 2026-08-24 — Kombin paylaşım indirmesi: Android'de native paylaşım menüsü
 - **Ne değişti:** `downloadBlob` (`lib/shareCard.js`) artık PLATFORM BAZLI
   dallanıyor (`Capacitor.isNativePlatform()`). **Web'de HİÇBİR ŞEY değişmedi**
