@@ -97,7 +97,8 @@ async function main() {
   console.log('\n3) CATEGORIES (salt okunur)')
   const categories = await call('GET', '/categories')
   check('GET /categories → 200', categories.status === 200)
-  check('6 kategori seed edilmiş', categories.data?.length === 6, `${categories.data?.length} kategori`)
+  // Aşama "katmanlama" ile 6 → 7 (Dış Giyim eklendi, bkz. migration 008).
+  check('7 kategori seed edilmiş', categories.data?.length === 7, `${categories.data?.length} kategori`)
   check(
     'Türkçe karakterler bozulmamış',
     categories.data?.some((row) => row.name === 'Üst') &&

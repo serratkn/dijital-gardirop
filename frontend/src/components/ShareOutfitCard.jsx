@@ -11,7 +11,9 @@ import { CARD_HEIGHT, CARD_WIDTH, SHARE_PALETTE as C } from '../lib/shareCard'
 //   2) Tailwind v4 saydamlık için `color-mix(in oklab, …)` üretir; satır içi
 //      düz renkler serileştirmede en güvenli yoldur.
 
-const CATEGORY_ORDER = ['Üst', 'Elbise', 'Alt', 'Ayakkabı', 'Çanta', 'Makyaj']
+// 'Dış Giyim' Üst'ün hemen ardından gelir: giyim mantığında üst parçanın
+// üstüne giyilen katman budur (bkz. outfitBuilder.js > OUTERWEAR_CATEGORY).
+const CATEGORY_ORDER = ['Üst', 'Dış Giyim', 'Elbise', 'Alt', 'Ayakkabı', 'Çanta', 'Makyaj']
 
 // Parçalar giyim sırasına göre dizilir (üstten aşağı), API sırasına göre değil:
 // kolajın bir kıyafeti anlatması için sıralamanın anlamlı olması gerekir.

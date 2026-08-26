@@ -196,6 +196,10 @@ async function birimTestleri() {
   check('Çanta → canta şeması', gemini.schemaKeyForCategory('Çanta') === 'canta')
   check('Makyaj → makyaj şeması', gemini.schemaKeyForCategory('Makyaj') === 'makyaj')
   check(
+    'Dış Giyim → giyim şeması (ayrı bir şema gerekmiyor)',
+    gemini.schemaKeyForCategory('Dış Giyim') === 'giyim',
+  )
+  check(
     'Tanınmayan kategori giyim şemasına düşer',
     gemini.schemaKeyForCategory('Şapka') === 'giyim',
   )

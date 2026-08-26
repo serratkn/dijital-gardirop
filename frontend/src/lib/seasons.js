@@ -7,12 +7,18 @@ export const SEASONS = [ALL_SEASON, 'Yaz', 'İlkbahar-Sonbahar', 'Kış']
 // Yeni parçalar sezon belirtilmeden de eklenebilsin diye varsayılan geniş tutuldu.
 export const DEFAULT_SEASON = ALL_SEASON
 
+// Backend'deki WeatherService.#toStatus'ün <10°C ürettiği durum. Dış giyim
+// (mont/kaban) slotu gibi "yalnızca gerçekten soğukken" davranan özellikler
+// bu sabiti kullanır — ham 'soğuk' dizesini elde yazmak yerine tek kaynaktan
+// okunur (bkz. outfitBuilder.js > pickOuterwearItem).
+export const COLD_WEATHER_STATUS = 'soğuk'
+
 // Hava durumu kategorisi → o havaya uygun sezonlar.
 // Kategoriler backend'deki WeatherService.#toStatus ile birebir aynı olmalıdır.
 const STATUS_SEASONS = {
   sıcak: ['Yaz'],
   ılık: ['İlkbahar-Sonbahar'],
-  soğuk: ['Kış'],
+  [COLD_WEATHER_STATUS]: ['Kış'],
 }
 
 // Hava bilinmiyorsa null döner — çağıran taraf bunu "filtreleme yapma"

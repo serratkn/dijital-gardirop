@@ -1,0 +1,20 @@
+-- Katmanlama (layering) desteği: kışlık kombinlerde ana parçanın (Üst/Elbise)
+-- üstüne giyilen mont/kaban/hırka gibi bir dış giyim katmanı eklenebilsin diye
+-- yeni bir kategori. Diğer beş kategoriyle AYNI şekilde seed edilir; salt
+-- okunur `categories` tablosuna bir satır eklemekten ibarettir, şema
+-- değişikliği YOKTUR.
+--
+-- İkon 'snowflake': lucide-react'te doğrudan bir mont/kaban ikonu yok, en
+-- yakın anlamlı seçim "yalnızca soğuk havada giyilir" fikrini taşıyan
+-- kar tanesi oldu (bkz. frontend/src/lib/categoryIcons.js).
+--
+-- NOT: Bu kolonun DEĞERİ frontend'de programatik olarak OKUNMAZ — kategori
+-- ikonu eşlemesi orada isme göre elle tanımlıdır (CATEGORY_ICONS). `icon`
+-- sütunu yalnızca belgeleyici bir referanstır, diğer beş satırdaki gibi.
+--
+-- Kombin kurma mantığı bu kategoriyi OUTFIT_CATEGORIES'e (zorunlu 4 slot)
+-- DEĞİL, ayrı ve koşullu bir "5. slot" olarak ele alır — yalnızca hava
+-- GERÇEKTEN soğukken (<10°C) ve seed'e vektörle en yakın TEMİZ bir parça
+-- bulunduğunda kombine eklenir (bkz. frontend/src/lib/outfitBuilder.js >
+-- OUTERWEAR_CATEGORY / pickOuterwearItem).
+INSERT INTO categories (name, icon) VALUES ('Dış Giyim', 'snowflake');

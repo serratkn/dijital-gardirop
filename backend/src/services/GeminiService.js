@@ -169,6 +169,10 @@ const KATEGORI_SEMASI = {
   Ayakkabı: 'ayakkabi',
   Çanta: 'canta',
   Makyaj: 'makyaj',
+  // Dış giyim (mont, kaban, hırka) Üst/Alt ile AYNI giyim şemasını kullanır —
+  // ayrı bir şema gerekmiyor: kesim_tipi, kumas_deseni, mevsim_uygunlugu gibi
+  // alanların hepsi bir mont için de anlamlı.
+  'Dış Giyim': 'giyim',
 }
 
 // Modelin uzun paragraflar yazmasını engelleyen sınırlar. Değerler arayüzde

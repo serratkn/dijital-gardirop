@@ -262,6 +262,12 @@ olduğu için iskelet oraya taşındı, kombin üretimi istemci tarafında anlı
   ya da Chroma'ya ulaşılamayan kullanıcı düğmeyi bile görmez. **Bu kategoride rastgele
   geri düşüş YOKTUR.** Bölüm açıkken kaydedilen kombine makyaj da dahil edilir,
   kapalıyken dört parça kaydedilir
+- **Katmanlama — koşullu 5. slot (Dış Giyim)** — hava **gerçekten soğukken**
+  (<10°C) başlangıç parçasına vektör uzayında en yakın TEMİZ bir mont/kaban
+  bulunursa, doğrudan (açılır bir bölüm olmadan) **5. kart** olarak ana
+  ızgaraya eklenir ve kaydedilen/paylaşılan kombine otomatik dahil olur. Hava
+  sıcak/ılıksa ya da bilinmiyorsa slot hiç denenmez; uygun dış giyim yoksa
+  sessizce atlanır — **rastgele geri düşüş yoktur** (Makyaj'la aynı ilke)
 - **Kombinlerim** — kayıtlı kombinler; parçaları, tarihi, favori, **"Bugün Giydim"**
   (`times_worn` sayacını atomik artırır) ve silme işlemleriyle
 - **Kıyafet Detay** — görüntüleme, favori, onaylı silme, fotoğraf yönetimi,
@@ -364,8 +370,8 @@ olduğu için iskelet oraya taşındı, kombin üretimi istemci tarafında anlı
 | Kolon | Tip | Not |
 |---|---|---|
 | `id` | SERIAL PK | |
-| `name` | VARCHAR(50) | `Üst`, `Alt`, `Elbise`, `Ayakkabı`, `Çanta`, `Makyaj` |
-| `icon` | VARCHAR(50) | lucide adları: `shirt`, `panel-bottom`, `triangle`, `footprints`, `handbag`, `sparkles` |
+| `name` | VARCHAR(50) | `Üst`, `Alt`, `Elbise`, `Ayakkabı`, `Çanta`, `Makyaj`, `Dış Giyim` (migration `008`) |
+| `icon` | VARCHAR(50) | lucide adları: `shirt`, `panel-bottom`, `triangle`, `footprints`, `handbag`, `sparkles`, `snowflake` — **frontend'de programatik olarak OKUNMAZ**, yalnızca belgeleyici (ikon eşlemesi `categoryIcons.js`'te isme göre elle tanımlı) |
 | `is_active` | BOOLEAN | `true` — okumalar bunu filtreler |
 
 ### `clothing_items`
@@ -2043,6 +2049,53 @@ bölümü hiç açmayan kullanıcı için akış eskisiyle birebir aynı (dört 
 Paylaşım görseli de aynı kümeyi kullanır — `ShareOutfitCard`'ın `CATEGORY_ORDER`
 dizisi `Makyaj`'ı zaten tanıyor ve en sona diziyor.
 
+**Katmanlama — koşullu 5. slot: Dış Giyim (`OUTERWEAR_CATEGORY`, `pickOuterwearItem`).**
+Kışlık kombinlerde ana parçanın (Üst/Elbise) üstüne giyilen mont/kaban/hırka
+katmanı. Yeni bir kategori (migration `008`, bkz. §5) ve `outfitBuilder.js`'e
+eklenen bir fonksiyonla çalışır; **Makyaj'la AYNI "isteğe bağlı ek" ailesinden**
+ama görünüm sözleşmesi FARKLI:
+
+1. **Açılır/kapanır bir bölüm DEĞİL — doğrudan ana ızgaraya 5. kart olarak
+   girer** (`displayItems = [...suggestionItems, outerwearItem]`, ana grid
+   `displayItems.map(...)` üzerinden render edilir). Makyaj bir kozmetik
+   öneriyken dış giyim gerçek bir gardırop parçasıdır; kullanıcının bir şey
+   açmasını beklemek yanlış olurdu. Bu yüzden **kaydetme/paylaşım da otomatik**:
+   `outfitItems = displayItems + (isMakeupOpen && makeupItem varsa)` — dış
+   giyim var olduğu an kaydedilen kombine dahildir, ayrı bir onay gerekmez.
+2. **GERİ DÜŞÜŞ YOK** (Makyaj'daki kuralın birebir aynısı): vektör bir şey
+   söyleyemiyorsa (embedding yok, Chroma kapalı, hepsi kirli) rastgele bir
+   mont ÖNERİLMEZ, slot `null` olur ve hiç render edilmez.
+3. **EK KURAL — hava durumu koşulu (Makyaj'da YOK olan tek fark):**
+   `pickOuterwearItem(candidatesByCategory, weatherStatus, variant)` yalnızca
+   `weatherStatus === COLD_WEATHER_STATUS` ('soğuk', backend'in <10°C eşiği)
+   iken bir şey döner.
+   - Hava **sıcak/ılıksa** slot hiç denenmez, kombin **4 parça** kalır.
+   - Hava **BİLİNMİYORSA** (`weatherStatus` null/undefined — şehir tanımlı
+     değil ya da hava durumu servisine ulaşılamadı) yine `null` döner.
+     **"BELİRSİZLİKTE EKLEME" ilkesi:** yanlışlıkla sıcak bir günde mont
+     önermektense hiç önermemek daha güvenli. `COLD_WEATHER_STATUS` sabiti
+     `lib/seasons.js`'te tanımlıdır — ham `'soğuk'` dizesi elde
+     tekrarlanmaz, backend'in `WeatherService.#toStatus` ile senkron kalması
+     gereken TEK nokta oradadır.
+4. **Sezon önceliği UYGULANMAZ** (Makyaj'daki gerekçenin aynısı): bu slot
+   zaten yalnızca hava soğukken çalışıyor, ayrıca bir sezon filtresi eklemek
+   gereksiz bir katman olurdu.
+5. **`OUTFIT_CATEGORIES`'e BİLİNÇLİ OLARAK EKLENMEDİ** (Makyaj'la aynı
+   gerekçe) — bu yüzden `variantDepth` onu hiç saymaz ve `pickSeedItem`
+   ondan başlangıç parçası seçmez. `CANDIDATE_CATEGORIES`'e (backend'e
+   sorgulanacak kategoriler listesi) EKLENDİ — `/companions` ucu zaten
+   kategori bazlı jenerik çalıştığı için **backend'de hiçbir değişiklik
+   gerekmedi**, yalnızca bu frontend sabitine bir kategori daha eklendi.
+6. **Kategori ikonu:** lucide-react'te doğrudan bir mont/kaban ikonu yok;
+   `categoryIcons.js` bilerek `Snowflake` kullanıyor (kategori zaten yalnızca
+   soğuk havada devreye giren koşullu bir slotu temsil ediyor).
+7. **Gemini şeması:** `GeminiService.KATEGORI_SEMASI`'nde `'Dış Giyim':
+   'giyim'` — Üst/Alt ile AYNI genel giyim şemasını kullanır, ayrı bir şema
+   yazılmadı (kesim_tipi, mevsim_uygunlugu gibi alanlar bir mont için de
+   anlamlı).
+8. **`ShareOutfitCard`'ın `CATEGORY_ORDER`'ına eklendi** — `Üst`'ün hemen
+   ardına (giyim mantığında üst parçanın üstüne giyilen katman budur).
+
 **Rozet (`Tarzına göre seçildi`) `vectorCount > 0` iken gösterilir.** Ölçüt
 "kombinde vektörün getirdiği en az bir parça var mı"dır; tamamen rastgeleye
 düşüldüyse rozet HİÇ çıkmaz. Kullanıcıya olmayan bir zekâyı satmamak için
@@ -2374,6 +2427,115 @@ tamamlayıp kaldırıldı:
 
 > Bundan sonraki her çalışma buraya tarihiyle işlenir: eklenen özellikler, düzeltilen
 > hatalar, alınan mimari kararlar. En yeni kayıt en üstte.
+
+### 2026-08-26 — Katmanlama (layering): koşullu 5. slot olarak Dış Giyim
+- **Ne eklendi:** Kombin Öner artık kışlık kombinlerde ana parçanın (Üst/
+  Elbise) üstüne giyilen bir mont/kaban/hırka önerebiliyor. Yeni bir kategori
+  (`Dış Giyim`) ve `outfitBuilder.js`'e eklenen koşullu bir 5. slot mantığıyla
+  çalışıyor; mevcut vektör/RAG sistemi, temiz/kirli filtresi ve hava durumu
+  entegrasyonu **hiç değişmeden** korundu.
+
+**VERİTABANI — migration `008_add_outerwear_category.sql`.** `categories`
+tablosuna tek satır (`INSERT INTO categories (name, icon) VALUES ('Dış Giyim',
+'snowflake')`), şema değişikliği YOK. İkon `snowflake`: lucide-react'te
+doğrudan bir mont/kaban ikonu yok, en yakın anlamlı seçim "yalnızca soğuk
+havada giyilir" fikrini taşıyan kar tanesi oldu. **`icon` kolonunun DEĞERİ
+frontend'de programatik olarak OKUNMAZ** (diğer beş satırla aynı, önceden de
+böyleydi) — kategori ikonu eşlemesi `categoryIcons.js`'te isme göre elle
+tanımlı; bu satır da oraya elle eklendi (`Snowflake`).
+
+**BACKEND — İKİ küçük değişiklik, `/companions` ucuna SIFIR değişiklik.**
+- `GeminiService.KATEGORI_SEMASI`'ne `'Dış Giyim': 'giyim'` eklendi — Üst/Alt
+  ile AYNI genel giyim şemasını kullanıyor, ayrı bir şema gerekmedi.
+- **`GET /clothing-items/:id/companions` ucu KONTROL EDİLDİ, HİÇBİR SATIR
+  DEĞİŞMEDİ.** `VectorService.findCompanions` `categoryIds`'i tamamen jenerik
+  işliyor (kategori adı/sayısı hakkında hiçbir varsayım yok); yeni kategori
+  frontend'in `CANDIDATE_CATEGORIES` sabitine eklenmesi yeterli oldu. Bu,
+  Aşama 4'ün "kategori başına ayrı sorgu" tasarımının **doğrudan** ödediği bir
+  genişleyebilirlik kazancı.
+
+**FRONTEND — koşullu 5. slot mantığı `outfitBuilder.js`'te.** Ayrıntılı
+mimari not için bkz. §8 "Katmanlama — koşullu 5. slot: Dış Giyim". Özet:
+- `OUTERWEAR_CATEGORY = 'Dış Giyim'` — **`OUTFIT_CATEGORIES`'e BİLİNÇLİ
+  OLARAK EKLENMEDİ** (Makyaj'la aynı gerekçe: "zorunlu 4 slot" ile "hava
+  soğukken üstüne eklenen katman" farklı kavramlar). `CANDIDATE_CATEGORIES`'e
+  eklendi ki `/companions` bu kategoriden de aday getirsin.
+- **`pickOuterwearItem(candidatesByCategory, weatherStatus, variant)`** —
+  Makyaj'ın `pickMakeupItem`'ıyla AYNI iskelet (id-tabanlı geri düşüşsüz
+  seçim, havuzda ilerleme, temiz/kirli filtresi, sezon uygulanmaz) ama TEK
+  EK KURALLA: `weatherStatus !== COLD_WEATHER_STATUS` ('soğuk', <10°C) iken
+  HİÇ denenmeden `null` döner. `weatherStatus` null/undefined olduğunda
+  (şehir tanımlı değil, hava durumu servisine ulaşılamadı) da `null`
+  döner — **"BELİRSİZLİKTE EKLEME"** ilkesi, yanlışlıkla sıcak bir günde
+  mont önermektense hiç önermemeyi tercih eder.
+- **`COLD_WEATHER_STATUS` sabiti `lib/seasons.js`'e eklendi** (`'soğuk'`).
+  Backend'in `WeatherService.#toStatus`'üyle senkron kalması gereken ham
+  dize artık TEK bir yerde tanımlı; `STATUS_SEASONS` da bu sabiti kullanacak
+  şekilde güncellendi (davranış değişmedi, yalnızca literal tekrarı kaldırıldı).
+- **Görünüm sözleşmesi Makyaj'dan BİLİNÇLİ olarak farklı:** dış giyim
+  açılır/kapanır bir bölüm değil, VARSA doğrudan ana ızgaraya 5. kart olarak
+  giriyor (`displayItems = [...suggestionItems, outerwearItem]`) ve
+  kaydetme/paylaşıma OTOMATİK dahil oluyor (`outfitItems` artık
+  `displayItems`'tan türüyor) — kullanıcının bir şey açmasına gerek yok,
+  çünkü bu kozmetik bir öneri değil gerçek bir gardırop parçası.
+- `ClothingCard`'ın `onCleanChange` callback'i dış giyim kartında da AYNEN
+  kullanılıyor: kullanıcı kirli işaretlerse (`outerwearItem` memo'su id'den
+  yeniden çözülür) kart anında ızgaradan düşer.
+- `categoryIcons.js`'e `'Dış Giyim': Snowflake` ve `ShareOutfitCard.jsx`'in
+  `CATEGORY_ORDER`'ına `Üst`'ün hemen ardına eklendi (giyim mantığında üst
+  parçanın üstüne giyilen katman budur) — paylaşım görseli de otomatik doğru
+  sırada gösteriyor.
+- **QuickAddModal'a hiçbir kod değişikliği GEREKMEDİ.** Kategori dropdown'ı
+  zaten `GET /categories`'i dinamik olarak render ediyordu (`data-driven`,
+  sabit bir liste değil); migration uygulanır uygulanmaz "Dış Giyim" orada
+  kendiliğinden belirdi.
+
+**Doğrulama:**
+- **Backend — birim testleri güncellendi:** `test-all-endpoints.js`'teki
+  "6 kategori seed edilmiş" kontrolü "7 kategori" olarak güncellendi (77/77
+  hâlâ yeşil); `test-ai-analysis.js --birim`'e `Dış Giyim → giyim şeması`
+  kontrolü eklendi (49/49).
+- **Frontend — `test-outfit-builder.mjs` 91 → 108 kontrol.** Yeni bölüm
+  "9b) pickOuterwearItem": havuz yok/boş/uygun kategori yok → null; **KRİTİK
+  hava durumu koşulu** — soğukken seçiliyor, ılık/sıcakken VE hava
+  bilinmiyorken (`null`/`undefined`) HİÇ denenmiyor; havuzda ilerleme ve başa
+  sarma; kirli ürün eleniyor, hepsi kirliyse rastgeleye düşülmüyor; sezon
+  dış giyimi elemiyor; **dört kartlık ızgaraya sızmıyor** (`vectorCount`'a
+  girmiyor, `variantDepth` onu saymıyor, makyaj havuzuyla aynı anda var
+  olmaktan etkilenmiyor); `CANDIDATE_CATEGORIES` eşitlik kontrolü güncellendi.
+- **Uçtan uca, GERÇEK backend + GERÇEK ChromaDB embeddingleriyle (12 + 5
+  kontrol, Playwright + sistem Chrome).** İki geçici test kullanıcısı
+  kuruldu: Kullanıcı A (Üst/Alt/Ayakkabı/Çanta/**Dış Giyim**, 5 parça,
+  `ai_analysis` test-vector.js'teki "kontrollü veri" deseniyle ELLE yazıldı
+  — Gemini `generateContent` kotası harcanmadı — ve `create-embeddings.js
+  --uygula` ile GERÇEK embedding üretildi, ayrı bir kota) ve Kullanıcı B
+  (Dış Giyim KATEGORİSİNDE HİÇ parçası olmayan 4 kategori). `GET
+  /api/weather` Playwright route interception ile kontrollü sıcaklık/durum
+  değerleri döndürecek şekilde mocklandı (gerçek `WEATHER_API_KEY` gerekmedi):
+  - **KRİTİK — SOĞUK hava + Dış Giyim ürünü VAR:** kombin gerçekten **5
+    KART** içeriyor, "Dış Giyim" kartı görünüyor, **"Bu Kombini Kaydet"**
+    sonrası veritabanından okunan kombin GERÇEKTEN 5 `outfit_items` taşıyor
+    (montun id'si dahil).
+  - **KRİTİK — AYNI kullanıcı + SICAK hava:** kombin **4 KARTTA KALIYOR**,
+    Dış Giyim kartı hiç görünmüyor (slot hiç denenmiyor, rastgele bir monta
+    da düşülmüyor).
+  - **KRİTİK — SOĞUK hava + Dış Giyim ürünü YOK (Kullanıcı B):** kombin yine
+    **4 KART**, Dış Giyim hiç görünmüyor, kullanıcıya hiçbir hata/uyarı
+    mesajı gösterilmiyor (tamamen SESSİZ atlama, Makyaj'daki ilkeyle aynı).
+  - Üç senaryoda da temiz konsol.
+  - **Ek kontroller:** QuickAddModal kategori dropdown'ında "Dış Giyim"
+    gerçekten listeleniyor (kod değişikliği olmadan); Gardırop'un kategori
+    filtre pilinde "Dış Giyim" görünüyor; **karanlık modda** 5 kartlı kombin
+    doğru render ediliyor ve zemin rengi doğru (`rgb(28,24,21)`).
+- Regresyon: `test-all-endpoints` 77/77, `test-auth` 71/71, `test-stats`
+  60/60, `test-item-outfits` 27/27, `test-clean-status` 26/26,
+  `test-outfit-rag --birim` 36/36, `test-vector --birim` 46/46,
+  `test-ai-analysis --birim` 49/49, frontend `test-outfit-builder.mjs`
+  108/108, lint + build temiz.
+- **Temizlik:** test için oluşturulan iki kullanıcı ve 9 test parçası
+  `cleanup.js` ile silindi (kullanıcı CASCADE + 9 öksüz Chroma vektörü
+  süpürüldü); gerçek demo verisine dokunulmadı. `categories` tablosundaki
+  `Dış Giyim` satırı KALICI (bu, test verisi değil özelliğin kendisi).
 
 ### 2026-08-26 — İlk açılış tanıtım (intro) ekranı eklendi
 - **Ne eklendi:** Uygulama bir cihazda İLK KEZ açıldığında, Login ekranından ÖNCE

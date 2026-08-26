@@ -13,12 +13,14 @@
 import {
   CANDIDATE_CATEGORIES,
   MAKEUP_CATEGORY,
+  OUTERWEAR_CATEGORY,
   OUTFIT_CATEGORIES,
   buildOutfitFromCandidates,
   buildRandomOutfit,
   createMoodContext,
   isSameOutfit,
   pickMakeupItem,
+  pickOuterwearItem,
   pickSeedItem,
   variantDepth,
 } from '../src/lib/outfitBuilder.js'
@@ -424,10 +426,89 @@ console.log('\n9) Makyaj kombin ızgarasına SIZMIYOR')
     pickMakeupItem(havuz)?.name === 'ruj',
   )
   check(
-    'CANDIDATE_CATEGORIES = kombin kategorileri + Makyaj',
-    JSON.stringify(CANDIDATE_CATEGORIES) === JSON.stringify([...OUTFIT_CATEGORIES, MAKEUP_CATEGORY]),
+    'CANDIDATE_CATEGORIES = kombin kategorileri + Makyaj + Dış Giyim',
+    JSON.stringify(CANDIDATE_CATEGORIES) ===
+      JSON.stringify([...OUTFIT_CATEGORIES, MAKEUP_CATEGORY, OUTERWEAR_CATEGORY]),
     CANDIDATE_CATEGORIES.join(', '),
   )
+}
+
+// ---------------------------------------------------------------
+console.log('\n9b) pickOuterwearItem — koşullu 5. slot (kışlık dış giyim)')
+
+{
+  const mont = parca({ name: 'mont', category: OUTERWEAR_CATEGORY })
+  const kaban = parca({ name: 'kaban', category: OUTERWEAR_CATEGORY })
+  const kirliMont = parca({ name: 'mont-kirli', category: OUTERWEAR_CATEGORY, isClean: false })
+  const havuz = new Map([[OUTERWEAR_CATEGORY, [mont, kaban]]])
+
+  check('Havuz yoksa null (bölüm hiç gösterilmez)', pickOuterwearItem(null, 'soğuk') === null)
+  check('Boş havuzda null', pickOuterwearItem(new Map(), 'soğuk') === null)
+  check(
+    'Dış Giyim adayı olmayan havuzda null (kombin kategorileri yerine geçmez)',
+    pickOuterwearItem(new Map([['Alt', [parca({ category: 'Alt' })]]]), 'soğuk') === null,
+  )
+
+  console.log('\n   KRİTİK — hava durumu koşulu (Makyaj\'dan TEK farkı)')
+  check('Hava SOĞUK iken en yakın mont seçiliyor', pickOuterwearItem(havuz, 'soğuk')?.name === 'mont')
+  check('Hava ILIK iken slot HİÇ denenmiyor (null)', pickOuterwearItem(havuz, 'ılık') === null)
+  check('Hava SICAK iken slot HİÇ denenmiyor (null)', pickOuterwearItem(havuz, 'sıcak') === null)
+  check(
+    'Hava BİLİNMİYORSA (null) "belirsizlikte ekleme" — slot yine gösterilmiyor',
+    pickOuterwearItem(havuz, null) === null,
+  )
+  check(
+    'Hava BİLİNMİYORSA (undefined) da aynı şekilde gösterilmiyor',
+    pickOuterwearItem(havuz, undefined) === null,
+  )
+
+  console.log('\n   Havuzda ilerleme ve temiz/kirli filtresi (Makyaj ile AYNI desen)')
+  check('variant=1 sıradaki montu veriyor', pickOuterwearItem(havuz, 'soğuk', 1)?.name === 'kaban')
+  check('Havuz tükenince başa sarıyor', pickOuterwearItem(havuz, 'soğuk', 2)?.name === 'mont')
+  check(
+    'KİRLİ dış giyim ürünü eleniyor',
+    pickOuterwearItem(new Map([[OUTERWEAR_CATEGORY, [kirliMont, mont]]]), 'soğuk')?.name === 'mont',
+  )
+  check(
+    'Hepsi kirliyse null — RASTGELE BİR MONTA DÜŞÜLMÜYOR',
+    pickOuterwearItem(new Map([[OUTERWEAR_CATEGORY, [kirliMont]]]), 'soğuk') === null,
+  )
+
+  // Sezon dış giyime de UYGULANMAZ (Makyaj'daki gerekçenin aynısı): bu slot
+  // zaten yalnızca hava soğukken çalışıyor, ayrı bir sezon filtresi gereksiz.
+  const yazlikHirka = parca({ name: 'yazlik-hirka', category: OUTERWEAR_CATEGORY, season: 'Yaz' })
+  check(
+    'Sezon dış giyimi elemiyor',
+    pickOuterwearItem(new Map([[OUTERWEAR_CATEGORY, [yazlikHirka]]]), 'soğuk')?.name === 'yazlik-hirka',
+  )
+
+  console.log('\n   Dış Giyim kombin ızgarasına SIZMIYOR (Makyaj ile AYNI garanti)')
+  {
+    const seed = parca({ name: 'seed-ust', category: 'Üst' })
+    const alt = parca({ name: 'alt-aday', category: 'Alt' })
+    const cleanItems = [seed, mont, alt]
+    const karma = new Map([
+      ['Alt', [alt]],
+      [OUTERWEAR_CATEGORY, [mont]],
+    ])
+
+    const sonuc = buildOutfitFromCandidates({
+      seedItem: seed,
+      candidatesByCategory: karma,
+      cleanItems,
+      seasons: null,
+    })
+    check('Dış Giyim dört kartlık ızgaraya girmiyor', !adlar(sonuc.items).includes('mont'))
+    check('Dış Giyim vectorCount değerine sayılmıyor', sonuc.vectorCount === 1, `${sonuc.vectorCount}`)
+    check(
+      'Dış Giyim MAKYAJ HAVUZUNUN AYNI ANDA var olmasından etkilenmiyor',
+      pickOuterwearItem(karma, 'soğuk')?.name === 'mont',
+    )
+    check(
+      'variantDepth Dış Giyim havuzunu SAYMIYOR (yoksa dört kart değişmeden düğme dönerdi)',
+      variantDepth(new Map([[OUTERWEAR_CATEGORY, [mont, kaban]], ['Alt', [alt]]])) === 1,
+    )
+  }
 }
 
 // ---------------------------------------------------------------

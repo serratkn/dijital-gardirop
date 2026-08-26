@@ -1,7 +1,7 @@
 // Uzantı BİLEREK yazılı ('./seasons.js'): bu modül React'sız, saf JavaScript
 // ve test-scripts/test-outfit-builder.mjs onu DOĞRUDAN node ile çalıştırıyor.
 // Node'un ESM çözümleyicisi uzantısız yolu bulamaz; Vite ikisini de kabul eder.
-import { matchesSeason } from './seasons.js'
+import { COLD_WEATHER_STATUS, matchesSeason } from './seasons.js'
 
 // Kombin kurma mantığının TAMAMI burada. Sayfadan (OutfitSuggestion.jsx)
 // ayrılmasının sebebi Aşama 4'te iki ayrı yolun ortaya çıkması: vektör tabanlı
@@ -19,10 +19,18 @@ export const OUTFIT_CATEGORIES = ['Üst', 'Alt', 'Ayakkabı', 'Çanta']
 // kullanıcı açıkça istediğinde kaydedilen kombine dahil edilir.
 export const MAKEUP_CATEGORY = 'Makyaj'
 
+// Dış giyim (mont, kaban, hırka vb.) — mevcut dört ZORUNLU kategorinin
+// DIŞINDA, KOŞULLU bir beşinci slottur: yalnızca hava GERÇEKTEN soğukken
+// (bkz. pickOuterwearItem) ana kombine eklenir. OUTFIT_CATEGORIES'e BİLEREK
+// EKLENMEDİ — "kombinin zorunlu 4 slotu ne" sorusuyla "hava soğukken üstüne
+// eklenen katman ne" sorusu FARKLI kavramlar; Makyaj'ın OUTFIT_CATEGORIES
+// dışında tutulmasıyla AYNI gerekçe.
+export const OUTERWEAR_CATEGORY = 'Dış Giyim'
+
 // Backend'den aday istenen kategorilerin tamamı. OUTFIT_CATEGORIES'ten AYRI
 // tutuluyor çünkü ikisi farklı soruları yanıtlıyor: bu liste "neyi sorgula",
 // öteki "kombinin hangi slotları var" demek.
-export const CANDIDATE_CATEGORIES = [...OUTFIT_CATEGORIES, MAKEUP_CATEGORY]
+export const CANDIDATE_CATEGORIES = [...OUTFIT_CATEGORIES, MAKEUP_CATEGORY, OUTERWEAR_CATEGORY]
 
 export const pickRandom = (list) => list[Math.floor(Math.random() * list.length)]
 
@@ -241,9 +249,11 @@ export function pickSeedItem(
 // Aynı başlangıç parçası için kaç FARKLI varyant üretilebilir. "Başka Öneri
 // Göster" bu derinlik tükenince yeni bir başlangıç parçasına geçer; yoksa
 // aynı iki kombin arasında gidip gelirdi.
-// MAKYAJ HAVUZU DERİNLİĞE SAYILMAZ: sayılsaydı, çok makyaj ürünü olup tek
-// tişörtü olan bir gardıropta "Başka Öneri Göster" dört kartı hiç
-// değiştirmeden yalnızca ruju döndürür ve düğme bozuk görünürdü.
+// MAKYAJ (VE DIŞ GİYİM) HAVUZU DERİNLİĞE SAYILMAZ: sayılsaydı, çok makyaj
+// ürünü/montu olup tek tişörtü olan bir gardıropta "Başka Öneri Göster" dört
+// kartı hiç değiştirmeden yalnızca o isteğe bağlı ürünü döndürür ve düğme
+// bozuk görünürdü. İkisi de zaten OUTFIT_CATEGORIES'in DIŞINDA olduğu için
+// aşağıdaki döngüye hiç girmiyor — ayrı bir hariç tutma kodu gerekmedi.
 export function variantDepth(candidatesByCategory) {
   let depth = 0
   for (const category of OUTFIT_CATEGORIES) {
@@ -272,6 +282,34 @@ export function pickMakeupItem(candidatesByCategory, variant = 0) {
   if (temiz.length === 0) return null
 
   // Havuzda ilerleme kuralı diğer slotlarla aynı: 0 en yakın, 1 ikinci en yakın.
+  return temiz[variant % temiz.length]
+}
+
+// Kombine eşlik edecek KOŞULLU 5. slot: dış giyim (mont, kaban, hırka).
+// Makyaj'la AYNI ilkeyle çalışır — GERİ DÜŞÜŞ YOKTUR: vektör bir şey
+// söyleyemiyorsa (embedding yok, Chroma kapalı, hepsi kirli) doğru davranış
+// rastgele bir mont önermek değil, slotu HİÇ GÖSTERMEMEKTİR — çağıran null'ı
+// tam olarak böyle yorumlar.
+//
+// Makyaj'dan TEK ek kuralı: hava durumu koşulu.
+//   - `weatherStatus` TAM OLARAK COLD_WEATHER_STATUS ('soğuk') DEĞİLSE
+//     (sıcak/ılık VEYA null/undefined — şehir tanımlı değil ya da hava
+//     durumu servisine ulaşılamadı) fonksiyon HİÇ DENEMEDEN null döner.
+//     null/undefined'ı da reddetmesi BİLİNÇLİ: "BELİRSİZLİKTE EKLEME"
+//     ilkesi — hava durumu bilinmiyorsa yanlışlıkla sıcak bir günde mont
+//     önermektense hiç önermemek daha güvenlidir.
+//
+// Sezon önceliği burada da UYGULANMAZ (Makyaj'daki gerekçenin aynısı): bu
+// zaten yalnızca hava GERÇEKTEN soğukken çalışan bir slot, ayrıca bir sezon
+// filtresi eklemek gereksiz bir katman olurdu.
+export function pickOuterwearItem(candidatesByCategory, weatherStatus, variant = 0) {
+  if (weatherStatus !== COLD_WEATHER_STATUS) return null
+
+  const temiz = (candidatesByCategory?.get(OUTERWEAR_CATEGORY) ?? []).filter(
+    (item) => item.isClean !== false,
+  )
+  if (temiz.length === 0) return null
+
   return temiz[variant % temiz.length]
 }
 

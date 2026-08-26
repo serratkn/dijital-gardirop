@@ -31,6 +31,7 @@ import {
   createMoodContext,
   isSameOutfit,
   pickMakeupItem,
+  pickOuterwearItem,
   pickSeedItem,
   variantDepth,
 } from '../lib/outfitBuilder'
@@ -87,6 +88,11 @@ function OutfitSuggestion() {
   const [makeupItemId, setMakeupItemId] = useState(null)
   // Bölüm KAPALI başlar; kullanıcı istemeden makyaj önerisi dayatılmaz.
   const [isMakeupOpen, setIsMakeupOpen] = useState(false)
+  // Koşullu 5. slot: dış giyim. Makyaj'la AYNI id-tabanlı desen (kirli
+  // işaretlenirse anında kaybolsun diye), ama AÇILIR/KAPANIR bir bölüm
+  // DEĞİL — varsa doğrudan ana ızgaraya 5. kart olarak girer (bkz. aşağıdaki
+  // displayItems) ve kullanıcı bir şey açmadan kaydedilen kombine dahil olur.
+  const [outerwearItemId, setOuterwearItemId] = useState(null)
 
   const [isSaving, setIsSaving] = useState(false)
   const [isSaved, setIsSaved] = useState(false)
@@ -177,6 +183,12 @@ function OutfitSuggestion() {
     const item = makeupItemId ? itemsById.get(makeupItemId) : null
     return item && item.isClean !== false ? item : null
   }, [makeupItemId, itemsById])
+
+  // AYNI desen: id'den güncel kayda çözülür, temiz/kirli tekrar kontrol edilir.
+  const outerwearItem = useMemo(() => {
+    const item = outerwearItemId ? itemsById.get(outerwearItemId) : null
+    return item && item.isClean !== false ? item : null
+  }, [outerwearItemId, itemsById])
 
   // "Hiç parçan yok" ile "temiz parçan yok" ayrı mesajları hak eder:
   // ilki gardırobu doldurmayı, ikincisi çamaşır yıkamayı gerektirir.
@@ -290,12 +302,13 @@ function OutfitSuggestion() {
 
   const applyVariant = useCallback(
     (pool, variant) => {
-      // Havuz yoksa MEVCUT rastgele mantık aynen çalışır. Makyaj için geri
-      // düşüş YOKTUR: vektör konuşamıyorsa bölüm hiç gösterilmez.
+      // Havuz yoksa MEVCUT rastgele mantık aynen çalışır. Makyaj VE Dış Giyim
+      // için geri düşüş YOKTUR: vektör konuşamıyorsa ikisi de hiç gösterilmez.
       if (!pool) {
         setSuggestionItems(buildRandomOutfit(cleanItems, preferredSeasons, moodContextRef.current))
         setIsSmart(false)
         setMakeupItemId(null)
+        setOuterwearItemId(null)
         return
       }
 
@@ -313,8 +326,12 @@ function OutfitSuggestion() {
       setSuggestionItems(next)
       setIsSmart(vectorCount > 0)
       setMakeupItemId(pickMakeupItem(candidatesByCategory, variant)?.id ?? null)
+      // Yalnızca hava GERÇEKTEN soğukken (weather?.status === 'soğuk') bir
+      // şey döner; sıcak/ılık/bilinmeyen havada pickOuterwearItem null verir
+      // ve 5. kart hiç eklenmez (bkz. lib/outfitBuilder.js).
+      setOuterwearItemId(pickOuterwearItem(candidatesByCategory, weather?.status, variant)?.id ?? null)
     },
-    [cleanItems, preferredSeasons, resolveCandidates],
+    [cleanItems, preferredSeasons, resolveCandidates, weather],
   )
 
   const runSuggestion = useCallback(
@@ -340,6 +357,7 @@ function OutfitSuggestion() {
         setSuggestionItems([])
         setIsSmart(false)
         setMakeupItemId(null)
+        setOuterwearItemId(null)
         return
       }
 
@@ -474,6 +492,7 @@ function OutfitSuggestion() {
       })
       setIsSmart(false)
       setMakeupItemId(null)
+      setOuterwearItemId(null)
       setIsSaved(false)
       setSaveError('')
       return
@@ -497,12 +516,22 @@ function OutfitSuggestion() {
     setSaveError('')
   }
 
-  // Kaydedilen kombin: dört parça + (BÖLÜM AÇIKSA) makyaj önerisi.
-  // Bölümü hiç açmayan kullanıcı için davranış eskisiyle birebir aynı —
-  // makyaj sessizce kombine eklenmez, kullanıcı onu görmemiştir bile.
+  // Ekranda gösterilen ızgara: dört zorunlu parça + (VARSA) koşullu 5.
+  // kart olarak dış giyim. Makyaj'ın AKSİNE burada bir açma/kapama YOK —
+  // dış giyim gerçek bir gardırop parçasıdır (kozmetik bir öneri değil),
+  // hava soğukken kombinin doğal bir parçası olarak doğrudan görünür.
+  const displayItems = useMemo(
+    () => (outerwearItem ? [...suggestionItems, outerwearItem] : suggestionItems),
+    [suggestionItems, outerwearItem],
+  )
+
+  // Kaydedilen/paylaşılan kombin: displayItems + (BÖLÜM AÇIKSA) makyaj önerisi.
+  // Dış giyim displayItems'ın parçası olduğu için VARSA otomatik dahildir;
+  // makyaj bölümünü hiç açmayan kullanıcı için davranış eskisiyle birebir
+  // aynı — makyaj sessizce kombine eklenmez, kullanıcı onu görmemiştir bile.
   const outfitItems = useMemo(
-    () => (isMakeupOpen && makeupItem ? [...suggestionItems, makeupItem] : suggestionItems),
-    [isMakeupOpen, makeupItem, suggestionItems],
+    () => (isMakeupOpen && makeupItem ? [...displayItems, makeupItem] : displayItems),
+    [isMakeupOpen, makeupItem, displayItems],
   )
 
   const handleSave = async () => {
@@ -683,8 +712,11 @@ function OutfitSuggestion() {
                           </p>
                         )}
 
-                        <div className="mt-4 grid grid-cols-2 gap-6 sm:grid-cols-4">
-                          {suggestionItems.map((item) => (
+                        <div
+                          className="mt-4 grid grid-cols-2 gap-6 sm:grid-cols-4"
+                          data-testid="kombin-izgarasi"
+                        >
+                          {displayItems.map((item) => (
                             <div key={item.id}>
                               <ClothingCard item={item} onCleanChange={handleCleanChange} />
                               {/* SADECE BİLGİ. Bu işaret hiçbir parçayı elemez,
