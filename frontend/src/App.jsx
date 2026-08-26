@@ -17,8 +17,10 @@ import AccountInfo from './pages/AccountInfo'
 import ChangePassword from './pages/ChangePassword'
 import StylePreferences from './pages/StylePreferences'
 import ComingSoon from './pages/ComingSoon'
+import Intro from './pages/Intro'
 import { onUnauthorized } from './lib/api'
 import { hasValidSession } from './lib/auth'
+import { hasSeenIntro, markIntroSeen } from './lib/intro'
 import { watchSystemTheme } from './lib/theme'
 
 // Navigasyon ve alt menü yalnızca oturum açmış ekranlarda görünür;
@@ -47,6 +49,17 @@ function App() {
   const [authTick, setAuthTick] = useState(0)
   const isAuthenticated = hasValidSession()
 
+  // AYNI desen: `hasSeenIntro()` de localStorage'dan okunur, state değildir.
+  // `introTick` yalnızca yeniden render tetiklemek için var — `markIntroSeen()`
+  // localStorage'ı günceller ama React bunu kendiliğinden fark etmez.
+  const [introTick, setIntroTick] = useState(0)
+  void introTick
+  // Zaten oturumu olan bir kullanıcı (ör. token varken uygulama yeniden
+  // açıldığında) tanıtımı ASLA görmemeli — bu ekran yalnızca "hiç kullanmamış"
+  // kişiler içindir, `isAuthenticated` kontrolü bu yüzden `hasSeenIntro()`'dan
+  // ÖNCE gelir.
+  const showIntro = !isAuthenticated && !hasSeenIntro()
+
   // Sunucu 401 döndüğünde (token süresi doldu / iptal edildi) oturum düşer
   // ve kullanıcı giriş ekranına alınır. authTick yalnızca yeniden render tetikler.
   useEffect(() => {
@@ -64,6 +77,22 @@ function App() {
   // authTick okunmazsa lint kullanılmıyor sayar; oturum düşüşünde
   // yeniden hesaplamayı garanti eder.
   void authTick
+
+  // `showOnboarding`'in eski deseniyle AYNI: koşul doğruyken router/nav ağacı
+  // yerine DOĞRUDAN tanıtım ekranı döner (chrome-free, hiçbir rotaya bağlı
+  // değil). `onFinish` yalnızca bayrağı yazıp yeniden render tetikler; bir
+  // sonraki adımın nereye düşeceğine (Login mi, zaten oturum açıksa Ana
+  // Sayfa mı) mevcut routing karar verir.
+  if (showIntro) {
+    return (
+      <Intro
+        onFinish={() => {
+          markIntroSeen()
+          setIntroTick((tick) => tick + 1)
+        }}
+      />
+    )
+  }
 
   const protectedShell = (page) => (
     <ProtectedRoute>

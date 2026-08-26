@@ -27,6 +27,7 @@ kombin önerileri üreten bir stil platformudur.
 | Gardırop yönetimi (kategori filtresi, arama) | Gerçek API'ye bağlı |
 | Kombin önerisi (vektör benzerliğiyle akıllı eşleştirme) | Gerçek API'ye bağlı |
 | Ana sayfa istatistikleri ve son eklenenler | Gerçek API'ye bağlı |
+| İlk açılış tanıtım (intro carousel) ekranı | localStorage |
 | İlk açılış onboarding akışı + tarz anketi | localStorage |
 | Profil / hesap yönetimi ekranları | localStorage |
 | Ten tonu analizi (selfie → uyumlu renkler) | Gerçek API'ye bağlı, **isteğe bağlı** |
@@ -2248,9 +2249,11 @@ bir hedef üzerinden), "WhatsApp'ta Paylaş" gibi seçenekler sunar.
 **Kalıcı durum:** `src/lib/onboarding.js` `dg_` önekli localStorage anahtarlarının
 tek sahibidir (onboarding bayrağı, kullanıcı profili önbelleği, anket cevapları —
 `dg_user_id` YOKTUR, kullanıcı kimliği tamamen `dg_token`'daki JWT'den okunur).
-**İki istisna:** `dg_token`/`dg_refresh_token` `lib/auth.js`'e, `dg_theme` `lib/theme.js`'e aittir.
-Tema bir OTURUM verisi değil CİHAZ tercihidir — bu yüzden çıkışta `clearOnboardingState()`
-ile silinmez, kullanıcı çıkış yapınca teması korunur.
+**Üç istisna:** `dg_token`/`dg_refresh_token` `lib/auth.js`'e, `dg_theme` `lib/theme.js`'e,
+`dg_intro_seen` **`lib/intro.js`**'e aittir. Tema ve tanıtım bayrağı birer OTURUM verisi
+değil CİHAZ tercihidir — bu yüzden çıkışta `clearOnboardingState()` ile silinmez; kullanıcı
+çıkış yapınca teması VE "tanıtımı gördüm" durumu korunur (aksi hâlde aynı cihazda çıkış yapan
+her kullanıcı tanıtım ekranını yeniden görürdü).
 `localStorage`'a doğrudan dokunmayın. **Tek doğru kaynak veritabanıdır**; localStorage
 yalnızca hızlı erişim önbelleğidir (örn. Ana Sayfa karşılamasının ismi ilk boyamada
 buradan gelir, sonra API yanıtıyla tazelenir).
@@ -2371,6 +2374,60 @@ tamamlayıp kaldırıldı:
 
 > Bundan sonraki her çalışma buraya tarihiyle işlenir: eklenen özellikler, düzeltilen
 > hatalar, alınan mimari kararlar. En yeni kayıt en üstte.
+
+### 2026-08-26 — İlk açılış tanıtım (intro) ekranı eklendi
+- **Ne eklendi:** Uygulama bir cihazda İLK KEZ açıldığında, Login ekranından ÖNCE
+  3 kaydırmalı ekrandan oluşan bir tanıtım (intro carousel) gösteriliyor:
+  "Gardırobunu Dijitalleştir" → "Yapay Zekâ Senin İçin Analiz Etsin" →
+  "Akıllı Kombin Önerileri Al". Her ekranda büyük bir ikon, serif italik başlık,
+  kısa açıklama ve alt kısımda nokta göstergesi var; "Atla" linki (sağ üstte) her
+  ekrandan direkt çıkışı, son ekrandaki "Başla" butonu bitirmeyi sağlıyor.
+- **Yeni dosyalar:** `frontend/src/lib/intro.js` (`hasSeenIntro()` / `markIntroSeen()`)
+  ve `frontend/src/pages/Intro.jsx` (carousel'in kendisi). İkon seçimi BİLEREK
+  uygulamanın KENDİ sözlüğünden yapıldı, yeni bir görsel dil icat edilmedi:
+  `Shirt` (kategori ikonu), `Sparkles` (AiAnalysisPanel/WardrobeStats zaten
+  "yapay zekâ"yı bununla temsil ediyor), `Layers` (BottomNav'daki "Kombinler"
+  sekmesinin ikonu).
+- **`dg_intro_seen` yeni bir localStorage anahtarı, `lib/onboarding.js`'İN DIŞINDA
+  tutuldu.** `dg_theme` ile AYNI gerekçe: bu bir OTURUM verisi değil CİHAZ
+  tercihidir ("bu cihazda tanıtım hiç gösterildi mi") — `clearOnboardingState()`
+  kapsamına alınmadı, çünkü alınsaydı aynı cihazda çıkış yapan HER kullanıcı
+  tanıtımı yeniden görürdü. `İki istisna` notu artık `Üç istisna` (bkz. §8).
+- **App.jsx'e entegrasyon — eski `showOnboarding` tam-devre-dışı-bırakma
+  deseniyle AYNI yaklaşım** (route eklenmedi): `showIntro = !isAuthenticated
+  && !hasSeenIntro()` doğruyken `App()` router/nav ağacı yerine DOĞRUDAN
+  `<Intro>` döner. `isAuthenticated` kontrolü `hasSeenIntro()`'dan BİLEREK ÖNCE
+  gelir — zaten oturumu olan bir kullanıcı (ör. token varken uygulama yeniden
+  açıldığında) tanıtım bayrağı hiç set edilmemiş olsa bile ekranı ASLA görmez;
+  bu ekran yalnızca "hiç kullanmamış" kişiler içindir.
+- **`onFinish` (Atla ya da Başla) yalnızca bayrağı yazıp bir `introTick`
+  state'iyle yeniden render tetikler — `navigate()` ÇAĞRILMAZ.** `authTick`
+  ile BİREBİR AYNI desen: `hasSeenIntro()` de state değil, her render'da
+  localStorage'dan okunan bir değer; `markIntroSeen()` sonrası React bunu
+  kendiliğinden fark etmeyeceği için tetikleyici bir state gerekiyor. Nereye
+  düşüleceğine (oturumsuzsa `/giris`, StyleQuiz henüz bitmemişse oraya vb.)
+  mevcut `ProtectedRoute`/route ağacı zaten karar veriyor — intro bunu
+  tekrarlamıyor.
+- **Kaydırma (swipe) kütüphanesiz, düz `onTouchStart`/`onTouchEnd` ile.**
+  Depoda bir carousel/swipe paketi yoktu ve tek ihtiyaç "50px'ten büyük yatay
+  hareketi sayfa değişimine çevir" olduğu için yeni bir bağımlılık eklenmedi.
+  Nokta göstergesine tıklamak da bir gezinme yolu (`aria-label="N. ekrana
+  git"`, aktif nokta `aria-current`).
+- **Doğrulama — gerçek tarayıcıda 24 kontrol (Playwright + sistem Chrome):**
+  ilk açılışta tanıtımın görünmesi; "İleri" ile üç ekranın sırayla açılması;
+  nokta göstergesiyle gezinme; **gerçek dokunmatik `TouchEvent` ile** (390px
+  mobil viewport, sayfa içinden `new TouchEvent(...)` dispatch edilerek —
+  Chrome DevTools Protocol'ün touch emülasyon tuhaflıklarından bağımsız)
+  sola kaydırınca ileri, sağa kaydırınca geri gitmesi; 390px'te yatay taşma
+  olmaması; **Başla VE Atla'nın ikisinin de** `dg_intro_seen`'i `true` yazması
+  ve ardından Login ekranına düşülmesi; **sayfa yenilendiğinde tanıtımın BİR
+  DAHA görünmemesi**; **zaten geçerli bir oturumu olan kullanıcıda (`dg_token`
+  elle basılarak, `dg_intro_seen` KASITLI OLARAK set edilmeden) tanıtımın HİÇ
+  görünmeyip doğrudan Ana Sayfa'nın açılması**; karanlık modda doğru
+  zemin/metin renkleri (`rgb(28,24,21)` / `rgb(247,243,237)`); temiz konsol.
+- Regresyon: `npm run lint` + `npm run build` temiz, frontend
+  `test-outfit-builder.mjs` 91/91 (bu değişiklik yalnızca App.jsx'e ve iki yeni
+  dosyaya dokundu, backend/outfitBuilder'a hiç dokunulmadı).
 
 ### 2026-08-25 — JWT refresh token sistemi: zorla yeniden giriş kaldırıldı
 - **Ne değişti:** Kullanıcılar artık **7 gün sonra zorla yeniden giriş yapmak
