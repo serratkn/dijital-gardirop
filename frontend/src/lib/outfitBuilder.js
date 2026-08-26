@@ -14,6 +14,12 @@ import { COLD_WEATHER_STATUS, matchesSeason } from './seasons.js'
 
 export const OUTFIT_CATEGORIES = ['Üst', 'Alt', 'Ayakkabı', 'Çanta']
 
+// Elbise, Üst+Alt ikilisinin YERİNE geçen bir ALTERNATİFTİR, EK bir kategori
+// DEĞİL — bu yüzden OUTFIT_CATEGORIES'e basitçe eklenemez (o zaman kombin
+// "elbise + tişört + pantolon" gibi anlamsız 5 parçaya çıkardı). Hangi
+// rotanın kullanılacağına `resolveActiveCategories` karar verir.
+export const DRESS_CATEGORY = 'Elbise'
+
 // Makyaj kombinin PARÇASI DEĞİL, üstüne konan isteğe bağlı bir öneridir:
 // dört kartlık ızgaraya hiç girmez, kendi açılır bölümünde durur ve yalnızca
 // kullanıcı açıkça istediğinde kaydedilen kombine dahil edilir.
@@ -29,8 +35,17 @@ export const OUTERWEAR_CATEGORY = 'Dış Giyim'
 
 // Backend'den aday istenen kategorilerin tamamı. OUTFIT_CATEGORIES'ten AYRI
 // tutuluyor çünkü ikisi farklı soruları yanıtlıyor: bu liste "neyi sorgula",
-// öteki "kombinin hangi slotları var" demek.
-export const CANDIDATE_CATEGORIES = [...OUTFIT_CATEGORIES, MAKEUP_CATEGORY, OUTERWEAR_CATEGORY]
+// öteki "kombinin hangi slotları var" demek. Elbise HER ZAMAN sorgulanır
+// (dress route seçilmese bile) — backend'in kategori bazlı sorgusu zaten
+// jenerik olduğu için bunun bir maliyeti yok, ve dress route'un devreye
+// girip girmeyeceğine karar verirken (bkz. resolveActiveCategories) gerçek
+// vektör adaylarına ihtiyaç var.
+export const CANDIDATE_CATEGORIES = [
+  ...OUTFIT_CATEGORIES,
+  MAKEUP_CATEGORY,
+  OUTERWEAR_CATEGORY,
+  DRESS_CATEGORY,
+]
 
 export const pickRandom = (list) => list[Math.floor(Math.random() * list.length)]
 
@@ -137,6 +152,33 @@ const FORMAL_OCCASIONS = ['Akşam Yemeği', 'İş', 'Özel Davet']
 const GUNLUK_AYAKKABI_DESENI = /\bterlik\b|\bsandalet\b|\bsneaker\b|spor ayakkab|\bcrocs\b|flip.?flop/i
 const RESMI_AYAKKABI_DESENI = /\btopuk\b|\bstiletto\b|\boxford\b|\bklasik\b|\brugan\b|deri bot|\bbabet\b|\bmakosen\b/i
 
+// JS regex `\b`, `\w`'yi YALNIZCA ASCII harfleriyle tanımlar — Türkçe'ye özgü
+// harfler (ş, ğ, ı, ö, ü, ç) birer "kelime karakteri" SAYILMAZ. Bu yüzden
+// `\bşık\b` gibi bir desen "sade ve şık" cümlesinde HİÇ EŞLEŞMEZ: boşlukla
+// 'ş' arasında JS'e göre ikisi de "kelime dışı" olduğundan sınır bulunamaz
+// (yazılırken test edilip gerçekten YAKALANAN bir hata). "şık" kelimesi
+// için elle, Unicode-farkında bir sınır kuruluyor; listedeki diğer kelimeler
+// (klasik, zarif, elegan, resmi, ofis, sofistik…) ASCII bir harfle
+// başladığı/bittiği için normal `\b` sorunsuz çalışıyor.
+const TR_KELIME_DISI = '[^a-zçğıöşüA-ZÇĞİÖŞÜ0-9_]'
+const SIK_KELIME_DESENI = `(?:^|${TR_KELIME_DISI})şık(?:$|${TR_KELIME_DISI})`
+
+// "stilTercihi ALANI DOLU MU" ile "stilTercihi GERÇEKTEN ŞIKLIK/RESMİYET Mİ
+// İSTİYOR" AYNI ŞEY DEĞİL — bu ayrım önceden YOKTU ve gerçek bir hataya yol
+// açıyordu: "Akşam yemeğine gidiyorum ama RAHAT giyinmek istiyorum" dendiğinde
+// occasion "Akşam Yemeği" (resmi) olduğu için ve stilTercihi dolu ("Rahat")
+// olduğu için sistem yine de resmi ayakkabı/kıyafet öncelikliyordu — tam
+// TERSİ gerekiyordu. Artık yalnızca stilTercihi'nin İÇERİĞİ gerçekten
+// resmiyet/şıklık işaret ediyorsa formal önceliklendirme devreye giriyor.
+const RESMI_STIL_TERCIHI_DESENI = new RegExp(
+  `\\bklasik\\b|${SIK_KELIME_DESENI}|\\bzarif\\b|\\belegan\\b|\\bresmi\\b|\\bofis\\b|\\bsofistik`,
+  'i',
+)
+
+function stilTercihiResmiMi(stilTercihi) {
+  return Boolean(stilTercihi) && RESMI_STIL_TERCIHI_DESENI.test(String(stilTercihi).toLocaleLowerCase('tr-TR'))
+}
+
 // true = resmi görünüyor, false = günlük/spor görünüyor, null = bilinmiyor
 // (ai_analysis yok ya da hiçbir desene uymuyor).
 function ayakkabiFormalligi(item) {
@@ -153,12 +195,12 @@ function ayakkabiFormalligi(item) {
   return null
 }
 
-// Yalnızca Ayakkabı kategorisine, yalnızca resmi bir durum + belirtilmiş bir
-// stil tercihi varken uygulanır — "iş için rahat bir şeyler" gibi durumlarda
-// gereksiz yere sneaker'ları arkaya atmamalı.
+// Yalnızca Ayakkabı kategorisine, yalnızca resmi bir durum + GERÇEKTEN
+// resmiyet/şıklık isteyen bir stil tercihi varken uygulanır — "iş için rahat
+// bir şeyler" gibi durumlarda gereksiz yere sneaker'ları arkaya atmamalı.
 function preferFormalShoes(pool, category, moodContext) {
   if (category !== 'Ayakkabı') return pool
-  if (!moodContext?.stilTercihi) return pool
+  if (!stilTercihiResmiMi(moodContext?.stilTercihi)) return pool
   if (!FORMAL_OCCASIONS.includes(moodContext.occasion)) return pool
 
   const resmiler = pool.filter((item) => ayakkabiFormalligi(item) === true)
@@ -170,13 +212,150 @@ function preferFormalShoes(pool, category, moodContext) {
   return gunlukOlmayanlar.length > 0 ? gunlukOlmayanlar : pool
 }
 
-// Bir kategori havuzuna TÜM mood-bazlı önceliklendirmeyi uygular. preferSeason
-// ile AYNI aileden: sırasıyla kaçınılan kelimeler, sonra (yalnızca Ayakkabı
-// için) resmi ayakkabı kuralı. moodContext yoksa pool DEĞİŞMEDEN döner.
+// preferFormalShoes'un GENELLEŞTİRİLMİŞ hâli — Üst, Alt, Elbise ve Çanta
+// kategorilerine uygulanır. ÖNCEDEN bu kategoriler yalnızca (zayıf, seyrek)
+// `preferAvoidingKeywords` negatif filtresinden geçiyordu; "şık" isteyen bir
+// sorguda ai_analysis'i "Günlük"/"Rahat" etiketli bir tişört+pantolon, Gemini
+// açıkça bu kelimeleri "kaçınılması gereken" listesine koymadığı sürece hiç
+// geri plana atılmıyordu — gerçek hatanın kök nedeni buydu. Ayakkabı KENDİ
+// özel kelime dağarcığıyla (stiletto/sneaker) preferFormalShoes'ta kalır;
+// genel giyim sözlüğü (klasik/şık/rahat/günlük) farklı ve ayrı tutuldu.
+const GENEL_FORMAL_KATEGORILER = new Set(['Üst', 'Alt', DRESS_CATEGORY, 'Çanta'])
+const GUNLUK_STIL_DESENI = /\bgünlük\b|\bgündelik\b|\brahat\b|\bspor\b|\bcasual\b/i
+// "şık" için TEKRAR Unicode-farkında sınır (bkz. yukarıdaki SIK_KELIME_DESENI
+// notu — JS `\b` bu kelimede çalışmıyor).
+const RESMI_STIL_DESENI = new RegExp(
+  `\\bklasik\\b|${SIK_KELIME_DESENI}|\\bzarif\\b|\\belegan\\b|\\bresmi\\b|\\bofis\\b|\\bkokteyl\\b|\\bgece\\b`,
+  'i',
+)
+
+// true = resmi/şık görünüyor, false = günlük görünüyor, null = bilinmiyor.
+function genelFormallik(item) {
+  const veri = item?.aiAnalysis?.veri
+  if (!veri) return null
+
+  const metin = [veri.stil, veri.genel_aciklama, veri.alt_kategori, veri.kesim_tipi, veri.canta_turu, veri.bitis_efekti]
+    .filter(Boolean)
+    .join(' ')
+    .toLocaleLowerCase('tr-TR')
+
+  if (RESMI_STIL_DESENI.test(metin)) return true
+  if (GUNLUK_STIL_DESENI.test(metin)) return false
+  return null
+}
+
+// AYNI koşul ve AYNI "önceliklendir, eleme" deseni: yalnızca resmi bir
+// occasion + GERÇEKTEN resmiyet isteyen bir stil tercihi varken devreye girer.
+function preferFormalStyle(pool, category, moodContext) {
+  if (!GENEL_FORMAL_KATEGORILER.has(category)) return pool
+  if (!stilTercihiResmiMi(moodContext?.stilTercihi)) return pool
+  if (!FORMAL_OCCASIONS.includes(moodContext.occasion)) return pool
+
+  const resmiler = pool.filter((item) => genelFormallik(item) === true)
+  if (resmiler.length > 0) return resmiler
+
+  const gunlukOlmayanlar = pool.filter((item) => genelFormallik(item) !== false)
+  return gunlukOlmayanlar.length > 0 ? gunlukOlmayanlar : pool
+}
+
+// Bir kategori havuzuna TÜM mood-bazlı önceliklendirmeyi uygular: sırasıyla
+// kaçınılan kelimeler, sonra resmi ayakkabı kuralı (yalnızca Ayakkabı'da
+// gerçek etkisi olur), sonra genel resmiyet kuralı (Üst/Alt/Elbise/Çanta'da
+// gerçek etkisi olur — ikisi birbirini dışlar, aynı kategori için ikisi de
+// no-op olabilir ama asla ikisi de gerçek filtre uygulamaz). moodContext
+// yoksa pool DEĞİŞMEDEN döner.
 function applyMoodPreferences(pool, category, moodContext) {
   if (!moodContext) return pool
   const kelimeSuzulmus = preferAvoidingKeywords(pool, moodContext.kacinilanKelimeler)
-  return preferFormalShoes(kelimeSuzulmus, category, moodContext)
+  const ayakkabiSuzulmus = preferFormalShoes(kelimeSuzulmus, category, moodContext)
+  return preferFormalStyle(ayakkabiSuzulmus, category, moodContext)
+}
+
+// --- Elbise: Üst+Alt ikilisine ALTERNATİF bir "gövde" seçimi ---
+//
+// ÖNCEDEN Elbise kategorisi kombin kurma mantığının HİÇBİR yerinde
+// (OUTFIT_CATEGORIES, backend'e sorgulanan kategoriler, seed parça adayları)
+// yer almıyordu — gardıropta kaç elbise olursa olsun asla önerilmiyordu. Bu,
+// "şık bir akşam yemeği" gibi elbisenin doğal cevap olacağı isteklerde bile
+// sistemi yalnızca tişört+pantolon kombinasyonlarına hapsediyordu.
+const DRESS_ROUTE_CATEGORIES = [DRESS_CATEGORY, 'Ayakkabı', 'Çanta']
+
+// Verilen havuzda (textRanking varsa) bir kategorinin ULAŞABİLECEĞİ en
+// yüksek benzerlik skoru; hiçbir öğe ranking'te yoksa -Infinity.
+function enIyiSkor(items, textRanking) {
+  let best = -Infinity
+  for (const item of items) {
+    const skor = textRanking?.get(item.id)
+    if (typeof skor === 'number' && skor > best) best = skor
+  }
+  return best
+}
+
+// Elbise mi yoksa Üst+Alt ikilisi mi tercih edilmeli? İKİ aşamalı karar:
+//
+//   1. textRanking VARSA (arama_metni'nin GERÇEK embedding benzerliği —
+//      bkz. OutfitSuggestion.jsx > searchClothingItemsByText): en iyi Elbise
+//      skoru, en iyi Üst skoruYLA en iyi Alt skorunun ORTALAMASINA karşı
+//      kıyaslanır. Ortalama kullanılıyor çünkü bir elbise İKİ parçanın
+//      (üst+alt) YERİNE geçer — tek bir elbise skorunu tek bir üst skoruyla
+//      kıyaslamak adil olmazdı. Bu, kullanıcının GERÇEKTEN yazdığı cümleye
+//      (yalnızca occasion'a değil) göre karar verildiğinin doğrudan kanıtıdır.
+//   2. textRanking YOKSA (Chroma erişilemedi, arama başarısız oldu) ama
+//      occasion RESMİ ve stil tercihi GERÇEKTEN resmiyet istiyorsa:
+//      ai_analysis'ten okunan kaba formallik sinyaline (genelFormallik)
+//      bakılır. Üst+Alt'ta ZATEN resmi bir seçenek varsa BELİRSİZLİKTE
+//      MEVCUT DAVRANIŞ (Üst+Alt) korunur — yalnızca Üst+Alt'ta resmi
+//      seçenek YOKKEN ama Elbise'de VARKEN Elbise'ye geçilir.
+function elbiseTercihEdilsinMi(cleanItems, elbiseler, moodContext, textRanking) {
+  if (textRanking && textRanking.size > 0) {
+    const ustler = cleanItems.filter((item) => item.category === 'Üst')
+    const altlar = cleanItems.filter((item) => item.category === 'Alt')
+    const elbiseSkoru = enIyiSkor(elbiseler, textRanking)
+    const ustSkoru = enIyiSkor(ustler, textRanking)
+    const altSkoru = enIyiSkor(altlar, textRanking)
+
+    if (elbiseSkoru === -Infinity) return false
+    // Üst ya da Alt'ın ranking'te hiç karşılığı yoksa (indekslenmemiş)
+    // karşılaştırma anlamsızdır; elbisenin skoru varsa doğal tercih odur.
+    if (ustSkoru === -Infinity || altSkoru === -Infinity) return true
+
+    return elbiseSkoru > (ustSkoru + altSkoru) / 2
+  }
+
+  if (!stilTercihiResmiMi(moodContext?.stilTercihi)) return false
+  if (!FORMAL_OCCASIONS.includes(moodContext.occasion)) return false
+
+  const resmiElbiseVar = elbiseler.some((item) => genelFormallik(item) === true)
+  if (!resmiElbiseVar) return false
+
+  const ustler = cleanItems.filter((item) => item.category === 'Üst')
+  const altlar = cleanItems.filter((item) => item.category === 'Alt')
+  const resmiUstAltVar =
+    ustler.some((item) => genelFormallik(item) === true) &&
+    altlar.some((item) => genelFormallik(item) === true)
+
+  return !resmiUstAltVar
+}
+
+// Bir suggestion için "gövde" kategorilerini belirler: `OUTFIT_CATEGORIES`in
+// KENDİSİ (Üst+Alt+Ayakkabı+Çanta, referans eşitliği korunur — moodContext
+// yokken yapılan `=== OUTFIT_CATEGORIES` / JSON karşılaştırmalı testler
+// bundan etkilenmez) ya da `DRESS_ROUTE_CATEGORIES` (Elbise+Ayakkabı+Çanta).
+//
+// YALNIZCA moodContext VARKEN devreye girer — moodContext yoksa (pill-only
+// akış) HER ZAMAN OUTFIT_CATEGORIES döner. Elbise'nin serbest metin/mood
+// akışı DIŞINDA hâlâ hiç değerlendirilmemesi BİLİNÇLİ bir sınırdır: "stil
+// tercihi olmadan yapılan eski akış hâlâ aynı şekilde çalışıyor" regresyon
+// garantisi bunu gerektiriyor (bkz. CLAUDE.md).
+export function resolveActiveCategories(cleanItems, moodContext, textRanking = null) {
+  if (!moodContext) return OUTFIT_CATEGORIES
+
+  const elbiseler = cleanItems.filter((item) => item.category === DRESS_CATEGORY)
+  if (elbiseler.length === 0) return OUTFIT_CATEGORIES
+
+  return elbiseTercihEdilsinMi(cleanItems, elbiseler, moodContext, textRanking)
+    ? DRESS_ROUTE_CATEGORIES
+    : OUTFIT_CATEGORIES
 }
 
 // Her kategoriden rastgele bir parça seçer; o kategoride seçilebilir parça
@@ -190,7 +369,8 @@ function applyMoodPreferences(pool, category, moodContext) {
 // bile) kaçınılan kelimeler ve resmi ayakkabı kuralı yine de uygulanır —
 // bu ikisi Chroma'ya değil yalnızca ai_analysis'e bakar.
 export function buildRandomOutfit(items, seasons, moodContext = null) {
-  return OUTFIT_CATEGORIES.map((category) => {
+  const activeCategories = resolveActiveCategories(items, moodContext)
+  return activeCategories.map((category) => {
     const pool = items.filter((item) => item.category === category)
     if (pool.length === 0) return null
     const havuz = applyMoodPreferences(preferSeason(pool, seasons), category, moodContext)
@@ -219,12 +399,18 @@ export function buildRandomOutfit(items, seasons, moodContext = null) {
 // `moodContext`: kaçınılan kelimelerle örtüşen parçalar (preferAvoidingKeywords)
 // havuzdan ÖNCELİKLE elenir (elenmez, yalnızca arkaya atılır) — hem rastgele
 // hem de textRanking tabanlı seçim bu daraltılmış havuz üzerinden çalışır.
+// AYNI parametrelerle `resolveActiveCategories`e girilir (bkz. yukarısı):
+// dress route seçildiyse (yalnızca moodContext varken mümkün) seed yalnızca
+// Elbise/Ayakkabı/Çanta arasından gelir — Üst/Alt o suggestion için hiç aday
+// olmaz. moodContext yoksa davranış ESKİSİYLE (yalnızca OUTFIT_CATEGORIES)
+// BİREBİR AYNI kalır.
 export function pickSeedItem(
   cleanItems,
   seasons,
   { excludeId = null, textRanking = null, moodContext = null } = {},
 ) {
-  const uygun = cleanItems.filter((item) => OUTFIT_CATEGORIES.includes(item.category))
+  const activeCategories = resolveActiveCategories(cleanItems, moodContext, textRanking)
+  const uygun = cleanItems.filter((item) => activeCategories.includes(item.category))
   if (uygun.length === 0) return null
 
   const excluded = uygun.filter((item) => item.id !== excludeId)
@@ -254,9 +440,16 @@ export function pickSeedItem(
 // kartı hiç değiştirmeden yalnızca o isteğe bağlı ürünü döndürür ve düğme
 // bozuk görünürdü. İkisi de zaten OUTFIT_CATEGORIES'in DIŞINDA olduğu için
 // aşağıdaki döngüye hiç girmiyor — ayrı bir hariç tutma kodu gerekmedi.
-export function variantDepth(candidatesByCategory) {
+//
+// `categories` OPSİYONELDİR (varsayılan OUTFIT_CATEGORIES): dress route
+// aktifken (bkz. resolveActiveCategories) çağıran DRESS_ROUTE_CATEGORIES
+// geçmelidir — aksi hâlde derinlik, o suggestion'da hiç KULLANILMAYAN Üst/
+// Alt havuzlarının boyutuna göre yanlış hesaplanır ve "Başka Öneri Göster"
+// gerçek varyant sayısı tükendiğinde yeni bir başlangıç parçasına geçmek
+// yerine aynı kombini tekrar döndürebilirdi.
+export function variantDepth(candidatesByCategory, categories = OUTFIT_CATEGORIES) {
   let depth = 0
-  for (const category of OUTFIT_CATEGORIES) {
+  for (const category of categories) {
     const pool = candidatesByCategory?.get(category) ?? []
     const secilebilir = pool.filter((item) => item.isClean !== false)
     depth = Math.max(depth, secilebilir.length)
@@ -329,8 +522,16 @@ export function pickOuterwearItem(candidatesByCategory, weatherStatus, variant =
 //
 // moodContext OPSİYONELDİR: hem vektör adayları hem de rastgele geri düşüş
 // havuzu, seçilmeden ÖNCE applyMoodPreferences'tan geçirilir (kaçınılan
-// kelimeler + Ayakkabı için resmi ayakkabı kuralı). moodContext yoksa
-// (pill-only akış) davranış ESKİSİYLE BİREBİR AYNI kalır.
+// kelimeler + Ayakkabı için resmi ayakkabı kuralı + Üst/Alt/Elbise/Çanta için
+// genel resmiyet kuralı). moodContext yoksa (pill-only akış) davranış
+// ESKİSİYLE BİREBİR AYNI kalır.
+//
+// `textRanking` (opsiyonel): yalnızca `resolveActiveCategories`e (bkz.
+// yukarısı) aktarılır — dress route kararının `pickSeedItem`'da kullanılanla
+// AYNI sinyale göre verilmesi için. Bu iki fonksiyon AYNI girdilerle
+// çağrıldığında deterministik olarak AYNI kategori kümesini üretir; seed'in
+// hangi rotadan seçildiğiyle burada hangi rotanın kullanıldığı arasında
+// tutarsızlık oluşmaz.
 export function buildOutfitFromCandidates({
   seedItem,
   candidatesByCategory,
@@ -338,11 +539,14 @@ export function buildOutfitFromCandidates({
   seasons,
   variant = 0,
   moodContext = null,
+  textRanking = null,
 }) {
   let vectorCount = 0
   let fallbackCount = 0
 
-  const items = OUTFIT_CATEGORIES.map((category) => {
+  const activeCategories = resolveActiveCategories(cleanItems, moodContext, textRanking)
+
+  const items = activeCategories.map((category) => {
     if (seedItem?.category === category) return seedItem
 
     const adaylar = (candidatesByCategory?.get(category) ?? []).filter(

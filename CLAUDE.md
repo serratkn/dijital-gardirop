@@ -1968,8 +1968,10 @@ dendiğinde sistem parmak arası terlik önerdi — occasion doğru anlaşılmı
    kurulamayabilirdi; bu yüzden havuzda tercih edilen alt küme boşsa
    fonksiyon sessizce TÜM havuzu geri verir.
 3. **`preferFormalShoes(pool, category, moodContext)`** — yalnızca
-   `category === 'Ayakkabı'` VE `moodContext.stilTercihi` VE
-   `moodContext.occasion` `FORMAL_OCCASIONS = ['Akşam Yemeği', 'İş', 'Özel Davet']`
+   `category === 'Ayakkabı'` VE `moodContext.stilTercihi` **GERÇEKTEN
+   resmiyet/şıklık işaret ediyor** (bkz. `stilTercihiResmiMi`, 2026-08-26
+   düzeltmesi — aşağıya bakınız) VE `moodContext.occasion`
+   `FORMAL_OCCASIONS = ['Akşam Yemeği', 'İş', 'Özel Davet']`
    içindeyken devreye girer. `ayakkabiFormalligi(item)` iki ayrı regex ile
    `ayakkabi_turu`/`stil`/`topuk_yuksekligi` metnini sınıflandırır:
    `RESMI_AYAKKABI_DESENI` (topuk, stiletto, oxford, klasik, rugan, deri
@@ -2005,14 +2007,100 @@ dendiğinde sistem parmak arası terlik önerdi — occasion doğru anlaşılmı
    havuzdaki hiçbir parça onda yoksa `pickSeedItem` sessizce ESKİ (tam
    rastgele) davranışına döner — yeni bir hata yolu YOKTUR.
 
+**2026-08-26 — İKİNCİ bir kalite turu: "şık bir akşam yemeği" hâlâ basit bir
+tişört+pantolon üretiyordu.** Yukarıdaki dört mekanizma (2026-08-25) yalnızca
+Ayakkabı'yı ve NEGATİF kelime kaçınmayı çözmüştü; gerçek kullanımda üç ayrı,
+birbirinden bağımsız kök neden daha bulundu ve düzeltildi:
+
+5. **`preferFormalStyle(pool, category, moodContext)`** —
+   `preferFormalShoes`'un GENELLEŞTİRİLMİŞ hâli, Üst/Alt/Elbise/Çanta'ya
+   uygulanır. ÖNCEDEN bu dört kategori yalnızca (zayıf, seyrek) negatif
+   kelime kaçınmasından geçiyordu: Gemini `kacinilmasi_gerekenler` listesine
+   "günlük"/"basic" gibi kelimeleri KOYMADIĞI SÜRECE (ki gerçek Gemini
+   çağrılarında bu liste çoğu zaman BOŞ dönüyor — "Şık ama sade" gibi bir
+   istek çoğunlukla "kaçınılacak" değil "istenen" bir şeydir) hiçbir Üst/Alt
+   parçası geri plana atılmıyordu. `genelFormallik(item)` (`stil`,
+   `genel_aciklama`, `alt_kategori`, `kesim_tipi`, `canta_turu`,
+   `bitis_efekti` alanlarına bakar; ayrı bir `RESMI_STIL_DESENI`/
+   `GUNLUK_STIL_DESENI` çifti kullanır — Ayakkabı'nın stiletto/sneaker
+   sözlüğünden FARKLI bir genel giyim sözlüğü: klasik, şık, zarif, elegan,
+   resmi, ofis, kokteyl, gece / günlük, gündelik, rahat, spor, casual) AYNI
+   "önceliklendir, eleme" desenini izler.
+   **`applyMoodPreferences` artık kaçınılan kelimeler → `preferFormalShoes`
+   → `preferFormalStyle` sırasıyla ZİNCİRLEME uygular**; her kategori için
+   ikisinden yalnızca biri gerçek etki yapar (diğeri kendi kategori
+   kontrolünde no-op döner), asla ikisi birden çakışmaz.
+6. **`stilTercihiResmiMi(stilTercihi)` — GERÇEK BİR REGRESYON, kod yazılırken
+   YAKALANDI.** `preferFormalShoes` (ve yeni `preferFormalStyle`) ÖNCEDEN
+   yalnızca `moodContext.stilTercihi`'nin DOLU olup olmadığına bakıyordu,
+   İÇERİĞİNE değil. Bu, "Akşam yemeğine gidiyorum ama RAHAT giyinmek
+   istiyorum" gibi bir istekte occasion resmi ("Akşam Yemeği") VE stilTercihi
+   dolu ("Rahat") olduğu için sistemin YANLIŞLIKLA resmi ayakkabı/kıyafet
+   önceliklendirmesine yol açıyordu — tam TERSİ gerekiyordu. Artık
+   `stilTercihiResmiMi` stilTercihi'nin İÇERİĞİNİ (klasik/şık/zarif/elegan/
+   resmi/ofis/sofistik) bir regex'e karşı sınıyor; yalnızca GERÇEKTEN
+   resmiyet/şıklık işaret ediyorsa formal önceliklendirme devreye giriyor.
+   **YAKALANAN İKİNCİ HATA (kod yazılırken, gerçek regex testiyle):**
+   `\bşık\b` gibi bir desen JS'te HİÇ EŞLEŞMİYORDU — JS regex `\b`, `\w`'yi
+   yalnızca ASCII harfleriyle tanımlıyor, 'ş' bir "kelime karakteri"
+   sayılmıyor, bu yüzden boşlukla 'ş' arasında sınır bulunamıyordu. "şık"
+   kelimesi için elle, Unicode-farkında bir sınır (`SIK_KELIME_DESENI`)
+   kuruldu; listedeki diğer kelimeler ASCII bir harfle başlayıp bittiği için
+   normal `\b` sorunsuz çalışıyor.
+7. **Elbise, Üst+Alt ikilisine ALTERNATİF hâle getirildi
+   (`resolveActiveCategories`, `DRESS_CATEGORY`).** ÖNCEDEN Elbise kategorisi
+   kombin kurma mantığının HİÇBİR yerinde (ne `OUTFIT_CATEGORIES`'te, ne
+   backend'e sorgulanan `CANDIDATE_CATEGORIES`'te, ne `pickSeedItem`'ın aday
+   havuzunda) yer almıyordu — gardıropta kaç elbise olursa olsun ASLA
+   önerilmiyordu; bu, şikayetin ikinci (ve daha temel) kök nedeniydi. Elbise
+   `OUTFIT_CATEGORIES`'e basitçe EKLENEMEZDİ — Makyaj/Dış Giyim'in aksine bir
+   EK değil, Üst+Alt'ın YERİNE geçen bir ALTERNATİFTİR (aksi hâlde kombin
+   "elbise + tişört + pantolon" gibi anlamsız 5 parçaya çıkardı).
+   `resolveActiveCategories(cleanItems, moodContext, textRanking)` bu
+   suggestion için hangi "gövde" kategorilerinin kullanılacağına karar verir
+   ve ya `OUTFIT_CATEGORIES`'in KENDİSİNİ (referans eşitliği korunur) ya da
+   `[DRESS_CATEGORY, 'Ayakkabı', 'Çanta']`'yı döndürür; `buildRandomOutfit`,
+   `pickSeedItem` ve `buildOutfitFromCandidates` artık statik
+   `OUTFIT_CATEGORIES` yerine bu dinamik listeyi kullanır.
+   - **Karar İKİ AŞAMALIDIR.** (a) `textRanking` VARSA (arama_metni'nin
+     GERÇEK embedding benzerliği): en iyi Elbise skoru, en iyi Üst skoruyla
+     en iyi Alt skorunun ORTALAMASINA karşı kıyaslanır — bir elbise İKİ
+     parçanın (üst+alt) YERİNE geçtiği için karşılaştırma da bu şekilde adil
+     kurulur; bu, kararın yalnızca occasion'a değil kullanıcının GERÇEKTEN
+     yazdığı cümleye göre verildiğinin doğrudan kanıtıdır. (b) `textRanking`
+     YOKSA (Chroma erişilemedi): `genelFormallik`'e dayalı bir yedek — resmi
+     occasion + gerçekten resmi bir stilTercihi + Üst+Alt tarafında resmi
+     seçenek YOKKEN ama Elbise'de VARKEN Elbise'ye geçilir; Üst+Alt'ta DA
+     resmi bir seçenek varsa BELİRSİZLİKTE MEVCUT DAVRANIŞ (Üst+Alt) korunur.
+   - **YALNIZCA `moodContext` VARKEN devreye girer** — moodContext yoksa
+     (hazır durum pill'i akışı) HER ZAMAN `OUTFIT_CATEGORIES` döner. Elbise'nin
+     pill-only akışta HÂLÂ hiç değerlendirilmemesi BİLİNÇLİ bir sınırdır:
+     "stil tercihi olmadan yapılan eski akış hâlâ aynı şekilde çalışıyor"
+     regresyon garantisi tam olarak bunu gerektiriyor.
+   - **"Rahat bir gün" gibi zıt bir istekte Elbise KENDİLİĞİNDEN elenir** —
+     ayrı bir "bu occasion elbiseye uygun mu" beyaz listesi YOKTUR; dresslerin
+     "rahat" bir sorguya embedding benzerliği doğal olarak düşük çıktığı için
+     karşılaştırma kendiliğinden Üst+Alt'ı seçer (gerçek Gemini + gerçek
+     embedding ile doğrulandı, bkz. aşağıdaki test notu).
+   - `CANDIDATE_CATEGORIES`'e `DRESS_CATEGORY` eklendi (dress route
+     seçilmese bile HER ZAMAN sorgulanır — backend'in kategori bazlı sorgusu
+     zaten jenerik olduğu için maliyeti yok, karar verirken gerçek vektör
+     adaylarına ihtiyaç var). **Backend'de HİÇBİR değişiklik gerekmedi**
+     (aynı `/companions` genelleme kanıtı, bkz. 2026-08-26 "Dış Giyim" kaydı).
+   - `variantDepth(candidatesByCategory, categories = OUTFIT_CATEGORIES)`
+     artık opsiyonel bir `categories` parametresi alıyor — dress route
+     aktifken çağıran (`showAnother`) `resolveActiveCategories`'in
+     döndürdüğü listeyi geçirmeli, aksi hâlde derinlik o suggestion'da HİÇ
+     KULLANILMAYAN Üst/Alt havuzlarının boyutuna göre yanlış hesaplanırdı.
+
 **Geriye dönük uyumluluk yapısal olarak garanti edilir**: `buildRandomOutfit`,
 `pickSeedItem` ve `buildOutfitFromCandidates`'ın hepsi `moodContext`/
 `textRanking`'i OPSİYONEL, varsayılanı `null` olan son parametreler olarak
 alır; bu değerler yoksa (hazır durum pill'i seçildiğinde `handlePillSelect`
 her ikisini de bilerek `null`'a çeker) üç fonksiyon da ESKİ davranışını
-BİREBİR korur. 73 önceden var olan test — hiçbiri yeni parametreleri
-geçirmeden — bu iddiayı doğruluyor; üstüne mood bağlamına özgü 18 yeni
-kontrol eklendi (bkz. `test-outfit-builder.mjs`).
+BİREBİR korur. `test-outfit-builder.mjs` **132 kontrol** (91 önceki + Dış
+Giyim'in 17'si + bu turun 24'ü), hiçbiri yeni parametreleri geçirmeden eski
+davranışı doğruluyor.
 
 **İsteğe bağlı makyaj bölümü (`pickMakeupItem`).** Makyaj, `OUTFIT_CATEGORIES`'e
 **bilerek eklenmedi**: kombinin slotu değil, üstüne konan bir öneri. Bunun yerine
@@ -2427,6 +2515,107 @@ tamamlayıp kaldırıldı:
 
 > Bundan sonraki her çalışma buraya tarihiyle işlenir: eklenen özellikler, düzeltilen
 > hatalar, alınan mimari kararlar. En yeni kayıt en üstte.
+
+### 2026-08-26 — Kalite düzeltmesi: "şık bir akşam yemeği" artık gerçekten şık
+- **Rapor edilen sorun:** Serbest metin/mood akışında "şık bir akşam yemeği"
+  dendiğinde Gemini occasion'ı ve stil tercihini ("Şıklık") doğru çıkarıyordu
+  ama seçilen kombin basit bir tişört+pantolondan ibaret kalıyordu; gardıropta
+  elbiseler olmasına rağmen HİÇBİR ZAMAN önerilmiyordu. Bu, önceki günün
+  "mood bağlamı" düzeltmesinin (bkz. yukarıdaki 2026-08-25 kaydı) kapsamının
+  yetersiz kaldığı ikinci bir tur — o düzeltme yalnızca Ayakkabı'yı ve
+  NEGATİF kelime kaçınmasını (Gemini'nin `kacinilmasi_gerekenler` listesi)
+  çözmüştü.
+- **Üç bağımsız kök neden bulundu** (ayrıntılı mimari not için bkz. §8
+  "Mood bağlamı" bölümündeki 2026-08-26 eki):
+  1. **Elbise kategorisi kombin kurma mantığının HİÇBİR yerinde yoktu** —
+     ne `OUTFIT_CATEGORIES`'te ne backend'e sorgulanan kategorilerde ne
+     `pickSeedItem`'ın aday havuzunda. Gardıropta kaç elbise olursa olsun
+     sistem yapısal olarak asla bir elbiseyi değerlendirmiyordu.
+  2. **Stil filtreleri (`preferFormalShoes`) SADECE Ayakkabı'ya
+     uygulanıyordu.** Üst/Alt/Elbise/Çanta yalnızca (çoğu zaman boş dönen)
+     negatif kelime kaçınmasından geçiyordu — "şık" isteyen bir sorguda
+     "Günlük"/"Rahat" etiketli bir tişört+pantolon hiçbir zaman geri plana
+     atılmıyordu.
+  3. **`stilTercihi` yalnızca "DOLU MU" diye kontrol ediliyordu, İÇERİĞİNE
+     hiç bakılmıyordu** — "Akşam yemeğine gidiyorum ama RAHAT giyinmek
+     istiyorum" gibi bir istekte occasion resmi olduğu için sistem
+     YANLIŞLIKLA resmi kıyafet önceliklendiriyordu, tam TERSİ gerekirken.
+- **Düzeltme — `frontend/src/lib/outfitBuilder.js`:**
+  - `resolveActiveCategories(cleanItems, moodContext, textRanking)` +
+    `DRESS_CATEGORY = 'Elbise'`: Elbise artık Üst+Alt ikilisine bir
+    ALTERNATİF olarak değerlendiriliyor (ek değil — bir elbise iki parçanın
+    YERİNE geçer). Karar `textRanking` varsa gerçek embedding benzerliği
+    karşılaştırmasıyla (Elbise skoru vs. Üst+Alt skorlarının ortalaması),
+    yoksa `genelFormallik`'e dayalı bir yedekle veriliyor. **Yalnızca
+    moodContext varken devrede** — pill-only akış hiç etkilenmiyor.
+  - `preferFormalStyle(pool, category, moodContext)` — `preferFormalShoes`'un
+    Üst/Alt/Elbise/Çanta'ya genelleştirilmiş hâli, kendi genel giyim
+    sözlüğüyle (klasik/şık/zarif/elegan/resmi/ofis/kokteyl/gece vs.
+    günlük/gündelik/rahat/spor/casual).
+  - `stilTercihiResmiMi(stilTercihi)` — hem `preferFormalShoes` hem
+    `preferFormalStyle` hem de dress route kararı artık stilTercihi'nin
+    İÇERİĞİNİN gerçekten resmiyet/şıklık işaret edip etmediğini kontrol
+    ediyor, yalnızca doluluğunu değil.
+  - **YAKALANAN İKİNCİ, BAĞIMSIZ HATA (kod yazılırken, gerçek regex testiyle
+    tespit edildi):** `\bşık\b` deseni JS'te HİÇBİR ZAMAN eşleşmiyordu — JS
+    regex `\b` sınırı `\w`'yi yalnızca ASCII harfleriyle tanımlıyor, Türkçe'ye
+    özgü harfler (ş, ğ, ı, ö, ü, ç) "kelime karakteri" sayılmıyor. "sade ve
+    şık" gibi bir cümle bu yüzden `stilTercihiResmiMi`'yi hiç tetiklemiyordu.
+    Elle, Unicode-farkında bir sınır (`SIK_KELIME_DESENI`) kuruldu.
+  - `CANDIDATE_CATEGORIES`'e `DRESS_CATEGORY` eklendi; `variantDepth` artık
+    opsiyonel bir `categories` parametresi alıyor (dress route aktifken
+    doğru derinlik hesaplansın diye).
+  - **Backend'de HİÇBİR DEĞİŞİKLİK GEREKMEDİ** — `/companions` ucu zaten
+    tamamen kategori-jenerik (aynı gün eklenen "Dış Giyim" özelliğinde
+    doğrulanan aynı gerçek).
+- **Doğrulama — `test-outfit-builder.mjs` 108 → 132 kontrol.** Yeni bölüm
+  "13) KALİTE DÜZELTMESİ": `resolveActiveCategories`'in hem textRanking hem
+  formallik-fallback dallarında doğru karar vermesi (dahil: "şık" isteğinde
+  Elbise kazanıyor, "rahat" isteğinde kazanmıyor, moodContext yokken HER
+  ZAMAN eski davranış, elbise yoksa HER ZAMAN eski davranış); uçtan uca
+  `pickSeedItem` + `buildOutfitFromCandidates` izi (seed olarak GERÇEKTEN
+  elbise seçiliyor, kombin TAM 3 parça — Üst/Alt hiç yok, vektörce daha
+  yakın ama GÜNLÜK ayakkabı/çanta değil RESMİ olanlar seçiliyor);
+  `preferFormalStyle`'ın Üst/Çanta'da genel günlük/şık ayrımını GERÇEKTEN
+  yaptığı; **`stilTercihiResmiMi` regresyon testi** ("Akşam Yemeği" + "Rahat"
+  stilTercihiyle sneaker/günlük çanta ARTIK geri itilmiyor); `variantDepth`'in
+  dress route kategorileriyle doğru derinlik hesapladığı VE eski imzasının
+  (parametre verilmeden) regresyonsuz çalıştığı.
+- **Doğrulama — GERÇEK backend + GERÇEK Gemini + GERÇEK ChromaDB
+  embeddingleriyle uçtan uca (13 kontrol, Playwright + sistem Chrome).**
+  Karışık bir test gardırobu kuruldu (her kategoride hem "şık" hem "günlük"
+  etiketli parçalar: beyaz basic tişört/ipek şık bluz, mavi kot pantolon/
+  siyah kumaş pantolon, siyah kokteyl elbisesi, beyaz sneaker/siyah topuklu
+  ayakkabı, kanvas günlük çanta/siyah saten clutch); `ai_analysis` elle
+  yazıldı (generateContent kotası harcanmadan), embeddingler GERÇEK
+  `create-embeddings.js --uygula` ile üretildi:
+  - **KRİTİK — "Şık bir akşam yemeğine gidiyorum, sade ama zarif görünmek
+    istiyorum."** GERÇEK Gemini `stil_tercihi: "Sade ve Zarif"`,
+    `kacinilmasi_gerekenler: []` (BOŞ — kök neden #2'nin gerçek kanıtı)
+    döndürdü. Sonuç: **siyah kokteyl elbisesi + siyah topuklu ayakkabı +
+    siyah saten clutch** — vektörce daha yakın sneaker ve günlük çanta
+    DEĞİL, RESMİ olanlar seçildi; "Tarzına göre seçildi" rozeti çıktı.
+  - **KRİTİK — ZIT istek: "Rahat bir gün geçirmek istiyorum, günlük ve
+    konforlu bir kombin lazım."** GERÇEK Gemini `stil_tercihi: "Rahat"`
+    döndürdü. Sonuç: **beyaz basic tişört + mavi kot pantolon + beyaz
+    sneaker + kanvas günlük çanta** — dört parça, Elbise HİÇ seçilmedi.
+  - **REGRESYON — yalnızca "Spor" pill'i (stil tercihi YOK):** yorumlama
+    özeti hiç görünmedi (Gemini hiç çağrılmadı), kombin yine 4 parça, Elbise
+    seçenek olarak hiç değerlendirilmedi — pill-only akış BİREBİR eskisi gibi.
+  - Üç senaryoda da temiz konsol.
+- Regresyon: backend'e hiç dokunulmadığı için `test-all-endpoints` 77/77,
+  `test-outfit-rag --birim` 36/36, `test-outfit-interpret --kotasiz` 15/15
+  değişmeden geçti; frontend lint + build temiz.
+- **Temizlik:** test kullanıcısı ve 9 test parçası `cleanup.js` ile silindi
+  (kullanıcı CASCADE + 9 öksüz Chroma vektörü süpürüldü).
+- **Bilinçli olarak DOKUNULMAYAN bir nokta:** `dirtyOnlyCategories`/
+  `emptyCategories` (`OutfitSuggestion.jsx`, "Temiz Alt parçan yok" gibi
+  mesajlar) hâlâ STATİK `OUTFIT_CATEGORIES`'e bakıyor — dress route aktifken
+  (kombin Üst/Alt kullanmıyorken) teorik olarak ilgisiz bir "Temiz Alt
+  parçan yok" notu görünebilir. Bu, `moodContext`'in bir REF'te tutulup
+  render'ı tetiklememesiyle ilgili ayrı bir mimari kısıt (ref okumak useMemo
+  bağımlılığı olamaz) ve raporlanan kalite sorunuyla doğrudan ilgisi yok;
+  eklenen karmaşıklığa değmedi, bilinçli olarak dokunulmadı.
 
 ### 2026-08-26 — Katmanlama (layering): koşullu 5. slot olarak Dış Giyim
 - **Ne eklendi:** Kombin Öner artık kışlık kombinlerde ana parçanın (Üst/

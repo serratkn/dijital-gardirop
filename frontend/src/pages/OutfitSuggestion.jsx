@@ -33,6 +33,7 @@ import {
   pickMakeupItem,
   pickOuterwearItem,
   pickSeedItem,
+  resolveActiveCategories,
   variantDepth,
 } from '../lib/outfitBuilder'
 
@@ -321,6 +322,7 @@ function OutfitSuggestion() {
         seasons: preferredSeasons,
         variant,
         moodContext: moodContextRef.current,
+        textRanking: textRankingRef.current,
       })
 
       setSuggestionItems(next)
@@ -499,8 +501,16 @@ function OutfitSuggestion() {
     }
 
     // Akıllı mod: aynı başlangıç parçasıyla havuzda BİR SIRA İLERLE
-    // (en yakın, sonra ikinci en yakın...).
-    const depth = variantDepth(resolveCandidates(pool.candidateIds))
+    // (en yakın, sonra ikinci en yakın...). Derinlik bu suggestion'da
+    // GERÇEKTEN kullanılan kategorilere göre hesaplanmalı — dress route
+    // aktifken (bkz. resolveActiveCategories) kullanılmayan Üst/Alt
+    // havuzlarının boyutu yanlış bir derinlik verirdi.
+    const activeCategories = resolveActiveCategories(
+      cleanItems,
+      moodContextRef.current,
+      textRankingRef.current,
+    )
+    const depth = variantDepth(resolveCandidates(pool.candidateIds), activeCategories)
     const next = variantRef.current + 1
 
     // Havuz tükendi: aynı başlangıç parçasından yeni bir kombin çıkmaz,

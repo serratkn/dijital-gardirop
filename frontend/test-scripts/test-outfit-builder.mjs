@@ -12,6 +12,7 @@
 
 import {
   CANDIDATE_CATEGORIES,
+  DRESS_CATEGORY,
   MAKEUP_CATEGORY,
   OUTERWEAR_CATEGORY,
   OUTFIT_CATEGORIES,
@@ -22,6 +23,7 @@ import {
   pickMakeupItem,
   pickOuterwearItem,
   pickSeedItem,
+  resolveActiveCategories,
   variantDepth,
 } from '../src/lib/outfitBuilder.js'
 import { matchesSkinTone } from '../src/lib/skinTone.js'
@@ -426,9 +428,9 @@ console.log('\n9) Makyaj kombin ızgarasına SIZMIYOR')
     pickMakeupItem(havuz)?.name === 'ruj',
   )
   check(
-    'CANDIDATE_CATEGORIES = kombin kategorileri + Makyaj + Dış Giyim',
+    'CANDIDATE_CATEGORIES = kombin kategorileri + Makyaj + Dış Giyim + Elbise',
     JSON.stringify(CANDIDATE_CATEGORIES) ===
-      JSON.stringify([...OUTFIT_CATEGORIES, MAKEUP_CATEGORY, OUTERWEAR_CATEGORY]),
+      JSON.stringify([...OUTFIT_CATEGORIES, MAKEUP_CATEGORY, OUTERWEAR_CATEGORY, DRESS_CATEGORY]),
     CANDIDATE_CATEGORIES.join(', '),
   )
 }
@@ -716,6 +718,271 @@ console.log('    (bkz. deneme@gmail.com gardırobu: sneaker + terlik + babet + s
     check(
       'moodContext verilmezse ESKİ (tamamen rastgele) davranış korunuyor',
       new Set(eskiDavranis.map((k) => k[0]?.name)).size === 2,
+    )
+  }
+}
+
+// ---------------------------------------------------------------
+console.log('\n13) KALİTE DÜZELTMESİ — Elbise, Üst+Alt ikilisine ALTERNATİF')
+console.log('    (bkz. gerçek şikayet: "şık bir akşam yemeği" → basit tişört+pantolon çıkıyordu,')
+console.log('     gardıropta elbise olmasına rağmen HİÇ önerilmiyordu)')
+
+{
+  // Karışık, gerçekçi bir gardırop: her kategoride hem "şık" hem "günlük"
+  // etiketli parçalar var — testin asıl amacı DOĞRU olanın seçilmesi.
+  const basicTisort = parca({ name: 'beyaz basic tişört', category: 'Üst', aiAnalysis: { veri: { stil: 'Günlük', alt_kategori: 'Tişört' } } })
+  const ipekBluz = parca({ name: 'ipek şık bluz', category: 'Üst', aiAnalysis: { veri: { stil: 'Şık', alt_kategori: 'Bluz' } } })
+  const kotPantolon = parca({ name: 'mavi kot pantolon', category: 'Alt', aiAnalysis: { veri: { stil: 'Günlük', alt_kategori: 'Kot Pantolon' } } })
+  const kumasPantolon = parca({ name: 'siyah kumaş pantolon', category: 'Alt', aiAnalysis: { veri: { stil: 'Klasik', alt_kategori: 'Kumaş Pantolon' } } })
+  const kokteylElbise = parca({ name: 'siyah kokteyl elbisesi', category: 'Elbise', aiAnalysis: { veri: { stil: 'Şık', genel_aciklama: 'Zarif bir kokteyl elbisesi' } } })
+  const sneaker = parca({ name: 'beyaz sneaker', category: 'Ayakkabı', aiAnalysis: { veri: { stil: 'Spor', ayakkabi_turu: 'Sneaker' } } })
+  const topuklu = parca({ name: 'siyah topuklu ayakkabı', category: 'Ayakkabı', aiAnalysis: { veri: { stil: 'Klasik', ayakkabi_turu: 'Topuklu Ayakkabı' } } })
+  const gunlukCanta = parca({ name: 'kanvas günlük çanta', category: 'Çanta', aiAnalysis: { veri: { stil: 'Günlük', canta_turu: 'Tote' } } })
+  const sikCanta = parca({ name: 'siyah saten clutch', category: 'Çanta', aiAnalysis: { veri: { stil: 'Şık', canta_turu: 'Clutch' } } })
+
+  const tumParcalar = [
+    basicTisort, ipekBluz, kotPantolon, kumasPantolon, kokteylElbise, sneaker, topuklu, gunlukCanta, sikCanta,
+  ]
+
+  console.log('\n   a) resolveActiveCategories — REGRESYON: moodContext yoksa HER ZAMAN Üst+Alt')
+  {
+    check(
+      'moodContext yokken elbise olsa BİLE her zaman OUTFIT_CATEGORIES (referans eşit)',
+      resolveActiveCategories(tumParcalar, null) === OUTFIT_CATEGORIES,
+    )
+    const sikContext = createMoodContext({ occasion: 'Akşam Yemeği', stil_tercihi: 'Şık', kacinilmasi_gerekenler: [] })
+    const textRankingSik = new Map([[kokteylElbise.id, 0.99], [basicTisort.id, 0.1], [kotPantolon.id, 0.1]])
+    check(
+      'moodContext VE textRanking elbiseyi güçlü işaret etse bile moodContext null ise yine Üst+Alt',
+      JSON.stringify(resolveActiveCategories(tumParcalar, null, textRankingSik)) === JSON.stringify(OUTFIT_CATEGORIES),
+    )
+    check(
+      'Gardıropta HİÇ temiz Elbise yoksa (moodContext VE textRanking olsa bile) Üst+Alt kalır',
+      JSON.stringify(
+        resolveActiveCategories(tumParcalar.filter((i) => i.category !== 'Elbise'), sikContext, textRankingSik),
+      ) === JSON.stringify(OUTFIT_CATEGORIES),
+    )
+  }
+
+  console.log('\n   b) resolveActiveCategories — textRanking VARKEN: elbise skoru üst+alt ORTALAMASINA karşı')
+  {
+    const sikContext = createMoodContext({ occasion: 'Akşam Yemeği', stil_tercihi: 'Şık', kacinilmasi_gerekenler: [] })
+    // Elbise (0.93) > (Üst en iyi 0.82 + Alt en iyi 0.80) / 2 = 0.81 → Elbise kazanır.
+    const textRankingSik = new Map([
+      [basicTisort.id, 0.55], [ipekBluz.id, 0.82], [kotPantolon.id, 0.50], [kumasPantolon.id, 0.80],
+      [kokteylElbise.id, 0.93], [sneaker.id, 0.45], [topuklu.id, 0.85], [gunlukCanta.id, 0.48], [sikCanta.id, 0.88],
+    ])
+    check(
+      'KRİTİK — "şık" isteğinde textRanking Elbise rotasını GERÇEKTEN seçtiriyor',
+      JSON.stringify(resolveActiveCategories(tumParcalar, sikContext, textRankingSik)) ===
+        JSON.stringify(['Elbise', 'Ayakkabı', 'Çanta']),
+    )
+
+    // Aynı gardırop, TERS istek: "rahat bir gün" — elbise skoru düşük, dress
+    // route KAZANMAMALI (dress'in "varsayılan olarak resmi" sayılmadığının kanıtı).
+    const rahatContext = createMoodContext({ occasion: 'Buluşma', stil_tercihi: 'Rahat', kacinilmasi_gerekenler: [] })
+    const textRankingRahat = new Map([
+      [basicTisort.id, 0.88], [ipekBluz.id, 0.40], [kotPantolon.id, 0.85], [kumasPantolon.id, 0.35],
+      [kokteylElbise.id, 0.30], [sneaker.id, 0.90], [topuklu.id, 0.20], [gunlukCanta.id, 0.82], [sikCanta.id, 0.25],
+    ])
+    check(
+      'KRİTİK — "rahat bir gün" isteğinde Elbise TERCİH EDİLMİYOR, Üst+Alt kalıyor',
+      JSON.stringify(resolveActiveCategories(tumParcalar, rahatContext, textRankingRahat)) ===
+        JSON.stringify(OUTFIT_CATEGORIES),
+    )
+  }
+
+  console.log('\n   c) resolveActiveCategories — textRanking YOKKEN (Chroma erişilemedi): formallik sinyaline düşülür')
+  {
+    const sikContext = createMoodContext({ occasion: 'Akşam Yemeği', stil_tercihi: 'Şık', kacinilmasi_gerekenler: [] })
+
+    // Yalnızca Elbise'de resmi bir seçenek var (kumasPantolon 'Klasik' ama
+    // ipekBluz 'Şık' — Üst+Alt'ta İKİSİ BİRDEN resmi olmalı, o yüzden bu
+    // senaryoda Üst tarafı için resmi olmayan bir gardırop kuruluyor).
+    const sadeceUstGunluk = [basicTisort, kumasPantolon, kokteylElbise, topuklu, sikCanta]
+    check(
+      'Üst+Alt tarafında resmi seçenek YOKKEN (yalnızca Üst günlük) Elbise tercih ediliyor',
+      JSON.stringify(resolveActiveCategories(sadeceUstGunluk, sikContext)) ===
+        JSON.stringify(['Elbise', 'Ayakkabı', 'Çanta']),
+    )
+
+    // Üst+Alt'ta DA resmi bir seçenek varsa (ipekBluz + kumasPantolon)
+    // BELİRSİZLİKTE MEVCUT DAVRANIŞ (Üst+Alt) korunur.
+    check(
+      'Üst+Alt tarafında DA resmi seçenek varsa belirsizlikte Üst+Alt KORUNUYOR',
+      JSON.stringify(resolveActiveCategories(tumParcalar, sikContext)) === JSON.stringify(OUTFIT_CATEGORIES),
+    )
+
+    // Elbise hiç resmi değilse (yalnızca günlük elbise olsaydı) Üst+Alt kalır.
+    const gunlukElbise = parca({ name: 'gündelik keten elbise', category: 'Elbise', aiAnalysis: { veri: { stil: 'Günlük' } } })
+    check(
+      'Elbise GÜNLÜK etiketliyse (resmi değilse) tercih edilmiyor',
+      JSON.stringify(resolveActiveCategories([basicTisort, kumasPantolon, gunlukElbise, topuklu], sikContext)) ===
+        JSON.stringify(OUTFIT_CATEGORIES),
+    )
+  }
+
+  console.log('\n   d) pickSeedItem + buildOutfitFromCandidates — UÇTAN UCA "şık bir akşam yemeği"')
+  {
+    const sikContext = createMoodContext({ occasion: 'Akşam Yemeği', stil_tercihi: 'Şık', kacinilmasi_gerekenler: [] })
+    const textRankingSik = new Map([
+      [basicTisort.id, 0.55], [ipekBluz.id, 0.82], [kotPantolon.id, 0.50], [kumasPantolon.id, 0.80],
+      [kokteylElbise.id, 0.93], [sneaker.id, 0.45], [topuklu.id, 0.85], [gunlukCanta.id, 0.48], [sikCanta.id, 0.88],
+    ])
+
+    const seed = pickSeedItem(tumParcalar, null, { textRanking: textRankingSik, moodContext: sikContext })
+    check('Seed olarak GERÇEKTEN elbise seçildi (en yüksek "şık" skoru)', seed?.name === 'siyah kokteyl elbisesi', seed?.name)
+
+    // Vektör-yakınlık adayları BİLEREK "yanıltıcı" kuruldu: her kategoride
+    // GÜNLÜK parça vektör olarak DAHA YAKIN (listede ÖNCE) ama stil filtresi
+    // yine de resmi olanı öne çıkarmalı.
+    const candidatesByCategory = new Map([
+      ['Ayakkabı', [sneaker, topuklu]],
+      ['Çanta', [gunlukCanta, sikCanta]],
+    ])
+
+    const sonuc = buildOutfitFromCandidates({
+      seedItem: seed,
+      candidatesByCategory,
+      cleanItems: tumParcalar,
+      seasons: null,
+      moodContext: sikContext,
+      textRanking: textRankingSik,
+    })
+
+    check('KRİTİK — kombin TAM 3 PARÇA (Elbise+Ayakkabı+Çanta), Üst/Alt YOK', sonuc.items.length === 3, adlar(sonuc.items).join(', '))
+    check('Elbise kombinde', adlar(sonuc.items).includes('siyah kokteyl elbisesi'))
+    check('Üst hiç kombine girmiyor', !kategoriler(sonuc.items).includes('Üst'))
+    check('Alt hiç kombine girmiyor', !kategoriler(sonuc.items).includes('Alt'))
+    check(
+      'KRİTİK — vektörce daha yakın sneaker DEĞİL, RESMİ topuklu seçildi',
+      adlar(sonuc.items).includes('siyah topuklu ayakkabı') && !adlar(sonuc.items).includes('beyaz sneaker'),
+      adlar(sonuc.items).join(', '),
+    )
+    check(
+      'KRİTİK — vektörce daha yakın günlük çanta DEĞİL, RESMİ clutch seçildi',
+      adlar(sonuc.items).includes('siyah saten clutch') && !adlar(sonuc.items).includes('kanvas günlük çanta'),
+      adlar(sonuc.items).join(', '),
+    )
+  }
+
+  console.log('\n   e) UÇTAN UCA — TERS vaka: "rahat bir gün" günlük parçalar seçiyor, Elbise YOK')
+  {
+    const rahatContext = createMoodContext({ occasion: 'Buluşma', stil_tercihi: 'Rahat', kacinilmasi_gerekenler: [] })
+    const kombinler = Array.from({ length: 30 }, () => buildRandomOutfit(tumParcalar, null, rahatContext))
+    check(
+      'Elbise 30 denemenin HİÇBİRİNDE seçilmiyor (occasion resmi değil, dress route hiç devreye girmiyor)',
+      kombinler.every((k) => !k.some((item) => item.category === 'Elbise')),
+    )
+    check(
+      'Kombin her zaman 4 parça (Üst+Alt+Ayakkabı+Çanta)',
+      kombinler.every((k) => k.length === 4),
+    )
+  }
+
+  console.log('\n   f) preferFormalStyle — GENELLEŞTİRİLMİŞ kural artık Üst/Alt/Çanta\'ya da uygulanıyor')
+  {
+    const sikContext = createMoodContext({ occasion: 'Akşam Yemeği', stil_tercihi: 'Şık', kacinilmasi_gerekenler: [] })
+    // BİLEREK Ayakkabı kategorisinden bir seed: hem Üst hem Çanta slotunun
+    // candidatesByCategory'DEN bağımsız çözülmesi gerekiyor (seed'in KENDİ
+    // kategorisi olsaydı o slot doğrudan seed'e eşitlenir, candidates hiç
+    // devreye girmezdi). cleanItems'ta hiç Elbise YOK — bu test yalnızca
+    // Üst/Çanta'daki genel stil filtresini izole etmek istiyor, dress route
+    // kararına (bkz. bölüm b/c) hiç girmemeli.
+    const seed = parca({ name: 'seed-ayakkabi', category: 'Ayakkabı' })
+
+    // ÖNCEDEN (bu düzeltmeden önce) preferAvoidingKeywords tek başına bu
+    // durumu YAKALAYAMAZDI: Gemini "kaçınılması gerekenler" listesine
+    // "günlük"/"basic" kelimelerini KOYMADIĞI sürece basicTisort hiç geri
+    // plana atılmazdı. Artık genelFormallik/preferFormalStyle BAĞIMSIZ
+    // olarak bu ayrımı yapıyor.
+    const sonuc = buildOutfitFromCandidates({
+      seedItem: seed,
+      candidatesByCategory: new Map([
+        ['Üst', [basicTisort, ipekBluz]],
+        ['Çanta', [gunlukCanta, sikCanta]],
+      ]),
+      cleanItems: [seed, basicTisort, ipekBluz, gunlukCanta, sikCanta],
+      seasons: null,
+      moodContext: sikContext,
+    })
+    check(
+      'KRİTİK — GÜNLÜK tişört DEĞİL, ŞIK bluz seçildi (Üst kategorisi artık stil-farkında)',
+      adlar(sonuc.items).includes('ipek şık bluz') && !adlar(sonuc.items).includes('beyaz basic tişört'),
+      adlar(sonuc.items).join(', '),
+    )
+    check(
+      'Çanta kategorisinde de aynı kural: GÜNLÜK çanta DEĞİL, ŞIK clutch seçildi',
+      adlar(sonuc.items).includes('siyah saten clutch') && !adlar(sonuc.items).includes('kanvas günlük çanta'),
+    )
+  }
+
+  console.log('\n   g) YENİ BULUNAN HATA DÜZELTMESİ — stilTercihi İÇERİĞİ artık gerçekten okunuyor')
+  {
+    // "Akşam yemeğine gidiyorum ama RAHAT giyinmek istiyorum": occasion RESMİ
+    // (Akşam Yemeği) ama stilTercihi AÇIKÇA "Rahat" — ÖNCEDEN kod yalnızca
+    // "stilTercihi dolu mu" diye bakıyordu ve occasion resmi olduğu için
+    // YANLIŞLIKLA resmi ayakkabı/kıyafet önceliklendiriyordu. Artık
+    // stilTercihiResmiMi içeriği okuyor ve bu durumda HİÇBİR ŞEY yapmıyor.
+    const rahatAmaResmiMekan = createMoodContext({
+      occasion: 'Akşam Yemeği',
+      stil_tercihi: 'Rahat',
+      kacinilmasi_gerekenler: [],
+    })
+    const seed = parca({ name: 'seed-ust', category: 'Üst' })
+
+    const ayakkabiSonuc = buildOutfitFromCandidates({
+      seedItem: seed,
+      candidatesByCategory: new Map([['Ayakkabı', [sneaker, topuklu]]]),
+      cleanItems: [seed, sneaker, topuklu],
+      seasons: null,
+      moodContext: rahatAmaResmiMekan,
+    })
+    check(
+      'KRİTİK REGRESYON — occasion resmi ama stilTercihi "Rahat" iken sneaker GERİ İTİLMİYOR',
+      adlar(ayakkabiSonuc.items).includes('beyaz sneaker'),
+      adlar(ayakkabiSonuc.items).join(', '),
+    )
+
+    const cantaSonuc = buildOutfitFromCandidates({
+      seedItem: seed,
+      candidatesByCategory: new Map([['Çanta', [gunlukCanta, sikCanta]]]),
+      cleanItems: [seed, gunlukCanta, sikCanta],
+      seasons: null,
+      moodContext: rahatAmaResmiMekan,
+    })
+    check(
+      'Aynı senaryoda günlük çanta da GERİ İTİLMİYOR (preferFormalStyle de aynı düzeltmeyi kullanıyor)',
+      adlar(cantaSonuc.items).includes('kanvas günlük çanta'),
+      adlar(cantaSonuc.items).join(', '),
+    )
+
+    // Dress route kararı da (formallik-fallback dalı) aynı düzeltmeyi kullanmalı.
+    check(
+      '"Rahat" stilTercihiyle Elbise route\'a HİÇ girilmiyor (textRanking yokken formallik-fallback)',
+      JSON.stringify(resolveActiveCategories([seed, kokteylElbise], rahatAmaResmiMekan)) ===
+        JSON.stringify(OUTFIT_CATEGORIES),
+    )
+  }
+
+  console.log('\n   h) variantDepth — dress route AKTİFKEN doğru kategori kümesiyle çağrılabiliyor')
+  {
+    const dressCandidates = new Map([
+      [DRESS_CATEGORY, [kokteylElbise]],
+      ['Ayakkabı', [topuklu, sneaker]],
+      ['Çanta', [sikCanta]],
+      // Kullanılmayan Üst/Alt havuzları BİLEREK BÜYÜK — eski (hatalı)
+      // davranışta bunlar derinliği yanlış şişirirdi.
+      ['Üst', [basicTisort, ipekBluz, kumasPantolon, kotPantolon, kokteylElbise]],
+    ])
+    check(
+      'KRİTİK — dress route kategorileriyle çağrılınca derinlik GERÇEK (kullanılan) havuzlara göre',
+      variantDepth(dressCandidates, [DRESS_CATEGORY, 'Ayakkabı', 'Çanta']) === 2,
+      `${variantDepth(dressCandidates, [DRESS_CATEGORY, 'Ayakkabı', 'Çanta'])}`,
+    )
+    check(
+      'Varsayılan (OUTFIT_CATEGORIES) çağrı REGRESYONSUZ — eski imza hâlâ çalışıyor',
+      variantDepth(dressCandidates) === 5,
     )
   }
 }
