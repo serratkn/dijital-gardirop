@@ -11,6 +11,7 @@ import {
 } from '../lib/api'
 import { DEFAULT_COLOR } from '../lib/colors'
 import { DEFAULT_SEASON, SEASONS } from '../lib/seasons'
+import { BRANDS } from '../data/brands'
 
 const fieldLabel = 'text-xs font-medium uppercase tracking-[0.15em] text-ink/50'
 const fieldInput =
@@ -18,6 +19,13 @@ const fieldInput =
 
 // clothing_items.name kolonu VARCHAR(200)
 const NAME_MAX_LENGTH = 200
+// clothing_items.brand kolonu VARCHAR(100) — backend/src/utils/validators.js
+// > FIELD_LIMITS.clothingItems.brand ile AYNI tutulmalı.
+const BRAND_MAX_LENGTH = 100
+// Native <datalist>'in id'si; birden fazla QuickAddModal örneği (teorik
+// olarak) aynı anda DOM'da olsa bile input kendi id'sini taşıdığı için
+// çakışma yaratmaz.
+const BRAND_DATALIST_ID = 'marka-onerileri'
 
 // `item` verilirse DÜZENLEME MODU: mevcut değerlerle dolu açılır, kaydetme
 // PUT'a gider ve FOTOĞRAF SEÇİCİ HİÇ RENDER EDİLMEZ — fotoğraf yönetimi ayrı,
@@ -31,6 +39,7 @@ function QuickAddModal({ isOpen, onClose, onSaved, item = null }) {
 
   const [categories, setCategories] = useState([])
   const [name, setName] = useState('')
+  const [brand, setBrand] = useState('')
   const [categoryId, setCategoryId] = useState('')
   const [color, setColor] = useState(DEFAULT_COLOR)
   const [photoFile, setPhotoFile] = useState(null)
@@ -84,12 +93,14 @@ function QuickAddModal({ isOpen, onClose, onSaved, item = null }) {
 
     if (item) {
       setName(item.name ?? '')
+      setBrand(item.brand ?? '')
       setCategoryId(item.categoryId ? String(item.categoryId) : '')
       setColor(item.color || DEFAULT_COLOR)
       setSeason(item.season || DEFAULT_SEASON)
       setIsClean(item.isClean ?? true)
     } else {
       setName('')
+      setBrand('')
       setColor(DEFAULT_COLOR)
       setPhotoFile(null)
       setIsClean(true)
@@ -128,6 +139,7 @@ function QuickAddModal({ isOpen, onClose, onSaved, item = null }) {
         await updateClothingItem(item.id, {
           categoryId: Number(categoryId),
           name: name.trim(),
+          brand: brand.trim(),
           color,
           season,
           isClean,
@@ -154,6 +166,7 @@ function QuickAddModal({ isOpen, onClose, onSaved, item = null }) {
       created = await createClothingItem({
         categoryId: Number(categoryId),
         name: name.trim(),
+        brand: brand.trim(),
         color,
         season,
         isClean,
@@ -217,6 +230,30 @@ function QuickAddModal({ isOpen, onClose, onSaved, item = null }) {
             placeholder="örn. Zara Oversize Beyaz Gömlek"
             className={fieldInput}
           />
+        </div>
+
+        <div>
+          <label className={fieldLabel}>Marka</label>
+          {/* Native <input list> + <datalist>: 500'ün üzerinde markayı bir
+              <select>'e sığdırmak kullanılamaz olurdu; datalist hem yazarken
+              öneri gösterir hem de SERBEST METNİ engellemez — kullanıcının
+              markası listede yoksa (niş/yerel bir marka) doğrudan kendi
+              markasını yazabilir. Yeni bir kütüphane eklenmedi. */}
+          <input
+            type="text"
+            list={BRAND_DATALIST_ID}
+            value={brand}
+            onChange={(event) => setBrand(event.target.value)}
+            maxLength={BRAND_MAX_LENGTH}
+            placeholder="örn. Zara (opsiyonel)"
+            autoComplete="off"
+            className={fieldInput}
+          />
+          <datalist id={BRAND_DATALIST_ID}>
+            {BRANDS.map((option) => (
+              <option key={option} value={option} />
+            ))}
+          </datalist>
         </div>
 
         <div>

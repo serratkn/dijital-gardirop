@@ -1853,6 +1853,35 @@ gösterilir, modal açık kalır.
 `category_id` → kategori **adı** eşlemesini yapar (ikon eşlemesi ada göre çalışır).
 Masonry yüksekliği id'den deterministik türetilir.
 
+**Marka alanı — `src/data/brands.js` + native `<datalist>`.** `clothing_items.brand`
+kolonu ve backend doğrulaması (`FIELD_LIMITS.clothingItems.brand`, 100 karakter) Aşama
+6'dan beri vardı ama **hiçbir zaman frontend formuna bağlanmamıştı** — `QuickAddModal`'da
+alan yoktu. `brands.js`, **519 gerçek marka** (giyim/ayakkabı/makyaj, global + Türk
+pazarına özgü — LC Waikiki, Koton, Mavi, Network, Flormar, Golden Rose, Derimod, Desa
+gibi) taşıyan alfabetik, tekil bir dizi.
+
+- **Yeni bir kütüphane/bileşen EKLENMEDİ.** 500'ün üzerinde markayı bir `<select>`e
+  sığdırmak kullanılamaz olurdu (tek tek kaydırmak gerekirdi); bunun yerine native
+  `<input list="marka-onerileri">` + `<datalist>` kullanıldı. Bu, tarayıcının kendi
+  autocomplete mekanizmasıyla hem öneri gösterir hem de alanı **SERBEST METİN**
+  olarak bırakır — kullanıcının markası listede yoksa (niş/yerel bir marka) hiçbir
+  ek adım gerekmeden doğrudan kendi markasını yazabilir. `ColorPicker`'ın aksine
+  (kapalı bir seçenek kümesi) burada liste yalnızca bir ÖNERİ kaynağıdır.
+- **Kategori alanının AKSİNE marka ZORUNLU DEĞİLDİR** — `clothing_items.brand`
+  nullable; boş bırakılırsa `''` gönderilir, `ClothingDetail`'deki
+  `{item.brand && (...)}` kontrolü bunu zaten görmezden gelir.
+- **Düzenleme modunda mevcut marka ön-dolu gelir** — diğer alanlarla AYNI
+  `useLayoutEffect` tohumlama deseninden geçer, ayrı bir kod yolu yok.
+- **Backend'de HİÇBİR DEĞİŞİKLİK gerekmedi**: `ClothingItemRepository`,
+  `utils/validators.js` ve hatta `VectorService.buildSummaryText` (embedding
+  metnine "Markası X." cümlesi zaten ekliyordu) marka alanını GÜNDEN BERİ tam
+  destekliyordu — eksik olan yalnızca bu alanı formda göstermekti.
+- **Datalist native tarayıcı bileşeni olduğu için Tailwind ile stillendirilemez**
+  (öneri açılır kutusunun görünümü tarayıcı/işletim sistemi kontrolündedir) —
+  bilinçli bir ödünleşme, 500+ öğeli bir listeyi özel bir bileşenle (arama/filtre,
+  klavye navigasyonu, erişilebilirlik) yeniden inşa etmenin getirisi bu aşamada
+  gerekli görülmedi.
+
 **Ana Sayfa → Kombin Öner router state akışı.** "Hızlı Kombin Öner" kartları
 `<Link state={{ occasion }}>` ile durumu taşır; `OutfitSuggestion` bunu okuyup gardırop
 yüklendikten **sonra** tek seferlik öneri üretir. Anahtar ve durum listesi
@@ -2515,6 +2544,47 @@ tamamlayıp kaldırıldı:
 
 > Bundan sonraki her çalışma buraya tarihiyle işlenir: eklenen özellikler, düzeltilen
 > hatalar, alınan mimari kararlar. En yeni kayıt en üstte.
+
+### 2026-08-27 — "Yeni Parça Ekle" formuna Marka alanı eklendi (519 markalık öneri listesi)
+- **Ne eklendi:** `QuickAddModal`'a (hem oluşturma hem düzenleme modunda) "Marka"
+  alanı eklendi. Kullanıcı yazmaya başlayınca 519 gerçek markadan (giyim/ayakkabı/
+  makyaj, global + Türk pazarına özgü) öneriler çıkıyor; markası listede yoksa
+  **doğrudan kendi markasını yazabiliyor** — alan kapalı bir seçenek kümesi değil,
+  serbest metin.
+- **Backend'de HİÇBİR DEĞİŞİKLİK GEREKMEDİ.** `clothing_items.brand` kolonu,
+  `utils/validators.js > FIELD_LIMITS.clothingItems.brand` (100 karakter) ve hatta
+  `VectorService.buildSummaryText`'in embedding metnine "Markası X." eklemesi
+  Aşama 6'dan beri hazırdı — eksik olan tek şey bu alanı frontend formuna
+  bağlamaktı. `createClothingItem`/`updateClothingItem` zaten payload'ı olduğu
+  gibi ilettiği için `api.js`'te de değişiklik gerekmedi.
+- **Yeni dosya `frontend/src/data/brands.js`** — alfabetik sıralı, tekil, 519
+  markalık bir dizi. **Yeni bir kütüphane/bileşen EKLENMEDİ**: 500'ün üzerinde
+  markayı bir `<select>`e sığdırmak kullanılamaz olurdu; bunun yerine native
+  `<input list="marka-onerileri">` + `<datalist>` kullanıldı — tarayıcının kendi
+  autocomplete'i hem öneri gösteriyor hem alanı serbest metin olarak bırakıyor.
+- **YAKALANAN EKSİK (yazarken fark edildi):** ilk taslakta en büyük Türk giyim
+  markalarından dördü (**LC Waikiki, Koton, Mavi, Network**) unutulmuştu —
+  toplam sayım script'iyle (dedupe + alfabetik sıralama) kontrol edilirken
+  fark edilip 46 markalık ek bir turla (Türk markaları + çanta/aksesuar +
+  outdoor + skate/surf + streetwear + ek makyaj markaları) birlikte eklendi.
+- Marka **zorunlu değil** (kategori gibi değil) — DB kolonu nullable, boş
+  bırakılırsa `''` gönderiliyor, `ClothingDetail`'deki `{item.brand && (...)}`
+  kontrolü bunu zaten görmezden geliyor.
+- **Doğrulama — gerçek tarayıcıda 9 kontrol (Playwright + sistem Chrome),**
+  geçici bir test kullanıcısıyla: Marka alanının göründüğü ve datalist'e bağlı
+  olduğu; datalist'in 500'ün üzerinde seçenek taşıdığı; "Zara" ve "LC Waikiki"nin
+  listede olduğu; **listede olan bir markayla ("Zara") kaydın gerçekten
+  veritabanına yazıldığı**; Kıyafet Detay'da markanın göründüğü; **KRİTİK —
+  listede HİÇ olmayan serbest bir marka adının ("Benim Kendi Markam XYZ") da
+  sorunsuz kaydedildiği**; düzenleme modunda mevcut markanın ön-dolu geldiği;
+  temiz konsol.
+- Regresyon: `test-all-endpoints` 77/77 (backend'e dokunulmadığı için beklenen),
+  lint + build temiz.
+- **Not — `test-scripts/test-clothing-items.js` bu çalışmadan BAĞIMSIZ olarak
+  zaten kırık:** script auth öncesi dönemden kalma, `test-data.json`'daki statik
+  `userId`'yi Authorization header'ı OLMADAN gönderiyor ve `401` alıyor. Bu
+  görevle ilgisi yok (dokunulmadı), ama fark edildiği için not düşülüyor —
+  gerçek regresyon kanıtı `test-all-endpoints.js`'ten geliyor.
 
 ### 2026-08-26 — Kalite düzeltmesi: "şık bir akşam yemeği" artık gerçekten şık
 - **Rapor edilen sorun:** Serbest metin/mood akışında "şık bir akşam yemeği"
