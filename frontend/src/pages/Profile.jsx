@@ -1,9 +1,9 @@
 import { useEffect, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
-import { UserCog, KeyRound, Crown, Palette, Bell, HelpCircle, ChevronRight, LogOut } from 'lucide-react'
-import Button from '../components/ui/Button'
+import { UserCog, KeyRound, Palette, Bell, HelpCircle, ChevronRight, LogOut } from 'lucide-react'
 import WardrobeStats from '../components/WardrobeStats'
 import SkinToneSection from '../components/SkinToneSection'
+import PremiumCard from '../components/PremiumCard'
 import ThemeToggle from '../components/ui/ThemeToggle'
 import { fetchMe, logout } from '../lib/api'
 import { clearToken } from '../lib/auth'
@@ -40,6 +40,12 @@ function Profile({ onLoggedOut }) {
   const navigate = useNavigate()
   // Önbellek ilk boyamayı hızlandırır; ardından sunucudaki güncel hâlle tazelenir.
   const [profile, setProfile] = useState(() => getUserProfile())
+  // `subscription_tier` onboarding önbelleğinde HİÇ tutulmaz (yalnızca
+  // name/email/age) — bu yüzden ayrı bir state: ilk boyamada `null` (henüz
+  // bilinmiyor), `fetchMe()` dönünce gerçek değerle dolar. PremiumCard bu
+  // süre boyunca "Ücretsiz Plan" gösterir (varsayılan davranış), tazelenince
+  // gerçek plana geçer.
+  const [subscriptionTier, setSubscriptionTier] = useState(null)
 
   useEffect(() => {
     let isStale = false
@@ -50,6 +56,7 @@ function Profile({ onLoggedOut }) {
         const fresh = { name: user.name ?? '', email: user.email ?? '', age: user.age ?? '' }
         setProfile(fresh)
         setUserProfile(fresh)
+        setSubscriptionTier(user.subscription_tier ?? 'free')
       })
       .catch((error) => console.error('Profil bilgisi alınamadı:', error))
 
@@ -105,20 +112,7 @@ function Profile({ onLoggedOut }) {
 
           <SkinToneSection />
 
-          <div className="rounded-2xl border border-dusty-rose/40 bg-dusty-rose/10 p-6">
-            <div className="flex items-start justify-between gap-4">
-              <div>
-                <p className="text-xs font-medium uppercase tracking-[0.15em] text-accent-ink">
-                  Premium Abonelik
-                </p>
-                <p className="mt-1.5 text-sm text-ink/60">Ücretsiz Plan</p>
-              </div>
-              <Crown size={22} strokeWidth={1.5} className="text-accent-ink" />
-            </div>
-            <Button variant="primary" className="mt-5 w-full">
-              Premium'a Geç
-            </Button>
-          </div>
+          <PremiumCard subscriptionTier={subscriptionTier} />
 
           {/* Görünüm: tema tercihi hesaba değil CİHAZA aittir, bu yüzden
               sunucuya yazılmaz ve çıkış yapınca da korunur. */}

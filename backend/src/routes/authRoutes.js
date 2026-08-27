@@ -19,6 +19,17 @@ function createAuthRoutes(authService, authenticate) {
   // bilgisi değişim uçlarıyla (register/login) AYNI gerekçeyle paylaşır;
   // normal kullanımda (tek sekme, sessiz yenileme) bu limite hiç yaklaşılmaz.
   router.post('/auth/refresh', authLimiter, (req, res) => authController.refresh(req, res))
+  // "Şifremi Unuttum" akışı — İKİSİ DE korumasız (kullanıcı henüz giriş
+  // yapamıyor) ve authLimiter'ın ARKASINDA: aksi hâlde bir saldırgan aynı
+  // e-postaya saniyede onlarca sıfırlama e-postası tetikleyebilir (spam) ya
+  // da farklı e-postaları deneyip yanıt farkına bakarak (timing/hata) hangi
+  // e-postaların kayıtlı olduğunu anlamaya çalışabilirdi.
+  router.post('/auth/forgot-password', authLimiter, (req, res) =>
+    authController.forgotPassword(req, res),
+  )
+  router.post('/auth/reset-password', authLimiter, (req, res) =>
+    authController.resetPassword(req, res),
+  )
 
   // Korumalı
   router.get('/auth/me', authenticate, (req, res) => authController.me(req, res))

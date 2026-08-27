@@ -313,8 +313,9 @@ olduğu için iskelet oraya taşındı, kombin üretimi istemci tarafında anlı
 | Konu | Durum |
 |---|---|
 | **Token'lar localStorage'da** | Access VE refresh token ikisi de `localStorage`'da (`dg_token`/`dg_refresh_token`). XSS durumunda okunabilir. httpOnly cookie daha güvenli olurdu ama Capacitor WebView'de oturum yönetimini karmaşıklaştırır (Android'de ayrı origin/scheme, native isteklerle cookie paylaşılmaması); bilinçli ödünleşme. Access token artık KISA ömürlü (15dk-1sa) olduğu için XSS'in okuyabileceği pencere daha dar; refresh token çalınırsa da rotasyon (bkz. §8) meşru sahibinin bir sonraki sessiz yenilemesinde çalıntı kopyayı geçersiz kılar. |
-| **Şifre sıfırlama yok** | "Şifremi unuttum" akışı (e-posta ile sıfırlama bağlantısı) yoktur; kullanıcı şifresini yalnızca giriş yapmışken değiştirebilir. |
+| **Şifre sıfırlama e-postası GERÇEK bir kullanıcıya denenmedi** | Akış uçtan uca kuruldu (bkz. §8 "Şifre sıfırlama sistemi") ama Resend sandbox kısıtı (`onboarding@resend.dev` yalnızca hesap sahibine gönderebilir) yüzünden gerçek gönderim özel bir alan adı doğrulanana kadar test edilemedi; token üretimi/doğrulama/sıfırlamanın kendisi gerçek ve doğrulandı. |
 | **E-posta doğrulama yok** | `email_verified` kolonu var ama hep `false`; doğrulama akışı kurulmadı. |
+| **Ödeme sağlayıcısı entegrasyonu yok** | `subscription_tier` artık GERÇEKTEN uygulanıyor (bkz. §8 "Premium sınırları") ama kullanıcıyı `free`'den `premium`'a geçiren bir ödeme akışı (Stripe vb.) yok — "Premium'a Geç" düğmesi şu an dürüstçe "yakında" diyen bir sayfaya gider. |
 | **Çoklu cihaz oturum yönetimi yok** | Kullanıcı başına TEK bir aktif refresh token vardır (`users` tablosunun kendi satırında, ayrı bir "sessions" tablosu değil). Yeni bir cihaz/tarayıcıda giriş yapmak ÖNCEKİ refresh token'ı geçersiz kılar (üzerine yazar) — o cihazdaki oturum, access token'ı süresi dolana kadar (15dk-1sa) çalışmaya devam eder ama sonraki sessiz yenilemesi başarısız olur ve Login'e düşer. Bilinçli bir sınırlama (bkz. §8, migration `007`). |
 | **Fotoğraflar yerel diskte** | `backend/uploads/` altında tutulur; çok sunuculu bir kurulumda paylaşılan depolamaya (S3 vb.) taşınması gerekir. Dosyalar `/uploads` yolundan **token'sız** servis edilir — ad tahmin edilemez UUID olduğu için kabul edilebilir sayıldı. |
 | **Fotoğraf boyutlandırma yok** | Yüklenen görsel olduğu gibi saklanır; küçük resim (thumbnail) üretilmez. Native tarafta Capacitor `width: 1600` ile ön küçültme yapar, web'de böyle bir sınır yoktur. |
@@ -355,7 +356,9 @@ olduğu için iskelet oraya taşındı, kombin üretimi istemci tarafında anlı
 | `refresh_token_expires_at` | TIMESTAMP | Bu tarihten sonra reddedilir. Her başarılı `/auth/refresh` bunu `NOW() + REFRESH_TOKEN_EXPIRES_IN` olarak YENİLER (kayan pencere). `SAFE_COLUMNS` DIŞINDA |
 | `skin_tone_analysis` | JSONB | Gemini ten tonu analizi. **NULL = kullanıcı selfie yüklemedi** (özellik isteğe bağlı). `SAFE_COLUMNS` DIŞINDA |
 | `skin_tone_photo_url` | VARCHAR(500) | Selfie yolu (göreli). **HASSAS** — yalnızca sahibine, yalnızca kendi ucundan döner. `SAFE_COLUMNS` DIŞINDA |
-| `subscription_tier` | VARCHAR(20) | `'free'` — `free` \| `premium` |
+| `subscription_tier` | VARCHAR(20) | `'free'` — `free` \| `premium`. Artık GERÇEKTEN uygulanır (bkz. §8 "Premium sınırları", migration yok — kolon Aşama 1'den beri vardı, yalnızca hiç okunmuyordu) |
+| `reset_token_hash` | VARCHAR(255) | bcrypt(şifre sıfırlama token'ı) — `refresh_token_hash` ile AYNI kural, ham token asla saklanmaz. **NULL = bekleyen bir sıfırlama isteği yok**. Migration `009`. `SAFE_COLUMNS` DIŞINDA |
+| `reset_token_expires_at` | TIMESTAMP | Bu tarihten sonra reddedilir (varsayılan 1 saat, `PASSWORD_RESET_EXPIRES_IN`). Migration `009`. `SAFE_COLUMNS` DIŞINDA |
 | `created_at` / `updated_at` | TIMESTAMP | `NOW()` |
 
 ### `style_preferences` — kullanıcı başına tek satır
@@ -468,6 +471,8 @@ middleware token'ı doğrulayıp `req.userId`'yi doldurur.
 | `POST` | `/auth/logout` | Korumalı — `204`, refresh token'ı veritabanından SİLER |
 | `GET` | `/auth/me` | Token sahibinin kaydı |
 | `POST` | `/auth/change-password` | `{ currentPassword*, newPassword* }` → `204` |
+| `POST` | `/auth/forgot-password` | `{ email* }` → **her zaman** `204` |
+| `POST` | `/auth/reset-password` | `{ token*, newPassword* }` → `204` |
 
 Parola en az 8 karakter, en fazla 72 bayt (bcrypt sınırı) olmalıdır; `bcrypt` ile
 10 tur hash'lenir. Giriş hatalarında "kullanıcı yok" ile "şifre yanlış" **aynı** mesajı
@@ -499,6 +504,21 @@ localStorage'ı temizlemek yeterli değildir: sunucu tarafında refresh token h�
 dursaydı çalınmış (ya da unutulmuş bir cihazdaki) bir kopya oturumu canlı tutmaya
 devam ederdi.
 
+**Şifre sıfırlama (`forgot-password` / `reset-password`, bkz. §8 "Şifre sıfırlama
+sistemi" için tam mimari).** `POST /auth/forgot-password` kayıtlı e-posta olsun
+olmasın **her zaman** `204` döner — hangi e-postaların kayıtlı olduğu sızmasın
+diye (login'deki "kullanıcı yok/şifre yanlış" ayrımsızlığıyla AYNI ilke). Kayıtlıysa
+arka planda opak bir sıfırlama token'ı (`<userId>:<32 baytlık hex>`, refresh token'la
+AYNI desen) üretilip bcrypt özeti veritabanına yazılır ve `RESEND_API_KEY` tanımlıysa
+Resend üzerinden bir e-posta gönderilir; **anahtar yoksa e-posta sessizce
+GÖNDERİLMEZ** ama yanıt yine `204`'tür (WeatherService/GeminiService ile AYNI
+"anahtar yoksa dış servise hiç gidilmez" ilkesi). `POST /auth/reset-password` token'ı
+doğrulayıp (süre + bcrypt karşılaştırması) yeni şifreyi yazar; başarıda kullanıcının
+**mevcut refresh token'ı da geçersiz kılınır** (şifre değiştiyse tüm oturumlar
+sonlanmalı) ve sıfırlama token'ı **tek kullanımlıktır** (kullanılınca temizlenir).
+Geçersiz/süresi dolmuş/eksik bir `token` her durumda **aynı** `401` döner — hangi
+kontrolün başarısız olduğu dışarı sızmaz. İkisi de `authLimiter`'ın arkasındadır.
+
 **`/auth/register`, `/auth/login` ve `/auth/refresh` hız sınırlıdır**
 (`middleware/rateLimiters.js` > `authLimiter`): aynı IP'den **15 dakikada en fazla 5
 deneme**, aşılırsa `429` + `{ "error": "Çok fazla deneme yapıldı..." }`. Brute-force ve
@@ -520,6 +540,7 @@ Tüm hatalar `{ "error": "Türkçe mesaj" }` döner.
 | `401` | `UnauthorizedError` — token yok/geçersiz/süresi dolmuş, ya da şifre hatalı |
 | `404` | `NotFoundError` — kayıt yok **veya** başkasına ait |
 | `409` | `ConflictError` — benzersizlik ihlali (`23505`), örn. tekrarlı e-posta |
+| `402` | `PremiumRequiredError` — ücretsiz plan sınırı aşıldı (bkz. §8 "Premium sınırları") |
 | `429` | Hız sınırı aşıldı — `/auth/*` (15 dk'da 5) veya Gemini uçları (saatte 10) |
 | `500` | Beklenmeyen hata → `{ "error": "Sunucu hatası" }` |
 
@@ -880,7 +901,7 @@ istemcide hiçbir toplama yapılmaz.
 |---|---|---|
 | `GET` | `/clothing-items?userId=*&categoryId=` | `categoryId` opsiyonel filtre; `created_at DESC` sıralı |
 | `GET` | `/clothing-items/:id` | Silinmişse `404` |
-| `POST` | `/clothing-items` | `{ userId*, categoryId*, name*, color, brand, season, imageUrl, isClean }` → `201` |
+| `POST` | `/clothing-items` | `{ userId*, categoryId*, name*, color, brand, season, imageUrl, isClean }` → `201`, ücretsiz planda 30. parçadan sonra `402` (bkz. §8 "Premium sınırları") |
 | `PUT` | `/clothing-items/:id` | `{ categoryId*, name*, color, brand, season, isClean }` — **fotoğraf bu ucun işi değildir** |
 | `DELETE` | `/clothing-items/:id` | **Soft delete** → `204` |
 | `PATCH` | `/clothing-items/:id/favorite` | Favori durumunu tersine çevirir (atomik) |
@@ -939,7 +960,7 @@ tekrar yüklemek yeni bir Gemini çağrısı doğurmaz.
 |---|---|---|
 | `GET` | `/outfits?clothingItemId=` | Parçalarıyla birlikte, `created_at DESC`. `clothingItemId` opsiyonel filtre |
 | `GET` | `/outfits/:id` | |
-| `POST` | `/outfits` | `{ userId*, occasion, clothingItemIds*[] }` → `201` |
+| `POST` | `/outfits` | `{ userId*, occasion, clothingItemIds*[] }` → `201`, ücretsiz planda 10. kombinden sonra `402` (bkz. §8 "Premium sınırları") |
 | `PUT` | `/outfits/:id` | `{ occasion, clothingItemIds }` — `clothingItemIds` verilmezse parçalara dokunulmaz |
 | `DELETE` | `/outfits/:id` | Hard delete → `204` |
 | `PATCH` | `/outfits/:id/favorite` | Favori toggle |
@@ -1156,6 +1177,9 @@ node test-scripts/migrate-passwordless-users.js --delete-empty
 
 # Kıyafet → kombin filtresi: GET /outfits?clothingItemId= (27 kontrol)
 node test-scripts/test-item-outfits.js
+
+# Premium plan sınırları (parça/kombin) + şifre sıfırlama akışı (19 kontrol)
+node test-scripts/test-premium-and-reset.js
 
 # Temiz/kirli davranışı + kirli parçanın önerilmemesi (26 kontrol)
 node test-scripts/test-clean-status.js
@@ -1732,6 +1756,160 @@ sorunlar — ve bu depo zaten access token için de aynı ödünleşmeyi yapmı�
   **1'de kaldığı** (hiç tam sayfa yenilemesi olmadığı), localStorage'daki her
   iki token'ın da güncellendiği (rotasyon), ve geçersiz senaryoda gerçekten
   `/giris`'e düşüldüğü ölçüldü.
+
+**Şifre sıfırlama sistemi (`AuthService` + `UserRepository` + `EmailRepository`,
+migration `009`).** Öncesinde şifresini unutan bir kullanıcı için **hiçbir çıkış
+yolu yoktu** — hesap kalıcı olarak kilitli kalırdı. Mekanizma refresh token'la
+BİREBİR AYNI opak-token deseni kullanır ve bu bilinçli: iki akış da "kullanıcıya
+verilecek, veritabanında yalnızca özeti tutulacak, tek kullanımlık/süreli bir
+sır" ihtiyacını paylaşıyor.
+
+- **`AuthService`'in özel token yardımcıları GENELLEŞTİRİLDİ.** Eskiden yalnızca
+  refresh token için vardı (`#createRefreshToken` / `#extractUserIdFromRefreshToken`);
+  bu çalışmayla `#createOpaqueToken(userId, byteLength)` /
+  `#extractUserIdFromOpaqueToken(rawToken)` olarak yeniden adlandırılıp
+  BAYT UZUNLUĞU parametrik hâle getirildi — refresh token 48 bayt
+  (`REFRESH_TOKEN_BYTES`), sıfırlama token'ı 32 bayt (`RESET_TOKEN_BYTES`)
+  kullanır. İkisi de `<userId>:<hex>` biçimindedir ve **JWT DEĞİLDİR** — bcrypt
+  hash'leri sorgulanamadığı için (her hash'leme farklı salt üretir) token'ın
+  kendisine ucuz bir arama anahtarı gömülür; bu, `refresh_token_hash` için
+  zaten belgeli olan gerekçenin `reset_token_hash`'e de AYNEN uygulanmasıdır.
+- **`forgotPassword(email)` ASLA fırlatmaz görünür bir sonuç üretmez —
+  kayıtlı olsun olmasın controller HER ZAMAN `204` döner.** Bu, login'deki
+  "kullanıcı yok/şifre yanlış" ayrımsızlığıyla AYNI ilke: yanıt farklı olsaydı
+  saldırgan hangi e-postaların kayıtlı olduğunu tek tek deneyerek öğrenebilirdi.
+  Kayıt bulunamazsa fonksiyon sessizce döner (hiçbir token üretilmez); bulunursa
+  token üretilip `setResetToken` ile bcrypt özeti + bitiş tarihi
+  (`NOW() + PASSWORD_RESET_EXPIRES_IN`, varsayılan 1 saat) yazılır ve
+  `#sendResetEmail` çağrılır.
+- **`#sendResetEmail` GeminiService/WeatherService ile AYNI "anahtar yoksa dış
+  servise hiç gidilmez" ilkesini izler.** `emailRepository?.isConfigured`
+  (`RESEND_API_KEY` dolu mu) `false` ise e-posta hiç gönderilmeye
+  çalışılmaz, yalnızca sunucu log'una uyarı düşer — kullanıcıya dönen `204`
+  DEĞİŞMEZ. Gönderim try/catch içindedir ve **hata yalnızca loglanır,
+  fırlatılmaz**: e-posta servisi (Resend) o an düşmüş olsa bile `forgotPassword`
+  çağıranına (controller'a) bunu asla yansıtmamalı — aksi hâlde yanıt süresi
+  ya da hata varlığı "bu e-posta muhtemelen kayıtlı" sinyali verirdi.
+- **`EmailRepository` — yeni bir "dış servis de repository'dir" örneği**
+  (`WeatherRepository`/`GeminiService` ile AYNI rol): Resend API'sine native
+  `fetch` ile konuşur, SDK kurulmadı (tek bir POST isteği için gereksiz bir
+  bağımlılık olurdu). **Yalnızca veri erişimi, iş kuralı yok** — başarısız
+  yanıtta (`!response.ok`) fırlatır, çağıranı (`AuthService`) bilgilendirmek
+  onun işi değildir.
+- **Resend sandbox kısıtı BİLİNÇLİ olarak kabul edildi:** özel bir alan adı
+  doğrulanana kadar varsayılan gönderen adresi (`onboarding@resend.dev`)
+  YALNIZCA Resend hesabının kendi sahibinin e-postasına gönderim yapabilir.
+  Gerçek kullanıcılara göndermek için `RESEND_FROM_ADDRESS` doğrulanmış bir
+  alan adıyla doldurulmalı — bu, `.env.example`'da açıkça not edilmiştir.
+- **`resetPassword(rawToken, newPassword)` iki ayrı süre/geçerlilik kontrolü
+  yapar ve İKİSİ DE aynı 401'e düşer** (refresh token'daki "hangi kontrol
+  başarısız oldu dışarı sızmaz" ilkesiyle AYNI): `reset_token_expires_at`
+  geçmişse (ki bu durumda ayrıca `clearResetToken` ile housekeeping yapılır)
+  ve `bcrypt.compare` başarısız olursa (yanlış/kullanılmış token). Başarılı
+  sıfırlamada üç şey birlikte olur: yeni şifre yazılır, sıfırlama token'ı
+  **temizlenir (tek kullanımlık)** ve kullanıcının **refresh token'ı da
+  geçersiz kılınır** (`clearRefreshToken`) — şifre değiştiyse tüm var olan
+  oturumların düşmesi gerekir, aksi hâlde çalınmış bir cihazdaki eski oturum
+  şifre sıfırlansa bile çalışmaya devam ederdi.
+- **Frontend — `ForgotPassword.jsx` / `ResetPassword.jsx`, ikisi de
+  `AuthLayout` kalıbını (Login/Register ile AYNI) kullanır.**
+  `ForgotPassword` başarı/başarısızlık AYRIMI YAPMAZ: istek başarıyla gittiyse
+  (400/429 gibi gerçek bir hata almadıysa) her zaman AYNI "E-postanı Kontrol
+  Et" ekranını gösterir — backend'in enumeration-önleme sözleşmesini frontend
+  BOZMAMALI. `Login.jsx`'teki "Şifremi Unuttum?" linki o an yazılmış olan
+  e-postayı `state` ile taşır (kullanıcı tekrar yazmasın diye); `ResetPassword`
+  URL'den `?token=` okur, token yoksa/eksikse hiç form göstermez ("Bağlantı
+  Geçersiz"). Başarılı sıfırlama `navigate('/giris', { state: { passwordReset:
+  true } })` ile Login'e döner; Login bu bayrağı okuyup kısa bir onay satırı
+  gösterir (ayrı bir toast sistemi kurulmadı, mevcut `location.state`
+  aktarım deseni — `ProtectedRoute`'un `state.from`'uyla AYNI fikir —
+  yeterliydi).
+- **Doğrulama:** `test-scripts/test-premium-and-reset.js` (bkz. aşağıdaki
+  "Premium sınırları" ile aynı dosya, iki özellik birlikte test edilir) —
+  enumeration yokluğu, token'ın veritabanına gerçekten yazılması, geçersiz/
+  kullanılmış/süresi dolmuş token'ların hepsinin 401'e düşmesi, başarılı
+  sıfırlama sonrası eski şifrenin çalışmaması + yeni şifrenin çalışması +
+  eski refresh token'ın geçersiz kalması. Gerçek tarayıcıda (Playwright +
+  sistem Chrome, 16 kontrol): "Şifremi Unuttum?" linki, e-posta ön-doldurma,
+  var olan/olmayan e-postada AYNI ekran, gerçek token'la form doldurma,
+  eşleşmeyen şifre hatası, başarılı sıfırlama sonrası Login'e dönüş + onay
+  mesajı, eski/yeni şifreyle giriş, token'sız/geçersiz token senaryoları.
+
+**Premium sınırları (`config/plans.js`, `ClothingItemService`,
+`OutfitService`).** `users.subscription_tier` kolonu Aşama 1'den beri vardı
+ama **hiçbir yerde okunmuyordu** — Profil sayfasındaki "Premium Abonelik"
+kartı sabit "Ücretsiz Plan" yazan, "Premium'a Geç" butonu hiçbir şeye
+bağlı olmayan (dead button) bir dekordu. Bu artık GERÇEKTEN uygulanır.
+
+- **Sınırlar KASITLI OLARAK Gemini kotasından BAĞIMSIZ tutuldu.** Uygulamanın
+  tamamı TEK bir Gemini API anahtarını, günde yalnızca 20 istekle paylaşıyor
+  (bkz. §4 Eksikler) — "Premium'da sınırsız AI analizi" gibi bir vaat bu kotayla
+  hemen çelişirdi. Bunun yerine sınır, kotadan tamamen bağımsız iki basit
+  veritabanı SAYIMINA dayanır: `FREE_LIMITS = { clothingItems: 30, outfits: 10 }`.
+  `isPremium(user)` yalnızca `user.subscription_tier === 'premium'` kontrolüdür.
+- **HTTP `402 Payment Required` bilinçli olarak seçildi, `403` DEĞİL.** `403`
+  "bunu asla yapamazsın" der (yetkilendirme); `402` "şu an yapamazsın ama
+  yükseltirsen yapabilirsin" der — bu ayrım hem semantik olarak daha doğru
+  hem de frontend'in ileride "yükselt" bağlantılı özel bir hata ekranı
+  yapmasına (şimdilik generic hata mesajı gösteriliyor) zemin hazırlıyor.
+  Yeni `PremiumRequiredError extends AppError` (`utils/errors.js`,
+  `statusCode = 402`) eklendi; `BaseController.handleError` `error.statusCode`
+  üzerinden GENERİK çalıştığı için **hiçbir controller değişmedi**.
+- **Kontrol servis katmanında, repository'de DEĞİL** — depodaki "iş kuralı
+  serviste yaşar" ilkesiyle tutarlı. `ClothingItemService.createItem` ve
+  `OutfitService.createOutfit` yazmadan ÖNCE `#assertUnderItemLimit`/
+  `#assertUnderOutfitLimit` çağırır; bu da `userRepository.findById` ile
+  kullanıcıyı okuyup `isPremium` değilse `clothingItemRepository.countActive`/
+  `outfitRepository.countByUser` ile GÜNCEL sayıyı okur. **Constructor'lar
+  değişti:** `ClothingItemService(clothingItemRepository, userRepository)` ve
+  `OutfitService(outfitRepository, userRepository)` — ikinci parametre YENİ;
+  route dosyaları (`clothingItemRoutes.js`/`outfitRoutes.js`, DI container'lar)
+  kendi `new UserRepository(pool)` örneklerini kurup geçirecek şekilde
+  güncellendi (skinToneRoutes'un zaten yaptığı "route dosyası ihtiyaç
+  duyduğunda serbestçe `new UserRepository(pool)` kurar" deseniyle AYNI).
+- **Yalnızca YAZMA (create) yolları kontrol edilir**, okuma/güncelleme/silme
+  DEĞİL — bir kullanıcı zaten sahip olduğu 31. parçayı düzenleyebilir/silebilir/
+  favorileyebilir, yalnızca YENİ bir 31. parça EKLEYEMEZ. Sınırı aşan bir
+  kullanıcı sonradan premium'dan ücretsize düşerse (şu an böyle bir akış yok
+  ama ileride olursa) mevcut verisi silinmez, yalnızca yeni ekleme kilitlenir.
+- **Hata mesajı sınır sayısını İÇERİR** (`` `Ücretsiz planda en fazla ${FREE_LIMITS.clothingItems}
+  parça saklayabilirsin. Daha fazlası için Profil > Premium Abonelik üzerinden
+  yükselt.` ``) — kullanıcı "neden" ve "nasıl çözülür"ü aynı mesajda görür,
+  ayrı bir yardım sayfasına gitmesi gerekmez.
+- **Frontend — `lib/plans.js` (`FREE_LIMITS`) backend'deki `config/plans.js`
+  ile BİREBİR AYNI tutulmalıdır** (paylaşılan bir modül olmadığı için
+  senkronizasyon ELLE yapılır — `OUTFIT_REQUEST_CATEGORIES` ↔ `lib/occasions.js`
+  ile AYNI desen). Bu değer yalnızca GÖSTERİM amaçlıdır ("30 parçadan X'i
+  kullandın" gibi); gerçek sınır sunucuda uygulanır, frontend'deki kopya
+  ezilse bile hiçbir güvenlik/iş kuralı bozulmaz.
+- **`components/PremiumCard.jsx` (YENİ) — Profil sayfasındaki dead card'ın
+  yerini aldı.** `Profile.jsx`'in zaten yaptığı `fetchMe()` çağrısından gelen
+  `subscription_tier`'ı prop olarak alır (AYRI bir istek atmaz); kullanım
+  sayıları için KENDİ bağımsız `fetchWardrobeStats()` çağrısını yapar
+  (`WardrobeStats`/`SkinToneSection`'ın bu sayfadaki "her bölüm kendi verisini
+  çeker" deseniyle AYNI) — ama yalnızca ücretsiz kullanıcıda: premium'da sınır
+  zaten yok, sayıyı göstermenin bir anlamı olmadığı için istek hiç atılmaz.
+  Premium kullanıcıda "Premium'a Geç" butonu da HİÇ render edilmez (yükseltecek
+  bir şey kalmadı).
+- **`pages/Premium.jsx` (YENİ, `/profil/premium`) — buton artık GERÇEK bir
+  yere gidiyor**, ama gerçek bir ÖDEME AKIŞI SUNMUYOR: ödeme altyapısı henüz
+  kurulmadı. Sayfa gerçek kullanım sayılarını ve gerçek faydaları gösterir,
+  ardından *"Ödeme altyapısı yakında burada olacak"* der — Bildirimler/
+  Yardım & Destek'teki `ComingSoon` sayfalarıyla AYNI dürüstlük ilkesi
+  (var olmayan bir işlevi varmış gibi göstermemek), ama içerik ÖZEL
+  yazıldı (`ComingSoon` bileşeni yeniden kullanılmadı) çünkü burada
+  gösterilecek GERÇEK veri (kullanım sayıları, faydalar) var.
+- **Doğrulama — `backend/test-scripts/test-premium-and-reset.js` (YENİ, 19
+  kontrol):** ücretsiz planda tam sınıra kadar sorunsuz oluşturma, sınırı aşan
+  istekte `402` + sınır sayısını içeren mesaj, `subscription_tier = 'premium'`
+  yapıldıktan SONRA sınırın ÜSTÜNE çıkabilme — hem parça hem kombin için ayrı
+  ayrı. Gerçek tarayıcıda (Playwright + sistem Chrome, 12 kontrol): kart gerçek
+  plan + gerçek kullanım sayısını gösteriyor, buton gerçekten `/profil/premium`'a
+  gidiyor (ARTIK ölü buton DEĞİL), premium'a yükseltilince kart VE buton
+  görünürlüğü GÜNCELLENİYOR.
+- Regresyon: `test-auth` 71/71, `test-all-endpoints` 77/77, `test-stats` 60/60,
+  `test-clean-status` 26/26, `test-item-outfits` 27/27, frontend lint + build
+  temiz.
 
 **Güvenlik middleware'leri (`server.js`, en üstte, tüm route'lardan önce).**
 
@@ -2544,6 +2722,88 @@ tamamlayıp kaldırıldı:
 
 > Bundan sonraki her çalışma buraya tarihiyle işlenir: eklenen özellikler, düzeltilen
 > hatalar, alınan mimari kararlar. En yeni kayıt en üstte.
+
+### 2026-08-27 — Premium sınırları GERÇEKTEN uygulandı + şifre sıfırlama akışı eklendi
+- **Bağlam:** Uygulama Render (backend) + Vercel (frontend) üzerinde canlıya
+  alındıktan sonra çıkarılan bir profesyonelleştirme/pazarlanabilirlik yol
+  haritasından, en yüksek öncelikli iki madde uygulandı: (1) `subscription_tier`
+  kolonu Aşama 1'den beri veritabanında duruyordu ama hiçbir yerde okunmuyordu —
+  Profil'deki "Premium'a Geç" düğmesi hiçbir şeye bağlı olmayan bir dekordu;
+  (2) şifresini unutan bir kullanıcı için **hiçbir kurtarma yolu yoktu**, hesap
+  kalıcı olarak kilitli kalırdı. İkisinin tam mimarisi için bkz. §8 "Premium
+  sınırları" ve "Şifre sıfırlama sistemi".
+
+**Premium sınırları — özet.** `config/plans.js > FREE_LIMITS = { clothingItems:
+30, outfits: 10 }`. `ClothingItemService.createItem` / `OutfitService.createOutfit`
+yazmadan önce kullanıcının planını (`UserRepository.findById`) ve güncel sayısını
+kontrol eder; sınır ücretsiz kullanıcıda aşılırsa yeni `PremiumRequiredError`
+(`402 Payment Required`) fırlatılır. Sınır BİLİNÇLİ olarak paylaşılan Gemini
+kotasından (günde 20 istek) BAĞIMSIZ, saf veritabanı sayımıdır — "premium'da
+sınırsız AI" gibi kotayla çelişecek bir vaat verilmedi. Frontend: `PremiumCard.jsx`
+gerçek plan + kullanım sayısını gösterir, `pages/Premium.jsx` (`/profil/premium`)
+butonun gittiği gerçek (ama ödeme akışı henüz kurulmamış, dürüstçe "yakında"
+diyen) hedef sayfadır.
+
+**Şifre sıfırlama — özet.** `POST /auth/forgot-password` (`{ email }` → her
+zaman `204`, enumeration yok) ve `POST /auth/reset-password` (`{ token,
+newPassword }` → `204`) eklendi. Migration `009`: `users.reset_token_hash` +
+`reset_token_expires_at`. Mekanizma refresh token'la BİREBİR AYNI opak-token
+deseni kullanır (`<userId>:<hex>`, bcrypt özeti, tek kullanımlık, süreli).
+Yeni `EmailRepository` (Resend API, native `fetch`) — `RESEND_API_KEY` yoksa
+e-posta sessizce gönderilmez ama yanıt değişmez (WeatherService/GeminiService
+ile AYNI "anahtar yoksa dış servise hiç gidilmez" ilkesi). Başarılı sıfırlamada
+kullanıcının mevcut refresh token'ı da geçersiz kılınır (tüm oturumlar düşer).
+Frontend: `ForgotPassword.jsx` / `ResetPassword.jsx` (yeni rotalar
+`/sifremi-unuttum`, `/sifre-sifirla`), `Login.jsx`'e "Şifremi Unuttum?" linki.
+
+**Doğrulama:**
+- **Backend — yeni `test-scripts/test-premium-and-reset.js`, 19 kontrol:**
+  ücretsiz planda tam sınıra kadar sorunsuz oluşturma + sınırı aşan istekte
+  `402` (hem parça hem kombin için), premium'a yükseltilince sınırın üstüne
+  çıkabilme; şifre sıfırlamada enumeration yokluğu, token'ın veritabanına
+  gerçekten yazılması, geçersiz/kullanılmış/süresi dolmuş token'ların hepsinin
+  `401`'e düşmesi, başarılı sıfırlama sonrası eski şifrenin ÇALIŞMAMASI + yeni
+  şifrenin ÇALIŞMASI + eski refresh token'ın geçersiz kalması.
+  **Test script'inde yakalanan iki kendi hatam (ürün hatası DEĞİL):**
+  (a) `call()` yardımcısı GET isteklerinde `body: null`'ı `JSON.stringify(null)`
+  = `"null"` metnine çevirip GET'e gövde ekliyordu (`fetch` bunu reddediyor) —
+  koşul `body === null || body === undefined ? undefined : ...` olarak
+  düzeltildi. (b) "süresi dolmuş token" senaryosu YANLIŞLIKLA "başarılı
+  sıfırlama" senaryosuyla AYNI token'ı paylaşıyordu; `forgotPassword`'ın her
+  çağrıda hash'in ÜZERİNE YAZMASI yüzünden ikinci `forgotPassword` çağrısı
+  ilk token'ı sessizce geçersiz kılıp "başarılı sıfırlama" testini bozuyordu —
+  test, süresi dolmuş senaryoyu KENDİ bağımsız/taze token'ıyla akışın EN SONUNA
+  taşıyarak düzeltildi.
+- **Backend regresyon:** `test-auth` 71/71, `test-all-endpoints` 77/77,
+  `test-stats` 60/60, `test-clean-status` 26/26, `test-item-outfits` 27/27.
+- **Frontend — gerçek tarayıcıda (Playwright + sistem Chrome), iki ayrı script,
+  toplam 28 kontrol:** şifre sıfırlama akışı (16 kontrol — "Şifremi Unuttum?"
+  linki, e-posta ön-doldurma, var olan/olmayan e-postada AYNI ekran, gerçek
+  token'la form doldurma, eşleşmeyen şifre hatası, başarılı sıfırlama →
+  Login'e dönüş + onay mesajı, eski/yeni şifreyle giriş, token'sız/geçersiz
+  token senaryoları) ve premium kartı (12 kontrol — kart gerçek plan + gerçek
+  kullanım sayısını gösteriyor, buton GERÇEKTEN `/profil/premium`'a gidiyor,
+  premium'a yükseltilince kart VE buton görünürlüğü güncelleniyor).
+  **Test sırasında yakalanan üç ortam/test tuzağı (ürün hatası DEĞİL):**
+  (a) fresh bir tarayıcı profilinde `dg_intro_seen` yoksa App.jsx tanıtım
+  (intro) ekranını Login'in ÖNÜNE koyuyor — testler `context.addInitScript`
+  ile bu bayrağı navigasyondan ÖNCE basacak şekilde düzeltildi; (b) ikinci bir
+  `vite` dev sunucusu (`5174`) CORS'un varsayılan izinli listesinde
+  (`http://localhost:5173`) OLMADIĞI için `forgotPassword` isteği tarayıcıda
+  sessizce CORS hatasıyla düştü — test, zaten çalışan ve DOĞRU origin'deki
+  `5173` sunucusuna yönlendirilerek düzeltildi (fazladan açılan `5174`
+  kapatıldı); (c) `/profil/premium`'a geçiş sonrası kullanım verisini
+  bekleyen `useEffect` henüz tamamlanmadan `isVisible()` kontrolü hemen
+  çalıştırılmıştı — `waitForSelector` eklenerek düzeltildi.
+- Frontend `npm run lint` + `npm run build` temiz.
+- **Bilinçli olarak kapsam dışı bırakılanlar:** gerçek bir ödeme sağlayıcısı
+  (Stripe vb.) entegrasyonu — roadmap'in daha büyük, ayrı bir maddesi;
+  premium'dan ücretsize düşme akışı — şu an hiçbir yerde tetiklenmiyor;
+  şifre sıfırlama e-postasının GERÇEK bir kullanıcıya gönderilmesi —
+  Resend sandbox kısıtı (`onboarding@resend.dev` yalnızca hesap sahibine
+  gönderebilir) nedeniyle özel alan adı doğrulanana kadar test edilemedi,
+  akışın GERİ KALANI (token üretimi, e-posta HTML'i, doğrulama, sıfırlama)
+  uçtan uca gerçek ve doğrulandı.
 
 ### 2026-08-27 — "Yeni Parça Ekle" formuna Marka alanı eklendi (519 markalık öneri listesi)
 - **Ne eklendi:** `QuickAddModal`'a (hem oluşturma hem düzenleme modunda) "Marka"

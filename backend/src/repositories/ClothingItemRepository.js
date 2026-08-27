@@ -63,6 +63,22 @@ class ClothingItemRepository {
     }
   }
 
+  // Ücretsiz plan sınırını uygulamak için (bkz. config/plans.js). Soft
+  // delete edilmiş parçalar sayılmaz — kullanıcı bir parçayı silip yerine
+  // yenisini ekleyebilmeli.
+  async countActive(userId) {
+    try {
+      const result = await this.pool.query(
+        'SELECT COUNT(*)::int AS count FROM clothing_items WHERE user_id = $1 AND is_deleted = false',
+        [userId],
+      )
+      return result.rows[0].count
+    } catch (error) {
+      console.error('ClothingItemRepository.countActive hatası:', error.message)
+      throw error
+    }
+  }
+
   async create(data) {
     try {
       const { userId, categoryId, name, color, brand, season, imageUrl, isClean } = data

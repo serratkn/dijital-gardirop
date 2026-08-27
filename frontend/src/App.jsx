@@ -6,6 +6,8 @@ import ScrollToTopButton from './components/ScrollToTopButton'
 import ProtectedRoute from './components/auth/ProtectedRoute'
 import Login from './pages/Login'
 import Register from './pages/Register'
+import ForgotPassword from './pages/ForgotPassword'
+import ResetPassword from './pages/ResetPassword'
 import StyleQuiz from './pages/StyleQuiz'
 import Dashboard from './pages/Dashboard'
 import Wardrobe from './pages/Wardrobe'
@@ -17,6 +19,7 @@ import AccountInfo from './pages/AccountInfo'
 import ChangePassword from './pages/ChangePassword'
 import StylePreferences from './pages/StylePreferences'
 import ComingSoon from './pages/ComingSoon'
+import Premium from './pages/Premium'
 import Intro from './pages/Intro'
 import { onUnauthorized } from './lib/api'
 import { hasValidSession } from './lib/auth'
@@ -115,6 +118,22 @@ function App() {
           isAuthenticated ? <Navigate to="/" replace /> : <Register />
         }
       />
+      {/* Şifremi unuttum / sıfırlama — GİRİŞ GEREKTİRMEZ, tam tersine amaçları
+          oturumu olmayan birinin şifresini kurtarmak. Oturumu olan biri
+          yanlışlıkla buraya gelirse Ana Sayfa'ya yönlendirilir (Login/Register
+          ile AYNI kural). */}
+      <Route
+        path="/sifremi-unuttum"
+        element={
+          isAuthenticated ? <Navigate to="/" replace /> : <ForgotPassword />
+        }
+      />
+      <Route
+        path="/sifre-sifirla"
+        element={
+          isAuthenticated ? <Navigate to="/" replace /> : <ResetPassword />
+        }
+      />
 
       {/* Korumalı ama chrome-free: kayıt sonrası tarz anketi */}
       <Route
@@ -133,6 +152,7 @@ function App() {
       <Route path="/kombinlerim" element={protectedShell(<OutfitHistory />)} />
       <Route path="/kiyafet/:id" element={protectedShell(<ClothingDetail />)} />
       <Route path="/profil" element={protectedShell(<Profile onLoggedOut={() => setAuthTick((t) => t + 1)} />)} />
+      <Route path="/profil/premium" element={protectedShell(<Premium />)} />
       <Route path="/profil/hesap-bilgilerim" element={protectedShell(<AccountInfo />)} />
       <Route path="/profil/sifre-degistir" element={protectedShell(<ChangePassword />)} />
       <Route path="/profil/tarz-tercihlerim" element={protectedShell(<StylePreferences />)} />

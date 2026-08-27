@@ -1,6 +1,7 @@
-const { NotFoundError, ValidationError, ForbiddenError } = require('../utils/errors')
+const { NotFoundError, ValidationError, ForbiddenError, PremiumRequiredError } = require('../utils/errors')
 const { FIELD_LIMITS, assertFieldLengths } = require('../utils/validators')
 const { removeUploadedFile, fileNameFromImageUrl } = require('../config/upload')
+const { FREE_LIMITS, isPremium } = require('../config/plans')
 
 const FOREIGN_KEY_VIOLATION = '23503'
 
@@ -17,8 +18,13 @@ function translateForeignKeyError(error) {
 }
 
 class ClothingItemService {
-  constructor(clothingItemRepository) {
+  // userRepository, ücretsiz plan sınırını kontrol edebilmek için gerekir
+  // (bkz. #assertUnderItemLimit). Diğer katmanlardaki "opsiyonel bağımlılık"
+  // deseninden BİLEREK farklı: limit kontrolü ana yazma yolunun ayrılmaz bir
+  // parçası, analiz/embedding gibi üstüne konan bir zenginleştirme değil.
+  constructor(clothingItemRepository, userRepository) {
     this.clothingItemRepository = clothingItemRepository
+    this.userRepository = userRepository
   }
 
   async getItems(userId, categoryId) {
@@ -47,6 +53,7 @@ class ClothingItemService {
 
   async createItem(data) {
     this.#validateCreateData(data)
+    await this.#assertUnderItemLimit(data.userId)
 
     try {
       // Belirtilmezse parça temiz kabul edilir (kolon varsayılanıyla aynı).
@@ -159,6 +166,23 @@ class ClothingItemService {
     }
 
     return this.clothingItemRepository.toggleCleanStatus(id)
+  }
+
+  // Ücretsiz kullanıcı en fazla FREE_LIMITS.clothingItems parça saklayabilir.
+  // Premium kullanıcı hiçbir kontrolden geçmez. Silme (soft delete) sayımı
+  // düşürdüğü için kullanıcı bir parçayı silip yerine yenisini ekleyebilir —
+  // bu "sınırsız kullanım hakkı" değil, "aynı anda en fazla N aktif parça" demek.
+  async #assertUnderItemLimit(userId) {
+    const user = await this.userRepository.findById(userId)
+    if (isPremium(user)) return
+
+    const count = await this.clothingItemRepository.countActive(userId)
+    if (count >= FREE_LIMITS.clothingItems) {
+      throw new PremiumRequiredError(
+        `Ücretsiz planda en fazla ${FREE_LIMITS.clothingItems} parça saklayabilirsin. ` +
+          'Daha fazlası için Profil > Premium Abonelik üzerinden yükselt.',
+      )
+    }
   }
 
   // Kolon NOT NULL: null/tanımsız değer veritabanına gitmeden burada karara bağlanır.

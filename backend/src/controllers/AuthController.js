@@ -66,6 +66,32 @@ class AuthController extends BaseController {
       this.handleError(error, res)
     }
   }
+
+  // Korumasız — kullanıcı henüz oturum açamadığı için bu uca bir Bearer
+  // token'la gelinmez. GÜVENLİK: e-posta kayıtlı olsun olmasın AYNI 204
+  // döner (AuthService.forgotPassword zaten sessizce tamamlanıyor) — hangi
+  // e-postaların kayıtlı olduğu buradan da sızmasın diye.
+  async forgotPassword(req, res) {
+    try {
+      await this.authService.forgotPassword(req.body?.email)
+      res.status(204).send()
+    } catch (error) {
+      // Yalnızca email biçimi hatalıysa (ValidationError) buraya düşer;
+      // "kullanıcı yok" asla bir hata olarak gelmez (bkz. AuthService).
+      this.handleError(error, res)
+    }
+  }
+
+  // Korumasız — kimlik body'deki token'ın İÇİNE gömülüdür (refresh token'daki
+  // #extractUserIdFromOpaqueToken ile AYNI mekanizma).
+  async resetPassword(req, res) {
+    try {
+      await this.authService.resetPassword(req.body?.token, req.body?.newPassword)
+      res.status(204).send()
+    } catch (error) {
+      this.handleError(error, res)
+    }
+  }
 }
 
 module.exports = AuthController

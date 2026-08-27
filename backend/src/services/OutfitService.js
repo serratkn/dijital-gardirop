@@ -1,11 +1,15 @@
-const { NotFoundError, ValidationError } = require('../utils/errors')
+const { NotFoundError, ValidationError, PremiumRequiredError } = require('../utils/errors')
 const { FIELD_LIMITS, assertMaxLength, assertUuid } = require('../utils/validators')
+const { FREE_LIMITS, isPremium } = require('../config/plans')
 
 const FOREIGN_KEY_VIOLATION = '23503'
 
 class OutfitService {
-  constructor(outfitRepository) {
+  // userRepository, ücretsiz plan sınırını kontrol edebilmek için gerekir
+  // (bkz. #assertUnderOutfitLimit) — ClothingItemService'teki AYNI gerekçe.
+  constructor(outfitRepository, userRepository) {
     this.outfitRepository = outfitRepository
+    this.userRepository = userRepository
   }
 
   // clothingItemId verilirse yalnızca o parçanın geçtiği kombinler döner
@@ -41,6 +45,7 @@ class OutfitService {
 
     const clothingItemIds = this.#validateItemIds(data.clothingItemIds)
     await this.#assertItemsBelongToUser(data.userId, clothingItemIds)
+    await this.#assertUnderOutfitLimit(data.userId)
 
     try {
       return await this.outfitRepository.create({
@@ -99,6 +104,21 @@ class OutfitService {
       throw new NotFoundError('Kombin bulunamadı')
     }
     return this.outfitRepository.incrementTimesWorn(id)
+  }
+
+  // Ücretsiz kullanıcı en fazla FREE_LIMITS.outfits kombin kaydedebilir.
+  // Premium kullanıcı hiçbir kontrolden geçmez.
+  async #assertUnderOutfitLimit(userId) {
+    const user = await this.userRepository.findById(userId)
+    if (isPremium(user)) return
+
+    const count = await this.outfitRepository.countByUser(userId)
+    if (count >= FREE_LIMITS.outfits) {
+      throw new PremiumRequiredError(
+        `Ücretsiz planda en fazla ${FREE_LIMITS.outfits} kombin kaydedebilirsin. ` +
+          'Daha fazlası için Profil > Premium Abonelik üzerinden yükselt.',
+      )
+    }
   }
 
   #validateItemIds(clothingItemIds) {

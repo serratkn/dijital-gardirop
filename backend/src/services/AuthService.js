@@ -13,6 +13,12 @@ const MIN_PASSWORD_LENGTH = 8
 // (access token'ın aksine kısa aralıklarla tetiklenir); 10 tur ~60-70ms
 // sürer ve bu depodaki password_hash ile TUTARLI kalması için düşürülmedi.
 const REFRESH_TOKEN_BCRYPT_ROUNDS = 10
+// Şifre sıfırlama token'ı 32 bayt (256 bit) — refresh token'dan (48 bayt)
+// bilerek daha kısa: bu token çok daha kısa ömürlü (varsayılan 1 saat) ve
+// tek kullanımlık, 256 bit zaten kaba kuvvetle tahmin edilemez bir güvenlik
+// payı sağlıyor.
+const RESET_TOKEN_BYTES = 32
+
 // 48 bayt = 384 bit entropi — kaba kuvvetle tahmin edilemez. Token biçimi
 // `<userId>:<rastgeleHex>` şeklindedir (bkz. #createRefreshToken): bcrypt
 // hash'leri SORGULANAMADIĞI için (her hash'leme farklı salt üretir, WHERE
@@ -50,8 +56,20 @@ class UnauthorizedError extends AppError {
 }
 
 class AuthService {
-  constructor(userRepository) {
+  // emailRepository OPSİYONELDİR (varsayılan null) — WeatherService'teki
+  // "anahtar yoksa dış servise hiç gidilmez" ilkesiyle AYNI: RESEND_API_KEY
+  // tanımlı değilse forgotPassword sessizce e-posta GÖNDERMEZ (yalnızca log'a
+  // uyarı düşer) ama kullanıcıya YİNE DE aynı "gönderildi" yanıtını döner —
+  // login'deki "kullanıcı yok/şifre yanlış" ayrımsızlığıyla AYNI güvenlik ilkesi.
+  constructor(userRepository, emailRepository = null) {
     this.userRepository = userRepository
+    this.emailRepository = emailRepository
+
+    this.resetTokenExpiresInMs = parseDurationToMs(process.env.PASSWORD_RESET_EXPIRES_IN || '1h')
+    // Sıfırlama e-postasındaki bağlantı bu adrese göre kurulur. Sondaki
+    // eğik çizgiler temizlenir (frontend/src/lib/api.js > resolveApiOrigin
+    // ile AYNI disiplin) — çift eğik çizgili bir URL üretmemek için.
+    this.frontendUrl = (process.env.FRONTEND_URL || 'http://localhost:5173').replace(/\/+$/, '')
 
     this.jwtSecret = process.env.JWT_SECRET
     // KISA ömürlü access token — artık kullanıcı oturumunun asıl süresini
@@ -134,7 +152,7 @@ class AuthService {
   // meşru sahibi bir sonraki sessiz yenilemeyi yaptığı anda çalıntı kopya
   // geçersiz kalır.
   async refresh(rawToken) {
-    const userId = this.#extractUserIdFromRefreshToken(rawToken)
+    const userId = this.#extractUserIdFromOpaqueToken(rawToken)
     if (!userId) {
       throw new UnauthorizedError('Oturum yenilenemedi, lütfen tekrar giriş yapın')
     }
@@ -204,6 +222,114 @@ class AuthService {
     return this.userRepository.updatePassword(userId, passwordHash)
   }
 
+  // "Şifremi Unuttum" — e-postaya bir sıfırlama bağlantısı gönderir.
+  //
+  // GÜVENLİK: bu metod hiçbir şey FIRLATMAZ (email biçimi hatalıysa hariç) ve
+  // e-posta kayıtlı olsun olmasın DAİMA aynı şekilde tamamlanır — çağıran
+  // (AuthController) her koşulda aynı "gönderildi" yanıtını döner. Aksi hâlde
+  // "kullanıcı bulunamadı" ile "gönderildi" yanıtları arasındaki fark, hangi
+  // e-postaların kayıtlı olduğunu dışarıya sızdırırdı (login'deki ilkeyle AYNI).
+  async forgotPassword(email) {
+    const normalized = this.#normalizeEmail(email)
+    const user = await this.userRepository.findByEmail(normalized)
+
+    // Kullanıcı yoksa burada SESSİZCE döneriz — çağıran zaten aynı yanıtı verecek.
+    if (!user) return
+
+    const rawToken = this.#createOpaqueToken(user.id, RESET_TOKEN_BYTES)
+    const tokenHash = await bcrypt.hash(rawToken, BCRYPT_ROUNDS)
+    const expiresAt = new Date(Date.now() + this.resetTokenExpiresInMs)
+    await this.userRepository.setResetToken(user.id, { hash: tokenHash, expiresAt })
+
+    await this.#sendResetEmail(user.email, rawToken)
+  }
+
+  // E-posta gönderimi bu akışı ASLA fırlatmaz — WeatherService/ClothingAnalysisService
+  // ile AYNI ilke: dış servis (Resend) erişilemese, anahtar tanımlı olmasa ya da
+  // zaman aşımına uğrasa bile forgotPassword'ün "her koşulda aynı yanıt" sözleşmesi
+  // bozulmamalı. Hata sunucu log'una düşer ki yanlış yapılandırma fark edilsin.
+  async #sendResetEmail(email, rawToken) {
+    if (!this.emailRepository?.isConfigured) {
+      console.warn(
+        'Şifre sıfırlama e-postası GÖNDERİLMEDİ: RESEND_API_KEY tanımlı değil ' +
+          '(backend/.env dosyasına bakın).',
+      )
+      return
+    }
+
+    const link = `${this.frontendUrl}/sifre-sifirla?token=${encodeURIComponent(rawToken)}`
+
+    try {
+      await this.emailRepository.send({
+        to: email,
+        subject: 'Dijital Gardırop — Şifreni Sıfırla',
+        html: this.#buildResetEmailHtml(link),
+      })
+    } catch (error) {
+      console.error('Şifre sıfırlama e-postası gönderilemedi:', error.message)
+    }
+  }
+
+  #buildResetEmailHtml(link) {
+    return `
+      <div style="font-family: Georgia, serif; max-width: 480px; margin: 0 auto; color: #211d1a;">
+        <h1 style="font-style: italic; font-weight: 500;">Dijital Gardırop</h1>
+        <p>Şifreni sıfırlamak için aşağıdaki bağlantıya tıkla. Bu bağlantı 1 saat boyunca geçerlidir.</p>
+        <p style="margin: 28px 0;">
+          <a href="${link}" style="background: #7a3b3b; color: #f7f3ed; padding: 12px 24px; border-radius: 999px; text-decoration: none; display: inline-block;">
+            Şifremi Sıfırla
+          </a>
+        </p>
+        <p style="font-size: 13px; color: #6b6660;">
+          Bu isteği sen yapmadıysan bu e-postayı yok sayabilirsin — hesabında hiçbir şey değişmez.
+        </p>
+      </div>
+    `
+  }
+
+  // Sıfırlama formunun gönderdiği token + yeni şifre ile parolayı GERÇEKTEN
+  // değiştirir. FIRLATIR: burada (forgotPassword'ün aksine) kullanıcı ekranda
+  // bekliyor ve token GERÇEKTEN kendi elindeki linkten geliyor — enumeration
+  // riski yok, bu yüzden geçersiz/süresi dolmuş bir token için net bir hata
+  // dönmek güvenlik ilkesini bozmaz.
+  async resetPassword(rawToken, newPassword) {
+    const password = this.#validatePassword(newPassword, 'newPassword')
+
+    const userId = this.#extractUserIdFromOpaqueToken(rawToken)
+    if (!userId) {
+      throw new UnauthorizedError('Sıfırlama bağlantısı geçersiz veya süresi dolmuş')
+    }
+
+    const record = await this.userRepository.findResetTokenData(userId)
+    if (!record || !record.reset_token_hash) {
+      throw new UnauthorizedError('Sıfırlama bağlantısı geçersiz veya süresi dolmuş')
+    }
+
+    if (record.reset_token_expires_at && record.reset_token_expires_at.getTime() <= Date.now()) {
+      await this.userRepository.clearResetToken(userId)
+      throw new UnauthorizedError('Sıfırlama bağlantısı geçersiz veya süresi dolmuş')
+    }
+
+    const isValid = await bcrypt.compare(rawToken, record.reset_token_hash)
+    if (!isValid) {
+      throw new UnauthorizedError('Sıfırlama bağlantısı geçersiz veya süresi dolmuş')
+    }
+
+    const passwordHash = await bcrypt.hash(password, BCRYPT_ROUNDS)
+    await this.userRepository.updatePassword(userId, passwordHash)
+
+    // Token TEK KULLANIMLIKTIR — kullanılır kullanılmaz geçersiz kılınır,
+    // aynı bağlantı ikinci kez işe yaramaz.
+    await this.userRepository.clearResetToken(userId)
+
+    // GÜVENLİK: şifre değiştiğinde var olan oturum(lar) da geçersiz kılınır.
+    // Bir saldırgan bu bağlantıyı ele geçirip şifreyi kendi bildiği bir
+    // değerle değiştirse bile, kurbanın ESKİ cihazlarındaki refresh token
+    // artık işe yaramaz — bir sonraki sessiz yenilemede Login'e düşerler ve
+    // hesaplarının ele geçirildiğini fark ederler.
+    await this.userRepository.clearRefreshToken(userId)
+  }
+
   // Middleware tarafından her korumalı istekte çağrılır.
   verifyToken(token) {
     try {
@@ -226,7 +352,7 @@ class AuthService {
   // bir `user` nesnesi var, burada tekrarlamaya gerek yok.
   async #issueTokenPair(userId, email) {
     const accessToken = this.#createAccessToken(userId, email)
-    const refreshToken = this.#createRefreshToken(userId)
+    const refreshToken = this.#createOpaqueToken(userId, REFRESH_TOKEN_BYTES)
     const refreshTokenHash = await bcrypt.hash(refreshToken, REFRESH_TOKEN_BCRYPT_ROUNDS)
     const expiresAt = new Date(Date.now() + this.refreshTokenExpiresInMs)
 
@@ -235,19 +361,21 @@ class AuthService {
     return { token: accessToken, refreshToken }
   }
 
-  // Opak bir dize: `<userId>:<48 baytlık rastgele hex>`. JWT DEĞİLDİR —
-  // imzalanmaz, çözülmez; tek işlevi kaba kuvvetle tahmin edilemeyecek kadar
-  // yüksek entropili (384 bit) bir sır taşımak ve DB'de hangi kullanıcıya ait
-  // olduğunu O(1) bulunabilir kılmaktır (bkz. REFRESH_TOKEN_BYTES yorumu).
-  #createRefreshToken(userId) {
-    return `${userId}:${crypto.randomBytes(REFRESH_TOKEN_BYTES).toString('hex')}`
+  // Opak bir dize: `<userId>:<rastgele hex>`. JWT DEĞİLDİR — imzalanmaz,
+  // çözülmez; tek işlevi kaba kuvvetle tahmin edilemeyecek kadar yüksek
+  // entropili bir sır taşımak ve DB'de hangi kullanıcıya ait olduğunu O(1)
+  // bulunabilir kılmaktır (bkz. REFRESH_TOKEN_BYTES/RESET_TOKEN_BYTES).
+  // Refresh token VE şifre sıfırlama token'ı AYNI biçimi paylaşır — tek fark
+  // uzunluk ve TTL'leri, o yüzden tek bir üretici/çözücü çifti yeterli.
+  #createOpaqueToken(userId, byteLength) {
+    return `${userId}:${crypto.randomBytes(byteLength).toString('hex')}`
   }
 
-  // `refresh()` bu userId'yi kullanarak SADECE o kullanıcının satırını okur;
-  // biçimi bozuk (UUID değil) bir token burada sessizce null'a düşer —
-  // refresh() bunu diğer tüm doğrulama hatalarıyla AYNI 401'e çevirir,
-  // "neden reddedildiği" dışarıya asla sızmaz.
-  #extractUserIdFromRefreshToken(rawToken) {
+  // `refresh()` ve `resetPassword()` bu userId'yi kullanarak SADECE o
+  // kullanıcının satırını okur; biçimi bozuk (UUID değil) bir token burada
+  // sessizce null'a düşer — ikisi de bunu diğer tüm doğrulama hatalarıyla
+  // AYNI 401'e çevirir, "neden reddedildiği" dışarıya asla sızmaz.
+  #extractUserIdFromOpaqueToken(rawToken) {
     if (typeof rawToken !== 'string' || !rawToken) return null
 
     const separatorIndex = rawToken.indexOf(':')

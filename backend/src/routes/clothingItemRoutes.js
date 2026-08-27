@@ -5,6 +5,7 @@ const { uploadImage, MAX_FILE_SIZE } = require('../config/upload')
 const { geminiLimiter } = require('../middleware/rateLimiters')
 const ClothingItemRepository = require('../repositories/ClothingItemRepository')
 const CategoryRepository = require('../repositories/CategoryRepository')
+const UserRepository = require('../repositories/UserRepository')
 const ClothingItemService = require('../services/ClothingItemService')
 const VectorRepository = require('../repositories/VectorRepository')
 const ClothingAnalysisService = require('../services/ClothingAnalysisService')
@@ -13,7 +14,9 @@ const GeminiService = require('../services/GeminiService')
 const ClothingItemController = require('../controllers/ClothingItemController')
 
 const clothingItemRepository = new ClothingItemRepository(pool)
-const clothingItemService = new ClothingItemService(clothingItemRepository)
+// UserRepository ikinci bağımlılık: ücretsiz plan sınırını kontrol etmek için
+// (bkz. ClothingItemService > #assertUnderItemLimit, config/plans.js).
+const clothingItemService = new ClothingItemService(clothingItemRepository, new UserRepository(pool))
 
 const geminiService = new GeminiService()
 

@@ -282,6 +282,26 @@ export function changePassword(payload) {
   })
 }
 
+// "Şifremi Unuttum" — register/login ile AYNI şekilde skipAuth: token yok,
+// Bearer başlığı denenmemeli. Backend e-posta kayıtlı olsun olmasın AYNI
+// (204) yanıtı döner (bkz. AuthService.forgotPassword) — hangi e-postaların
+// kayıtlı olduğu sızmasın diye; frontend bu yüzden başarı/başarısızlık
+// ayrımı YAPMAZ, her zaman aynı "gönderildiyse ulaşacak" mesajını gösterir.
+export function forgotPassword(email) {
+  return request('/auth/forgot-password', { method: 'POST', body: { email }, skipAuth: true })
+}
+
+// Sıfırlama formunun gönderdiği token GEÇERSİZ/SÜRESİ DOLMUŞ olabilir —
+// buradaki 401 gerçek bir form hatasıdır (oturum düşürme anlamına gelmez,
+// zaten oturum YOK), bu yüzden de skipAuth: true.
+export function resetPassword(token, newPassword) {
+  return request('/auth/reset-password', {
+    method: 'POST',
+    body: { token, newPassword },
+    skipAuth: true,
+  })
+}
+
 // Vektör okuma uçlarının istemci tarafı zaman aşımı. İki çağrının da ortak
 // özelliği var: kullanıcı ekrana bakıp bekliyor ve BAŞARISIZLIK TOLERE
 // EDİLEBİLİR (sonuç yoksa bölüm gösterilmez / rastgele seçime düşülür).

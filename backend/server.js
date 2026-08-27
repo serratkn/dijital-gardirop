@@ -7,6 +7,7 @@ const helmet = require('helmet')
 const pool = require('./src/config/database')
 const { UPLOAD_DIR } = require('./src/config/upload')
 const UserRepository = require('./src/repositories/UserRepository')
+const EmailRepository = require('./src/repositories/EmailRepository')
 const { AuthService } = require('./src/services/AuthService')
 const createAuthenticate = require('./src/middleware/authenticate')
 const createAuthRoutes = require('./src/routes/authRoutes')
@@ -73,8 +74,13 @@ app.use(
 app.use(express.json())
 
 // Auth altyapısı uygulamada tek örnektir: token'ı imzalayan ve doğrulayan
-// aynı servis olmalıdır.
-const authService = new AuthService(new UserRepository(pool))
+// aynı servis olmalıdır. EmailRepository, "şifremi unuttum" e-postaları için
+// — RESEND_API_KEY tanımlı değilse AuthService bunu sessizce atlar (bkz.
+// AuthService constructor'ı ve #sendResetEmail).
+const authService = new AuthService(
+  new UserRepository(pool),
+  new EmailRepository(process.env.RESEND_API_KEY, process.env.RESEND_FROM_ADDRESS),
+)
 const authenticate = createAuthenticate(authService)
 
 // Selfie'ler ASLA statik olarak servis edilmez — bu blok, aşağıdaki genel

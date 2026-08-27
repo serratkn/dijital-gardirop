@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Link, useNavigate } from 'react-router-dom'
+import { Link, useLocation, useNavigate } from 'react-router-dom'
 import AuthLayout from '../components/auth/AuthLayout'
 import Button from '../components/ui/Button'
 import { login } from '../lib/api'
@@ -12,6 +12,11 @@ const fieldInput =
 
 function Login() {
   const navigate = useNavigate()
+  const location = useLocation()
+  // ResetPassword başarılı olunca buraya `state: { passwordReset: true }` ile
+  // yönlendiriyor — ayrı bir toast sistemi yok, en basit yol bu bayrağı
+  // okuyup kısa bir onay satırı göstermek.
+  const showPasswordResetNotice = Boolean(location.state?.passwordReset)
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [isSubmitting, setIsSubmitting] = useState(false)
@@ -57,6 +62,12 @@ function Login() {
       }
     >
       <form onSubmit={handleSubmit} className="mt-10 space-y-5 text-left">
+        {showPasswordResetNotice && (
+          <p className="rounded-xl border border-dusty-rose/40 bg-dusty-rose/10 px-4 py-3 text-sm text-ink/70">
+            Şifren güncellendi. Yeni şifrenle giriş yapabilirsin.
+          </p>
+        )}
+
         <div>
           <label className={fieldLabel}>E-posta</label>
           <input
@@ -69,7 +80,16 @@ function Login() {
           />
         </div>
         <div>
-          <label className={fieldLabel}>Şifre</label>
+          <div className="flex items-baseline justify-between">
+            <label className={fieldLabel}>Şifre</label>
+            <Link
+              to="/sifremi-unuttum"
+              state={{ email }}
+              className="text-xs text-ink/50 underline transition-colors hover:text-accent-ink"
+            >
+              Şifremi Unuttum?
+            </Link>
+          </div>
           <input
             type="password"
             value={password}

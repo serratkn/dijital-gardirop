@@ -1,13 +1,16 @@
 const { Router } = require('express')
 const pool = require('../config/database')
 const OutfitRepository = require('../repositories/OutfitRepository')
+const UserRepository = require('../repositories/UserRepository')
 const OutfitService = require('../services/OutfitService')
 const GeminiService = require('../services/GeminiService')
 const OutfitController = require('../controllers/OutfitController')
 const { geminiLimiter } = require('../middleware/rateLimiters')
 
 const outfitRepository = new OutfitRepository(pool)
-const outfitService = new OutfitService(outfitRepository)
+// UserRepository ikinci bağımlılık: ücretsiz plan sınırını kontrol etmek için
+// (bkz. OutfitService > #assertUnderOutfitLimit, config/plans.js).
+const outfitService = new OutfitService(outfitRepository, new UserRepository(pool))
 const outfitController = new OutfitController(outfitService, new GeminiService())
 
 const router = Router()

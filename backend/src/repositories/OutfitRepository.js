@@ -100,6 +100,20 @@ class OutfitRepository {
     }
   }
 
+  // Ücretsiz plan sınırını uygulamak için (bkz. config/plans.js).
+  async countByUser(userId) {
+    try {
+      const result = await this.pool.query(
+        'SELECT COUNT(*)::int AS count FROM outfits WHERE user_id = $1',
+        [userId],
+      )
+      return result.rows[0].count
+    } catch (error) {
+      console.error('OutfitRepository.countByUser hatası:', error.message)
+      throw error
+    }
+  }
+
   // Kombin ve parçaları tek transaction içinde yazılır; biri başarısız olursa
   // yarım kombin kalmaması için tamamı geri alınır.
   async create(data) {

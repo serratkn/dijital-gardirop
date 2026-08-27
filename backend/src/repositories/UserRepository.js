@@ -174,6 +174,62 @@ class UserRepository {
     }
   }
 
+  // --- Şifre sıfırlama (bkz. AuthService.forgotPassword / resetPassword) ---
+  //
+  // refresh_token_hash ile AYNI disiplin: bu iki metod da SAFE_COLUMNS
+  // KULLANMAZ (API yanıtına doğrudan dönmezler) ve ham token asla buraya
+  // gelmez — AuthService bcrypt.hash sonucunu gönderir, burası yalnızca saklar.
+
+  async setResetToken(userId, { hash, expiresAt }) {
+    try {
+      const result = await this.pool.query(
+        `UPDATE users
+         SET reset_token_hash = $1, reset_token_expires_at = $2, updated_at = NOW()
+         WHERE id = $3
+         RETURNING id`,
+        [hash, expiresAt, userId],
+      )
+      return result.rows[0] || null
+    } catch (error) {
+      console.error('UserRepository.setResetToken hatası:', error.message)
+      throw error
+    }
+  }
+
+  // Refresh token'daki `findRefreshTokenData` ile AYNI desen: token OPAK
+  // olduğu için (bcrypt hash'i sorgulanamaz) AuthService önce token'ın
+  // içine gömülü user id'yi çıkarır, sonra SADECE o kullanıcının satırını
+  // burada okuyup bcrypt.compare ile doğrular.
+  async findResetTokenData(userId) {
+    try {
+      const result = await this.pool.query(
+        `SELECT id, email, reset_token_hash, reset_token_expires_at
+         FROM users WHERE id = $1`,
+        [userId],
+      )
+      return result.rows[0] || null
+    } catch (error) {
+      console.error('UserRepository.findResetTokenData hatası:', error.message)
+      throw error
+    }
+  }
+
+  // Token KULLANILDIKTAN SONRA (başarılı sıfırlama) ya da SÜRESİ DOLUNCA
+  // (housekeeping) çağrılır — tek kullanımlık olması bu çağrının garantisidir.
+  async clearResetToken(userId) {
+    try {
+      await this.pool.query(
+        `UPDATE users
+         SET reset_token_hash = NULL, reset_token_expires_at = NULL, updated_at = NOW()
+         WHERE id = $1`,
+        [userId],
+      )
+    } catch (error) {
+      console.error('UserRepository.clearResetToken hatası:', error.message)
+      throw error
+    }
+  }
+
   // --- Ten tonu analizi ---
   //
   // Bu iki kolon SAFE_COLUMNS'A BİLEREK EKLENMEDİ. Selfie yolu hassas veridir

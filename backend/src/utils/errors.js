@@ -34,6 +34,17 @@ class ForbiddenError extends AppError {
   }
 }
 
+// Ücretsiz planın somut bir sınırına ulaşıldığında (parça/kombin sayısı) ya
+// da premium'a özel bir işlem denendiğinde. 402 Payment Required — HTTP'nin
+// tam bunun için ayrılmış, nadiren kullanılan kodu. 403 (ForbiddenError)
+// KASITLI OLARAK kullanılmadı: 403 "bu işlemi asla yapamazsın" der, burada ise
+// "şu an ücretsiz plandasın, yükseltirsen yapabilirsin" deniyor — anlamca farklı.
+class PremiumRequiredError extends AppError {
+  constructor(message = 'Bu işlem premium üyelik gerektiriyor') {
+    super(message, 402)
+  }
+}
+
 // Dış servis (Gemini gibi) erişilemediğinde veya anlamsız yanıt verdiğinde.
 // 500 DEĞİL: 500 "bizim kodumuz patladı" demektir ve kullanıcıya hiçbir şey
 // anlatmaz. 503 "bağımlı olduğumuz servis şu an kullanılamıyor" demektir ve
@@ -51,4 +62,5 @@ module.exports = {
   ConflictError,
   ForbiddenError,
   ServiceUnavailableError,
+  PremiumRequiredError,
 }
