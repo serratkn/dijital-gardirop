@@ -314,6 +314,10 @@ olduğu için iskelet oraya taşındı, kombin üretimi istemci tarafında anlı
   ve (kullanıcının şehri varsa) hava gerçekten soğukken bir uyarı gösterir; ikisi de
   yoksa "her şey yolunda" der. **Push/anlık bildirim DEĞİLDİR** — yalnızca sayfa
   açıldığında var olan veriden hesaplanan bir özet
+- **Kullanım başına maliyet** — parçaya isteğe bağlı bir satın alma fiyatı eklenir;
+  Kıyafet Detay'da "kullanım başına X ₺" (fiyat / o parçanın geçtiği TÜM kombinlerin
+  toplam giyilme sayısı) gösterilir. Fiyat yoksa ya da parça hiç giyilmediyse bölüm
+  hiç görünmez ya da nazik bir yönlendirme çıkar
 - **Backend** — 6 kaynak için tam CRUD, transaction'lı kombin yazımı, tipli hata yönetimi,
   alan uzunluğu ve foreign key doğrulamaları
 
@@ -400,6 +404,7 @@ olduğu için iskelet oraya taşındı, kombin üretimi istemci tarafında anlı
 | `is_clean` | BOOLEAN | **NOT NULL**, `true` — kombin önerisi yalnızca `true` olanlardan seçer |
 | `is_deleted` | BOOLEAN | `false` — **soft delete**, her okuma filtreler |
 | `ai_analysis` | JSONB | Gemini otomatik analizi. **NULL = henüz analiz edilmedi veya analiz başarısız oldu** — kıyafet akışı buna hiç bağlı değildir |
+| `purchase_price` | NUMERIC(10,2) | Kullanım başına maliyet (cost-per-wear) için. **NULL = fiyat girilmedi**. Migration `010`. `PUT`'ta gönderilmezse mevcut değer korunur (`isClean` ile AYNI ilke); `null` göndermek BİLEREK temizler |
 | `created_at` / `updated_at` | TIMESTAMP | |
 
 `ai_analysis` biçimi (bkz. `GeminiService.analyzeClothingItem`):
@@ -912,8 +917,8 @@ istemcide hiçbir toplama yapılmaz.
 |---|---|---|
 | `GET` | `/clothing-items?userId=*&categoryId=` | `categoryId` opsiyonel filtre; `created_at DESC` sıralı |
 | `GET` | `/clothing-items/:id` | Silinmişse `404` |
-| `POST` | `/clothing-items` | `{ userId*, categoryId*, name*, color, brand, season, imageUrl, isClean }` → `201`, ücretsiz planda 30. parçadan sonra `402` (bkz. §8 "Premium sınırları") |
-| `PUT` | `/clothing-items/:id` | `{ categoryId*, name*, color, brand, season, isClean }` — **fotoğraf bu ucun işi değildir** |
+| `POST` | `/clothing-items` | `{ userId*, categoryId*, name*, color, brand, season, imageUrl, isClean, purchasePrice }` → `201`, ücretsiz planda 30. parçadan sonra `402` (bkz. §8 "Premium sınırları") |
+| `PUT` | `/clothing-items/:id` | `{ categoryId*, name*, color, brand, season, isClean, purchasePrice }` — **fotoğraf bu ucun işi değildir** |
 | `DELETE` | `/clothing-items/:id` | **Soft delete** → `204` |
 | `PATCH` | `/clothing-items/:id/favorite` | Favori durumunu tersine çevirir (atomik) |
 | `PATCH` | `/clothing-items/:id/clean-status` | Temiz/kirli durumunu tersine çevirir (atomik) |
@@ -927,6 +932,20 @@ istemcide hiçbir toplama yapılmaz.
 yapılmaz (`"false"` metni `true` olurdu). `POST`'ta belirtilmezse parça **temiz** sayılır.
 `PUT`'ta belirtilmezse **mevcut değer korunur** — aksi hâlde herhangi bir düzenleme kirli
 bir parçayı sessizce temiz yapardı.
+
+**Kullanım başına maliyet (`purchasePrice`, bkz. §8 "Kullanım başına maliyet"
+için tam mimari).** İsteğe bağlı, `isClean` ile AYNI "gönderilmezse korunur"
+ilkesini izler — farkla ki `null` göndermek fiyatı BİLEREK temizler (isClean'de
+böyle bir "temizle" kavramı yok, her zaman `true`/`false`). Negatif ya da sayı
+olmayan bir değer `400` döner. **`GET /clothing-items/:id` (tekil) yanıtına
+`total_times_worn` ve `cost_per_wear` computed alanları eklenir** — liste
+uçları (`GET /clothing-items`, `findByCategory`, `findByIds`) bunları BİLEREK
+TAŞIMAZ, yalnızca `purchase_price` (ham kolon) döner. `cost_per_wear`,
+`purchase_price` yoksa VEYA parça hiç giyilmediyse (`total_times_worn = 0`)
+`null` döner — `0`'a bölme ya da uydurma bir değer asla üretilmez. Bir parçanın
+"kaç kez giyildiği" ayrı bir kolon değildir: `outfits.times_worn` yalnızca
+KOMBİN bazında tutulur, bu yüzden `total_times_worn` o parçayı İÇEREN TÜM
+kombinlerin `times_worn` TOPLAMIdır (bir parça birden fazla kombinde geçebilir).
 
 **`PUT` FOTOĞRAFA ASLA DOKUNMAZ — payload'da `imageUrl` gönderilse bile.**
 `ClothingItemService.updateItem` gelen veriden bağımsız olarak `image_url`'i
@@ -1191,6 +1210,10 @@ node test-scripts/test-item-outfits.js
 
 # Premium plan sınırları (parça/kombin) + şifre sıfırlama akışı (19 kontrol)
 node test-scripts/test-premium-and-reset.js
+
+# Kullanım başına maliyet (cost-per-wear): fiyat + giyilme sayısının birden
+# çok kombinde TOPLANMASI + 0'a bölme koruması (22 kontrol)
+node test-scripts/test-cost-per-wear.js
 
 # Temiz/kirli davranışı + kirli parçanın önerilmemesi (26 kontrol)
 node test-scripts/test-clean-status.js
@@ -2073,6 +2096,65 @@ notuna bakın).
   `fetch` ile kırılır (kart o fotoğraf için yer tutucuya düşer, tüm paylaşım
   engellenmez — ama bu da doğrulanmadı).
 
+**Kullanım başına maliyet (cost-per-wear).** Yol haritasının "Farklılaştırıcı"
+şeridindeki ilk madde: kullanıcı bir parçaya ne ödediğini girer, uygulama
+"bu parça sana kullanım başına kaç ₺'ye geldi" gibi somut bir rakam üretir.
+
+- **`purchase_price` NUMERIC(10,2)** (migration `010`) — INTEGER'a (kuruşsuz)
+  ya da FLOAT'a (yuvarlama hatası riski) BİLEREK konulmadı.
+- **"Kaç kez giyildi" ayrı bir kolon DEĞİL — TÜRETİLEN bir değer.**
+  `clothing_items`'ta bir "giyilme sayısı" kolonu yok; giyilme yalnızca
+  `outfits.times_worn` üzerinden, KOMBİN bazında tutuluyor ("Bugün Giydim"
+  düğmesi). Bir parçanın toplam giyilme sayısı, o parçayı İÇEREN tüm
+  kombinlerin `times_worn` toplamıdır — `ClothingItemRepository.findById`
+  içinde bir `SUM` alt sorgusuyla hesaplanır (`outfit_items` → `outfits` JOIN).
+- **Bu alt sorgu YALNIZCA `findById`'de var, `findAll`/`findByCategory`/
+  `findByIds`'te YOK.** Kapsam bilinçli olarak dar tutuldu: cost-per-wear
+  yalnızca Kıyafet Detay'da gösteriliyor, Gardırop ızgarası ya da vektör aday
+  zenginleştirmesi bu hesaplamaya hiç ihtiyaç duymuyor — sık çağrılan liste
+  uçlarına gereksiz bir JOIN eklemenin bir karşılığı olmazdı.
+- **`cost_per_wear` SERVİS katmanında hesaplanır** (`ClothingItemService.
+  getItemById > #computeCostPerWear`), repository'de DEĞİL — "SQL yalnızca
+  veri, iş kuralı serviste yaşar" ilkesiyle tutarlı. Fiyat yoksa VEYA parça
+  hiç giyilmediyse (`total_times_worn = 0`) `null` döner; `0`'a bölmek ya da
+  uydurma bir "∞" değeri göstermek YANLIŞ bir bilgi olurdu.
+- **`purchasePrice` `PUT`'ta gönderilmezse KORUNUR** (`isClean` ile AYNI
+  "gönderilmezse mevcut değer korunur" deseni) — `name`/`color` gibi ilgisiz
+  bir alanı düzenlemek sessizce fiyatı silmemeli. `isClean`'den FARKLI olarak
+  burada gerçek bir "temizle" kavramı var: kullanıcı `null` gönderirse fiyat
+  BİLEREK NULL'a döner (isClean hiçbir zaman NULL olamaz, hep `true`/`false`).
+- **Frontend'de fiyat alanı `age` (AccountInfo.jsx) ile AYNI kalıbı izler:**
+  input'a bağlı state STRING'tir (`''` boş), sayıya çevirme yalnızca gönderim
+  anında (`purchasePrice === '' ? null : Number(purchasePrice)`) yapılır —
+  Postgres NUMERIC kolonları `pg` sürücüsünde string döndüğü için (float
+  hassasiyet kaybını önlemek için) bu, form değerini olduğu gibi taşımanın
+  en basit yolu.
+- **`ClothingDetail.jsx`'te bölüm fiyat YOKSA hiç render edilmez**
+  ("Buna Benzer Diğer Parçalar" ile AYNI ilke — veri yoksa boşluk da
+  bırakılmaz). Fiyat var ama parça hiç giyilmediyse `cost_per_wear` yerine
+  nazik bir yönlendirme gösterilir ("Henüz 'Bugün Giydim' ile işaretlenmedi").
+- **Doğrulama — `backend/test-scripts/test-cost-per-wear.js` (YENİ, 22
+  kontrol):** fiyatsız parçada `cost_per_wear`/`purchase_price` NULL; fiyatlı
+  ama hiç giyilmemiş parçada `cost_per_wear` NULL (0'a bölme değil); **KRİTİK
+  — bir kombinde 2 kez "Bugün Giydim" sonrası `cost_per_wear = fiyat/2`**;
+  **İKİNCİ bir kombinle aynı parçanın giyilmelerinin TOPLANDIĞI** (iki ayrı
+  kombindeki giyilmeler birleşiyor); negatif/sayı olmayan fiyatın `400`
+  döndüğü; `PUT`'ta fiyat gönderilmezse KORUNDUĞU, `null` gönderilirse
+  GERÇEKTEN temizlendiği; liste ucunun `cost_per_wear`/`total_times_worn`
+  TAŞIMADIĞI ama `purchase_price`'ı (form ön-doldurma için) taşıdığı.
+  Gerçek tarayıcıda (Playwright + sistem Chrome, 12 kontrol): form alanının
+  görünmesi, kaydedilen fiyatın Kıyafet Detay'da doğru gösterilmesi, **3 kez
+  "Bugün Giydim" sonrası gerçek hesaplamanın ekranda çıkması (900 ₺ / 3 =
+  300 ₺)**, düzenleme modunda fiyatın ön-dolu gelmesi, fiyat temizlenince
+  bölümün kaybolması, temiz konsol.
+- Regresyon: `test-all-endpoints` 77/77, `test-image-upload` 29/29 (fotoğraf
+  akışına dokunulmadığının kanıtı), frontend lint + build temiz.
+- **Kapsam dışı bırakılan (bilinçli):** paylaşılabilir bir "kombin kartı"
+  (roadmap'in "sosyal medyada kendiliğinden dolaşan bir istatistik" fikri) —
+  `ShareOutfitCard` KOMBİNLER için, tekil bir PARÇA istatistiği için ayrı bir
+  paylaşım mekanizması bu oturumun kapsamına alınmadı; şimdilik yalnızca
+  Kıyafet Detay'da gösteriliyor.
+
 **Güvenlik middleware'leri (`server.js`, en üstte, tüm route'lardan önce).**
 
 - **`helmet()`** — varsayılan güvenlik başlıkları (CSP, X-Frame-Options, HSTS
@@ -2884,6 +2966,44 @@ tamamlayıp kaldırıldı:
 
 > Bundan sonraki her çalışma buraya tarihiyle işlenir: eklenen özellikler, düzeltilen
 > hatalar, alınan mimari kararlar. En yeni kayıt en üstte.
+
+### 2026-08-27 — Kullanım başına maliyet (cost-per-wear) eklendi
+- **Bağlam:** Yol haritasının "Farklılaştırıcı" şeridindeki ilk madde. Kullanıcı
+  R2 kurulumunu (kredi kartı istemeden ücretsiz katmanla bile olsa) şimdilik
+  ertelemeyi seçti; bu madde hiçbir dış hesap gerektirmediği için hemen
+  uygulandı. Tam mimari not için bkz. §8 "Kullanım başına maliyet".
+- **Migration `010_add_purchase_price.sql`:** `clothing_items.purchase_price
+  NUMERIC(10,2)`, nullable.
+- **"Kaç kez giyildi" TÜRETİLEN bir değer** — ayrı bir kolon eklenmedi.
+  `outfits.times_worn` yalnızca kombin bazında tutulduğu için bir parçanın
+  toplam giyilme sayısı, o parçayı içeren TÜM kombinlerin `times_worn`
+  toplamıdır (`ClothingItemRepository.findById`'e eklenen bir `SUM` alt
+  sorgusu). Bu alt sorgu BİLEREK yalnızca `findById`'de var — liste uçlarına
+  (Gardırop ızgarası, vektör aday zenginleştirmesi) sızmıyor.
+- **`GET /clothing-items/:id`'e iki computed alan eklendi:** `total_times_worn`
+  ve `cost_per_wear` (`ClothingItemService` içinde hesaplanır, repository'de
+  DEĞİL). `cost_per_wear`, fiyat yoksa ya da parça hiç giyilmediyse `null`
+  döner — `0`'a bölme ya da uydurma bir değer asla üretilmez.
+- **`purchasePrice`, `isClean` ile AYNI "PUT'ta gönderilmezse korunur"
+  ilkesini izler** ama gerçek bir "temizle" kavramı da var: `null` göndermek
+  fiyatı bilerek siler.
+- **Frontend:** `QuickAddModal`'a "Satın Alma Fiyatı (₺)" alanı eklendi
+  (`age` alanıyla AYNI string-state deseni); `ClothingDetail.jsx`'e fiyat
+  varsa gösterilen, yoksa hiç render edilmeyen bir "Kullanım Başına Maliyet"
+  bölümü eklendi.
+- **Doğrulama — `test-scripts/test-cost-per-wear.js` (YENİ, 22 kontrol):**
+  fiyatsız/giyilmemiş parçada `null` korumaları, **KRİTİK — İKİ AYRI kombinde
+  giyilen bir parçanın giyilme sayılarının TOPLANDIĞI** doğrulaması, geçersiz
+  fiyat reddi, `PUT`'ta koruma/temizleme, liste ucunun computed alanları
+  taşımadığı. Gerçek tarayıcıda (Playwright + sistem Chrome, 12 kontrol):
+  formdan kayıt, Kıyafet Detay'da doğru gösterim, **3 kez "Bugün Giydim"
+  sonrası 900₺/3 = 300₺'nin GERÇEKTEN ekrana çıkması**, düzenlemede ön-dolu
+  gelme, fiyat temizlenince bölümün kaybolması, temiz konsol.
+- Regresyon: `test-all-endpoints` 77/77, `test-image-upload` 29/29, frontend
+  lint + build temiz.
+- **Kapsam dışı bırakılan (bilinçli):** paylaşılabilir bir istatistik kartı
+  (roadmap'in "sosyal medyada dolaşan rakam" fikri) — yalnızca Kıyafet
+  Detay'da gösteriliyor, ayrı bir paylaşım mekanizması eklenmedi.
 
 ### 2026-08-27 — Kıyafet fotoğrafları Cloudflare R2'ye yansıtılabiliyor (kod hazır, hesap kurulumu bekliyor)
 - **Bağlam:** Aynı profesyonelleştirme yol haritasının "Hemen kazanç" şeridindeki

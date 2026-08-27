@@ -42,6 +42,18 @@ export function toClothingItem(row, categoryNames) {
     imageUrl: row.image_url,
     isFavorite: row.is_favorite,
     isClean: row.is_clean,
+    // Postgres NUMERIC kolonları `pg` sürücüsünde STRING döner (float
+    // hassasiyet kaybını önlemek için) — `age`'in `toUserProfile`'daki
+    // muamelesiyle AYNI ilke: form input'larına doğrudan `value` olarak
+    // verilebilsin diye STRING olarak bırakılır, sayıya çevirme yalnızca
+    // gönderim anında (QuickAddModal) yapılır.
+    purchasePrice: row.purchase_price,
+    // Yalnızca `GET /clothing-items/:id` (tekil) taşır — liste uçları
+    // BİLİNÇLİ OLARAK taşımaz (bkz. ClothingItemRepository.findById).
+    // `undefined` kalmaları (liste yanıtlarında) sorun değil: yalnızca
+    // ClothingDetail bu alanları okur.
+    totalTimesWorn: row.total_times_worn,
+    costPerWear: row.cost_per_wear,
     // Gemini otomatik analizi (Aşama 2). NULL olabilir: analiz arka planda
     // çalışır, henüz bitmemiş ya da hiç yapılamamış olabilir. Kolonun içeriği
     // zaten kendi şemasında (Türkçe anahtarlar) olduğu için camelCase'e

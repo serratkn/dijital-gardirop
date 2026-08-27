@@ -16,10 +16,26 @@ class ClothingItemRepository {
     }
   }
 
+  // Yalnızca BU metod `total_times_worn` taşır — kullanım başına maliyet
+  // (cost-per-wear) hesaplaması için gereken tek yer Kıyafet Detay'dır.
+  // `findAll`/`findByCategory`/`findByIds` (ızgara + vektör aday zenginleştirme)
+  // BİLEREK bu alt sorguyu taşımaz: sık çağrılan liste uçlarına gereksiz bir
+  // JOIN eklemek, tek bir sayfada kullanılan bir alan için orantısız olurdu.
+  // Bir parçanın "kaç kez giyildiği" ayrı bir kolon DEĞİL: `outfits.times_worn`
+  // yalnızca KOMBİN bazında tutuluyor, bu yüzden bir parçanın toplam giyilme
+  // sayısı o parçayı İÇEREN tüm kombinlerin times_worn TOPLAMIdır.
   async findById(id) {
     try {
       const result = await this.pool.query(
-        'SELECT * FROM clothing_items WHERE id = $1 AND is_deleted = false',
+        `SELECT ci.*,
+                COALESCE((
+                  SELECT SUM(o.times_worn)
+                  FROM outfit_items oi
+                  JOIN outfits o ON o.id = oi.outfit_id
+                  WHERE oi.clothing_item_id = ci.id
+                ), 0)::int AS total_times_worn
+         FROM clothing_items ci
+         WHERE ci.id = $1 AND ci.is_deleted = false`,
         [id],
       )
       return result.rows[0] || null
@@ -81,13 +97,13 @@ class ClothingItemRepository {
 
   async create(data) {
     try {
-      const { userId, categoryId, name, color, brand, season, imageUrl, isClean } = data
+      const { userId, categoryId, name, color, brand, season, imageUrl, isClean, purchasePrice } = data
       const result = await this.pool.query(
         `INSERT INTO clothing_items
-           (user_id, category_id, name, color, brand, season, image_url, is_clean)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+           (user_id, category_id, name, color, brand, season, image_url, is_clean, purchase_price)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
          RETURNING *`,
-        [userId, categoryId, name, color, brand, season, imageUrl, isClean],
+        [userId, categoryId, name, color, brand, season, imageUrl, isClean, purchasePrice ?? null],
       )
       return result.rows[0]
     } catch (error) {
@@ -98,14 +114,14 @@ class ClothingItemRepository {
 
   async update(id, data) {
     try {
-      const { categoryId, name, color, brand, season, imageUrl, isClean } = data
+      const { categoryId, name, color, brand, season, imageUrl, isClean, purchasePrice } = data
       const result = await this.pool.query(
         `UPDATE clothing_items
          SET category_id = $1, name = $2, color = $3, brand = $4, season = $5,
-             image_url = $6, is_clean = $7, updated_at = NOW()
-         WHERE id = $8 AND is_deleted = false
+             image_url = $6, is_clean = $7, purchase_price = $8, updated_at = NOW()
+         WHERE id = $9 AND is_deleted = false
          RETURNING *`,
-        [categoryId, name, color, brand, season, imageUrl, isClean, id],
+        [categoryId, name, color, brand, season, imageUrl, isClean, purchasePrice ?? null, id],
       )
       return result.rows[0] || null
     } catch (error) {

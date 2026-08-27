@@ -557,6 +557,34 @@ function ClothingDetail() {
               </div>
             )}
 
+            {/* Fiyat girilmemişse bölüm HİÇ render edilmez — "Buna Benzer Diğer
+                Parçalar" ile AYNI ilke: veri yoksa boşluk da bırakılmaz. Fiyat
+                varsa ama parça HİÇ giyilmediyse (costPerWear null) 0'a bölme
+                yerine nazik bir yönlendirme gösterilir. */}
+            {item.purchasePrice !== null && item.purchasePrice !== undefined && (
+              <div className="mt-6">
+                <p className="text-xs font-medium uppercase tracking-[0.15em] text-ink/50">
+                  Kullanım Başına Maliyet
+                </p>
+                {item.costPerWear !== null && item.costPerWear !== undefined ? (
+                  <p className="mt-1">
+                    <span className="font-display text-2xl italic text-burgundy">
+                      {Number(item.costPerWear).toLocaleString('tr-TR')} ₺
+                    </span>
+                    <span className="text-sm text-ink/50"> / kullanım</span>
+                  </p>
+                ) : (
+                  <p className="mt-1 font-body text-base text-ink/60">
+                    Henüz "Bugün Giydim" ile işaretlenmedi.
+                  </p>
+                )}
+                <p className="mt-1 text-xs text-ink/40">
+                  {Number(item.purchasePrice).toLocaleString('tr-TR')} ₺'ye alındı
+                  {item.totalTimesWorn > 0 && ` · ${item.totalTimesWorn} kez giyildi`}
+                </p>
+              </div>
+            )}
+
             <div className="mt-10">
               <p className="text-xs font-medium uppercase tracking-[0.15em] text-ink/50">
                 Bu Kıyafetle Yapılan Kombinler

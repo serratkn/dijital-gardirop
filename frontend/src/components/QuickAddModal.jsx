@@ -46,6 +46,9 @@ function QuickAddModal({ isOpen, onClose, onSaved, item = null }) {
   // Varsayılan temiz: yeni eklenen parça kombin önerisine hemen katılabilsin.
   const [isClean, setIsClean] = useState(true)
   const [season, setSeason] = useState(DEFAULT_SEASON)
+  // `age` (AccountInfo.jsx) ile AYNI desen: input'a bağlı STRING state,
+  // gönderim anında sayıya çevrilir (`purchasePrice === '' ? null : Number(...)`).
+  const [purchasePrice, setPurchasePrice] = useState('')
   const [isSaving, setIsSaving] = useState(false)
   const [savingLabel, setSavingLabel] = useState('')
   const [errorMessage, setErrorMessage] = useState('')
@@ -98,6 +101,7 @@ function QuickAddModal({ isOpen, onClose, onSaved, item = null }) {
       setColor(item.color || DEFAULT_COLOR)
       setSeason(item.season || DEFAULT_SEASON)
       setIsClean(item.isClean ?? true)
+      setPurchasePrice(item.purchasePrice ?? '')
     } else {
       setName('')
       setBrand('')
@@ -105,6 +109,7 @@ function QuickAddModal({ isOpen, onClose, onSaved, item = null }) {
       setPhotoFile(null)
       setIsClean(true)
       setSeason(DEFAULT_SEASON)
+      setPurchasePrice('')
     }
     setErrorMessage('')
     setSavingLabel('')
@@ -126,6 +131,10 @@ function QuickAddModal({ isOpen, onClose, onSaved, item = null }) {
       setErrorMessage('Kategori seçmelisin.')
       return
     }
+    if (purchasePrice !== '' && (!Number.isFinite(Number(purchasePrice)) || Number(purchasePrice) < 0)) {
+      setErrorMessage('Fiyat negatif olmayan bir sayı olmalıdır.')
+      return
+    }
 
     setIsSaving(true)
     setErrorMessage('')
@@ -143,6 +152,7 @@ function QuickAddModal({ isOpen, onClose, onSaved, item = null }) {
           color,
           season,
           isClean,
+          purchasePrice: purchasePrice === '' ? null : Number(purchasePrice),
         })
       } catch (error) {
         console.error('Parça güncellenemedi:', error)
@@ -170,6 +180,7 @@ function QuickAddModal({ isOpen, onClose, onSaved, item = null }) {
         color,
         season,
         isClean,
+        purchasePrice: purchasePrice === '' ? null : Number(purchasePrice),
       })
     } catch (error) {
       console.error('Parça kaydedilemedi:', error)
@@ -287,6 +298,24 @@ function QuickAddModal({ isOpen, onClose, onSaved, item = null }) {
           </select>
           <p className="mt-2 text-xs text-ink/45">
             Hava durumuna göre öneri için kullanılır. "Tüm Sezon" her havada uygun sayılır.
+          </p>
+        </div>
+
+        <div>
+          <label className={fieldLabel}>Satın Alma Fiyatı (₺)</label>
+          <input
+            type="number"
+            inputMode="decimal"
+            min="0"
+            step="0.01"
+            value={purchasePrice}
+            onChange={(event) => setPurchasePrice(event.target.value)}
+            placeholder="örn. 450 (opsiyonel)"
+            className={fieldInput}
+          />
+          <p className="mt-2 text-xs text-ink/45">
+            Girersen Kıyafet Detay'da kullanım başına maliyetini ("bu parça sana kullanım
+            başına kaç ₺'ye geldi") görebilirsin.
           </p>
         </div>
 

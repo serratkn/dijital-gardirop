@@ -52,7 +52,10 @@ class ClothingItemService {
       throw new NotFoundError('Kıyafet bulunamadı')
     }
 
-    return item
+    // Kullanım başına maliyet YALNIZCA burada hesaplanır (liste uçlarında
+    // DEĞİL) — repository'nin `total_times_worn`'u yalnızca `findById`'de
+    // taşımasıyla AYNI kapsam kararı.
+    return { ...item, cost_per_wear: this.#computeCostPerWear(item) }
   }
 
   async createItem(data) {
@@ -64,6 +67,7 @@ class ClothingItemService {
       return await this.clothingItemRepository.create({
         ...data,
         isClean: this.#normalizeIsClean(data.isClean, true),
+        purchasePrice: this.#normalizePurchasePrice(data.purchasePrice, null),
       })
     } catch (error) {
       throw translateForeignKeyError(error)
@@ -84,6 +88,11 @@ class ClothingItemService {
         // isClean gönderilmediyse mevcut değer korunur. true'ya düşmek, herhangi bir
         // düzenlemenin kirli bir parçayı sessizce temiz yapması anlamına gelirdi.
         isClean: this.#normalizeIsClean(data.isClean, existingItem.is_clean),
+        // purchasePrice gönderilmediyse mevcut değer korunur (isClean'le AYNI
+        // ilke) — `name`/`color` gibi ilgisiz bir alanı düzenlemek sessizce
+        // fiyatı silmemeli. Kullanıcı fiyatı GERÇEKTEN temizlemek isterse
+        // `null` göndermesi yeterli.
+        purchasePrice: this.#normalizePurchasePrice(data.purchasePrice, existingItem.purchase_price),
         // imageUrl BU UÇTAN ASLA DEĞİŞMEZ. Fotoğraf yönetimi ayrı, adanmış
         // uçların işi (POST/DELETE .../image); bu uç yalnızca metin alanlarını
         // günceller. undefined/null bırakılsaydı repository'nin SQL'i
@@ -222,6 +231,37 @@ class ClothingItemService {
       throw new ValidationError('isClean true veya false olmalıdır')
     }
     return value
+  }
+
+  // `purchase_price` NULLABLE'dır (isClean'in aksine) — üç durumu ayırt eder:
+  // `undefined` (alan hiç gönderilmedi → mevcut değer korunur), `null`/`''`
+  // (kullanıcı fiyatı BİLEREK temizledi → NULL yazılır), sayı (doğrulanıp
+  // yazılır). Negatif bir fiyatın anlamı yok; `Number.isFinite` NaN/Infinity'yi
+  // de eler (ör. kullanıcı metin gönderirse).
+  #normalizePurchasePrice(value, fallback) {
+    if (value === undefined) return fallback
+    if (value === null || value === '') return null
+
+    const parsed = Number(value)
+    if (!Number.isFinite(parsed) || parsed < 0) {
+      throw new ValidationError('purchasePrice negatif olmayan bir sayı olmalıdır')
+    }
+    // İki ondalık basamağa yuvarlanır (para birimi hassasiyeti) — kolon zaten
+    // NUMERIC(10,2), fazla basamaklar veritabanı tarafında sessizce
+    // kırpılırdı; burada açıkça yapmak şaşırtıcı olmaz.
+    return Math.round(parsed * 100) / 100
+  }
+
+  // Kullanım başına maliyet: fiyat YOKSA ya da parça HİÇ giyilmediyse (bir
+  // kombinde bile kaydedilmediyse) hesaplanamaz — `0`'a bölmek ya da uydurma
+  // bir değer döndürmek yerine `null` dönülür, arayüz bu durumu ayrı bir
+  // davetle ele alır (bkz. ClothingDetail.jsx).
+  #computeCostPerWear(item) {
+    if (item.purchase_price === null || item.purchase_price === undefined) return null
+    if (!item.total_times_worn || item.total_times_worn <= 0) return null
+
+    const price = Number(item.purchase_price)
+    return Math.round((price / item.total_times_worn) * 100) / 100
   }
 
   #validateCreateData(data) {
