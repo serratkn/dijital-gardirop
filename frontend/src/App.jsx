@@ -20,6 +20,7 @@ import ChangePassword from './pages/ChangePassword'
 import StylePreferences from './pages/StylePreferences'
 import ComingSoon from './pages/ComingSoon'
 import Premium from './pages/Premium'
+import Notifications from './pages/Notifications'
 import Intro from './pages/Intro'
 import { onUnauthorized } from './lib/api'
 import { hasValidSession } from './lib/auth'
@@ -156,7 +157,7 @@ function App() {
       <Route path="/profil/hesap-bilgilerim" element={protectedShell(<AccountInfo />)} />
       <Route path="/profil/sifre-degistir" element={protectedShell(<ChangePassword />)} />
       <Route path="/profil/tarz-tercihlerim" element={protectedShell(<StylePreferences />)} />
-      <Route path="/profil/bildirimler" element={protectedShell(<ComingSoon title="Bildirimler" />)} />
+      <Route path="/profil/bildirimler" element={protectedShell(<Notifications />)} />
       <Route
         path="/profil/yardim-destek"
         element={protectedShell(<ComingSoon title="Yardım & Destek" />)}

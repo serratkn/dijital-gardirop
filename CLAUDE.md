@@ -305,6 +305,15 @@ olduğu için iskelet oraya taşındı, kombin üretimi istemci tarafında anlı
 - **Profil > Gardırop İstatistiklerim** — kategori dağılımı, en çok kullanılan renk,
   en çok oluşturulan kombin durumu, favori sayısı ve temiz/kirli oranı; tamamı
   `GET /users/:id/stats` ile veritabanında hesaplanır
+- **Premium sınırları** — ücretsiz planda 30 parça / 10 kombin sınırı GERÇEKTEN
+  uygulanır (`402`); Profil > Premium kartı gerçek plan + kullanım sayısını gösterir,
+  "Premium'a Geç" gerçek bir sayfaya (`/profil/premium`) gider (ödeme akışı henüz yok)
+- **Şifre sıfırlama** — Login'deki "Şifremi Unuttum?" ile e-posta üzerinden (Resend)
+  tek kullanımlık, süreli bir bağlantı gönderilir; başarılı sıfırlamada tüm oturumlar düşer
+- **Bildirimler** — Profil > Bildirimler artık gerçek: kirli işaretli parçaları listeler
+  ve (kullanıcının şehri varsa) hava gerçekten soğukken bir uyarı gösterir; ikisi de
+  yoksa "her şey yolunda" der. **Push/anlık bildirim DEĞİLDİR** — yalnızca sayfa
+  açıldığında var olan veriden hesaplanan bir özet
 - **Backend** — 6 kaynak için tam CRUD, transaction'lı kombin yazımı, tipli hata yönetimi,
   alan uzunluğu ve foreign key doğrulamaları
 
@@ -319,7 +328,7 @@ olduğu için iskelet oraya taşındı, kombin üretimi istemci tarafında anlı
 | **Çoklu cihaz oturum yönetimi yok** | Kullanıcı başına TEK bir aktif refresh token vardır (`users` tablosunun kendi satırında, ayrı bir "sessions" tablosu değil). Yeni bir cihaz/tarayıcıda giriş yapmak ÖNCEKİ refresh token'ı geçersiz kılar (üzerine yazar) — o cihazdaki oturum, access token'ı süresi dolana kadar (15dk-1sa) çalışmaya devam eder ama sonraki sessiz yenilemesi başarısız olur ve Login'e düşer. Bilinçli bir sınırlama (bkz. §8, migration `007`). |
 | **Fotoğraflar yerel diskte** | `backend/uploads/` altında tutulur; çok sunuculu bir kurulumda paylaşılan depolamaya (S3 vb.) taşınması gerekir. Dosyalar `/uploads` yolundan **token'sız** servis edilir — ad tahmin edilemez UUID olduğu için kabul edilebilir sayıldı. |
 | **Fotoğraf boyutlandırma yok** | Yüklenen görsel olduğu gibi saklanır; küçük resim (thumbnail) üretilmez. Native tarafta Capacitor `width: 1600` ile ön küçültme yapar, web'de böyle bir sınır yoktur. |
-| **Bildirimler / Yardım & Destek** | "Yakında" sayfalarıdır, işlevleri yoktur. |
+| **Yardım & Destek** | "Yakında" sayfasıdır, işlevi yoktur. (**Bildirimler artık gerçek** — bkz. §8 "Bildirimler sayfası".) |
 | **Android paylaşım akışı gerçek cihaz/emülatörde henüz DENENMEDİ** | Kod tarafı tamamlandı: `downloadBlob` artık `Capacitor.isNativePlatform()` ile dallanıyor, Android'de Filesystem + Share ile native paylaşım menüsünü açıyor (bkz. §8). Bu makinede yerel `./gradlew` çağrısı, ortamdaki JDK sürümleriyle (26 ve Android Studio JBR 25) Gradle 8.14.3 uyumsuzluğu yüzünden çalışmıyor (`Unsupported class file major version`) — bu, koddan bağımsız bir ortam sorunu. Doğrulama şu ana kadar yalnızca **kaynak kod seviyesinde** yapıldı (Capacitor'ın `SharePlugin`/`FilesystemPlugin` Android kaynağı okunarak `Directory.Cache` + mevcut `FileProvider` yapılandırmasının doğru çalışacağı doğrulandı) ve **web regresyonuyla** (`<a download>` yolunun bozulmadığı kanıtlandı). Gerçek bir Android Studio/emülatör çalıştırması hâlâ gerekiyor. |
 | **Gemini ücretsiz kotası günde 20 istek** | Ölçüldü (`GenerateRequestsPerDayPerProjectPerModel-FreeTier`, limit 20, `gemini-3.6-flash`). Kota dolduğunda analiz sessizce atlanır ve parça analizsiz kalır; **kendiliğinden yeniden deneyen bir mekanizma yoktur** — `analyze-existing-items.js --uygula` ertesi gün elle çalıştırılır. Gerçek kullanım ücretli plan ister. |
 | **Fotoğraf değişince analiz KENDİLİĞİNDEN güncellenmez** | Maliyet koruması "dolu `ai_analysis` varsa tekrar analiz etme" der. Artık **elle tetiklenebiliyor**: Kıyafet Detay'daki "Yeniden Analiz Et" düğmesi (`POST /clothing-items/:id/analyze`) ve fotoğraf değiştirildiğinde çıkan hatırlatma. Otomatik yapılmıyor çünkü her çağrı gerçek para harcıyor. |
@@ -1911,6 +1920,47 @@ bağlı olmayan (dead button) bir dekordu. Bu artık GERÇEKTEN uygulanır.
   `test-clean-status` 26/26, `test-item-outfits` 27/27, frontend lint + build
   temiz.
 
+**Bildirimler sayfası (`pages/Notifications.jsx`, `/profil/bildirimler`).**
+Öncesinde `ComingSoon` ile "yakında" yazan bir iskeletti; artık gerçek, hesaplanmış
+bir özet gösterir. **Backend'de HİÇBİR DEĞİŞİKLİK gerekmedi** — sayfa tamamen
+mevcut uçları (`fetchClothingItems`, `fetchCategories`, `fetchMe`, `fetchWeather`)
+yeniden kullanır, bu da roadmap'teki "altyapısı zaten kod tabanında duran, yalnızca
+bağlanmayı bekliyor" iddiasının doğrudan kanıtıdır.
+
+- **GERÇEK PUSH/ANLIK BİLDİRİM DEĞİLDİR — bilinçli bir sınır.** Service Worker,
+  VAPID anahtarları, native push (FCM/APNs) gibi bir altyapı bu depoda hiç yok ve
+  tek bir sayfa için kurmak "hemen kazanç" ilkesiyle çelişirdi. Bunun yerine sayfa
+  AÇILDIĞINDA var olan veriden GERÇEK, o an doğru olan bir özet hesaplanır —
+  WeatherService/GeminiService'teki "isteğe bağlı zenginleştirme" ilkesiyle aynı
+  ruh: bir bölüm için veri yoksa/hesaplanamıyorsa o bölüm sessizce hiç görünmez.
+- **"Kaç gündür kirli" gibi bir tarih iddiası BİLEREK YOK.** `clothing_items.updated_at`
+  yalnızca "son düzenleme" anını tutar — isim/renk gibi kirli durumla ilgisiz bir
+  alan değiştirilse bile bu kolon güncellenir, dolayısıyla "ne zaman kirli
+  işaretlendi" sorusuna güvenilir bir cevap DEĞİLDİR. Ayrı bir
+  `kirli_isaretlenme_tarihi` kolonu eklemek tek bir bildirim satırı için orantısız
+  bir migration olurdu; bu yüzden liste yalnızca GERÇEKTEN bildiği şeyi söyler
+  (hangi parçalar ŞU AN kirli), uydurma bir gün sayısı göstermez.
+- **Soğuk hava uyarısı yalnızca `weatherStatus === COLD_WEATHER_STATUS` iken
+  çıkar** (`lib/seasons.js`, backend'in <10°C eşiğiyle senkron tutulan TEK sabit —
+  `outfitBuilder.js`'in Dış Giyim slotuyla AYNI kaynak) — "BELİRSİZLİKTE EKLEME"
+  değil "BELİRSİZLİKTE GÖSTERME" ilkesi burada da geçerli: şehir tanımlı değilse
+  ya da hava servisine ulaşılamıyorsa bölüm hiç render edilmez, yanlış bir "hava
+  soğuk" iddiası asla çıkmaz. **"Yarın"ı DEĞİL "bugün"ü** anlatır — `WeatherService`
+  yalnızca GÜNCEL sıcaklığı döndürür, bir tahmin (forecast) API'si değildir; mesaj
+  bilerek "Bugün hava soğuk" der, roadmap taslağındaki "yarın" ifadesi kasıtlı
+  olarak kullanılmadı (var olmayan bir veriyi varmış gibi göstermemek için).
+- **İki bölüm birbirinden BAĞIMSIZDIR ve BİRLİKTE görünebilir** — kirli parça listesi
+  hava durumundan, hava uyarısı kirli parça sayısından etkilenmez; ikisi de yoksa
+  "Her şey yolunda" boş durumu çıkar.
+- **Doğrulama — gerçek tarayıcıda 12 kontrol (Playwright + sistem Chrome):** boş
+  durum (kirli parça yok, şehir tanımsız); gerçek bir parça kirli işaretlenince
+  bölümün göründüğü, adının listelendiği, sayacın doğru olduğu, tıklanınca
+  kıyafet detayına gittiği; hava durumu mock'landığında (gerçek `/api/weather`
+  route interception ile — `WEATHER_API_KEY` gerekmedi) soğuk uyarısının GERÇEKTEN
+  çıktığı ve iki bölümün birlikte göründüğü; **sıcak havada uyarının HİÇ
+  çıkmadığı**; temiz konsol.
+- Regresyon: backend'e hiç dokunulmadı; frontend lint + build temiz.
+
 **Güvenlik middleware'leri (`server.js`, en üstte, tüm route'lardan önce).**
 
 - **`helmet()`** — varsayılan güvenlik başlıkları (CSP, X-Frame-Options, HSTS
@@ -2722,6 +2772,37 @@ tamamlayıp kaldırıldı:
 
 > Bundan sonraki her çalışma buraya tarihiyle işlenir: eklenen özellikler, düzeltilen
 > hatalar, alınan mimari kararlar. En yeni kayıt en üstte.
+
+### 2026-08-27 — "Bildirimler" sayfası gerçek bir özelliğe dönüştürüldü
+- **Bağlam:** Aynı profesyonelleştirme yol haritasının "Hemen kazanç" şeridindeki
+  üçüncü madde. `/profil/bildirimler` öncesinde `ComingSoon` ile "yakında" yazan
+  boş bir iskeletti; artık kirli parça hatırlatıcısı ve soğuk hava uyarısı
+  gösteren gerçek bir sayfa. Tam mimari not için bkz. §8 "Bildirimler sayfası".
+- **Backend'de HİÇBİR DEĞİŞİKLİK gerekmedi** — sayfa tamamen mevcut uçları
+  (`GET /clothing-items`, `GET /categories`, `GET /auth/me`, `GET /weather`)
+  yeniden kullanıyor. Roadmap'in "altyapısı zaten kod tabanında duran, yalnızca
+  bağlanmayı bekliyor" iddiasının doğrudan kanıtı.
+- **Gerçek bir push/anlık bildirim sistemi DEĞİLDİR** (Service Worker/VAPID/FCM
+  yok) — sayfa açıldığında var olan veriden hesaplanan bir özettir; bu bilinçli
+  bir kapsam kararı (bkz. §8).
+- **"Kaç gündür kirli" gibi bir iddia BİLEREK YOK** — `updated_at` yalnızca
+  "son düzenleme" anını tutar, "kirli işaretlenme anı" için güvenilir değildir;
+  liste yalnızca hangi parçaların ŞU AN kirli olduğunu söyler.
+- **Soğuk hava uyarısı yalnızca hava GERÇEKTEN soğukken çıkar**
+  (`COLD_WEATHER_STATUS`, Dış Giyim slotuyla AYNI kaynak) ve **"bugün" der,
+  "yarın" DEMEZ** — `WeatherService` bir tahmin API'si değil, yalnızca güncel
+  sıcaklığı döndürür.
+- **Doğrulama:** gerçek tarayıcıda 12 kontrol (Playwright + sistem Chrome) —
+  boş durum, kirli parça hatırlatıcısının uçtan uca çalışması (işaretle → görün
+  → tıkla → detaya git), hava durumu mock'lanarak soğuk uyarısının çıkması ve
+  sıcakken HİÇ çıkmaması, iki bölümün birlikte görünebilmesi, temiz konsol.
+  Backend'e dokunulmadığı için regresyon riski yok; frontend `npm run lint` +
+  `npm run build` temiz.
+- **Kapsam dışı bırakılan (bilinçli):** fotoğraf depolamayı Render'ın ephemeral
+  diskinden Cloudflare R2/S3 gibi kalıcı bir depoya taşımak — aynı yol
+  haritasının bir sonraki maddesi, ama bir depolama sağlayıcısı seçimi ve
+  hesap/kimlik bilgisi gerektirdiği için (yalnızca kullanıcının verebileceği bir
+  karar) bu oturumda BAŞLATILMADI.
 
 ### 2026-08-27 — Premium sınırları GERÇEKTEN uygulandı + şifre sıfırlama akışı eklendi
 - **Bağlam:** Uygulama Render (backend) + Vercel (frontend) üzerinde canlıya
