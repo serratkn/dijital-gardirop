@@ -1,87 +1,71 @@
-const {
-  geminiEmbeddingFunction,
-  getClient,
-  getCollectionName,
-  getHost,
-  getPort,
-} = require('../config/chroma')
-
-// ChromaDB ile konuşan TEK katman. Rolü diğer repository'lerle aynıdır:
-// yalnızca veri erişimi, iş kuralı yok, hatayı loglayıp YENİDEN FIRLATIR.
-// (WeatherRepository ile aynı desen: dış servise bakar ama katman rolü değişmez.)
+// Postgres (pgvector) ile konuşan TEK katman. Rolü diğer repository'lerle
+// AYNIDIR: yalnızca veri erişimi, iş kuralı yok, hatayı loglayıp YENİDEN
+// FIRLATIR. ChromaDB'nin yerini aldı (bkz. CLAUDE.md §9, 2026-08-27 kaydı) —
+// dış bir istemci/host/port yok, doğrudan paylaşılan `pool` kullanılır.
 //
-// Bu katman embedding ÜRETMEZ — hazır vektörü alır, saklar ve arar.
-// Üretim VectorService'in işidir; böylece "hangi model, hangi metin" kararı
-// depolama kodundan ayrı kalır.
+// Bu katman embedding ÜRETMEZ — hazır vektörü alır, saklar ve arar. Üretim
+// VectorService'in işidir; böylece "hangi model, hangi metin" kararı
+// depolama kodundan ayrı kalır (ChromaDB döneminden değişmeyen tek ilke).
 
-// Dış servise yapılan istek SINIRSIZ BEKLEYEMEZ (WeatherService/GeminiService
-// ile aynı kural). Chroma yerel ağda olduğu için 10 sn fazlasıyla yeterli;
-// container yeni ayağa kalkıyorsa ilk istek biraz gecikebilir.
-const REQUEST_TIMEOUT_MS = 10000
+// pgvector `vector` sütunu `pg` sürücüsünde tip kaydı yapılmadığı için metin
+// olarak gelir/gider: `'[0.1,0.2,-0.3]'`. Bu biçim AYNI ZAMANDA geçerli bir
+// JSON dizisidir, bu yüzden okurken `JSON.parse` yeterlidir — ayrı bir
+// `pgvector` npm paketi eklenmedi (WeatherRepository/EmailRepository'nin
+// "native fetch yeter, SDK gereksiz" ilkesiyle aynı gerekçe).
+function toVectorLiteral(embedding) {
+  return `[${embedding.join(',')}]`
+}
 
-// Koleksiyon tanıtıcısı önbelleklenir: her yazmada getOrCreateCollection
-// çağırmak Chroma'ya gereksiz bir tur atmak demekti.
-let cachedCollection = null
-let cachedKey = null
-
-function withTimeout(promise, label) {
-  return Promise.race([
-    promise,
-    new Promise((_, reject) =>
-      setTimeout(
-        () => reject(new Error(`ChromaDB yanıt vermedi (${label}, ${REQUEST_TIMEOUT_MS} ms)`)),
-        REQUEST_TIMEOUT_MS,
-      ),
-    ),
-  ])
+function fromVectorLiteral(raw) {
+  if (raw === null || raw === undefined) return null
+  return JSON.parse(raw)
 }
 
 class VectorRepository {
-  // Koleksiyonu açar (yoksa oluşturur). Kosinüs uzayı burada sabitlenir.
-  async getCollection() {
-    const client = getClient()
-    if (!client) {
-      throw new Error('ChromaDB devre dışı (CHROMA_ENABLED=false)')
-    }
+  constructor(pool) {
+    this.pool = pool
+  }
 
-    const key = `${getHost()}:${getPort()}/${getCollectionName()}`
-    if (cachedCollection && cachedKey === key) return cachedCollection
-
+  // Bağlantı sağlıklı mı? (/health ve test scriptlerinin "bağlantı" bölümü
+  // için.) Chroma döneminde ayrı bir servisti; artık aynı pool'u paylaştığı
+  // için bu yalnızca basit bir sorgu ile doğrulanır.
+  async heartbeat() {
     try {
-      const collection = await withTimeout(
-        client.getOrCreateCollection({
-          name: getCollectionName(),
-          embeddingFunction: geminiEmbeddingFunction,
-          metadata: {
-            // Koleksiyonun ne olduğu Chroma arayüzünden de okunabilsin.
-            aciklama: 'Dijital Gardırop — kıyafet analizi embeddingleri',
-          },
-        }),
-        'getOrCreateCollection',
-      )
-      cachedCollection = collection
-      cachedKey = key
-      return collection
+      await this.pool.query('SELECT 1')
+      return true
     } catch (error) {
-      console.error('VectorRepository.getCollection hatası:', error.message)
+      console.error('VectorRepository.heartbeat hatası:', error.message)
       throw error
     }
   }
 
-  // Tek bir kıyafetin vektörünü yazar/günceller.
-  // ID olarak KIYAFETİN VERİTABANI id'si kullanılır: ayrı bir eşleme tablosu
-  // gerekmez ve aynı parça iki kez indekslenirse üzerine yazılır (upsert).
+  // Tek bir kıyafetin vektörünü yazar/günceller (upsert).
+  // ID olarak KIYAFETİN VERİTABANI id'si kullanılır (ChromaDB döneminde de
+  // böyleydi): ayrı bir eşleme tablosu gerekmez, aynı parça iki kez
+  // indekslenirse üzerine yazılır.
   async upsertItem({ id, embedding, document, metadata }) {
     try {
-      const collection = await this.getCollection()
-      await withTimeout(
-        collection.upsert({
-          ids: [id],
-          embeddings: [embedding],
-          documents: [document],
-          metadatas: [metadata],
-        }),
-        'upsert',
+      await this.pool.query(
+        `INSERT INTO clothing_item_embeddings
+           (clothing_item_id, user_id, category_id, embedding, document, embedding_model, sema)
+         VALUES ($1, $2, $3, $4::vector, $5, $6, $7)
+         ON CONFLICT (clothing_item_id) DO UPDATE SET
+           user_id = EXCLUDED.user_id,
+           category_id = EXCLUDED.category_id,
+           embedding = EXCLUDED.embedding,
+           document = EXCLUDED.document,
+           embedding_model = EXCLUDED.embedding_model,
+           sema = EXCLUDED.sema,
+           created_at = NOW()`,
+        [
+          id,
+          metadata.user_id,
+          metadata.category_id,
+          toVectorLiteral(embedding),
+          document,
+          metadata.embedding_modeli ?? null,
+          metadata.sema ?? null,
+        ],
       )
       return true
     } catch (error) {
@@ -90,30 +74,61 @@ class VectorRepository {
     }
   }
 
-  // En yakın komşular. `where` Chroma'nın metadata filtresidir; kullanıcı
-  // izolasyonu BURADA DEĞİL çağıran katmanda kurulur ama filtre olmadan asla
-  // sorgulanmamalıdır (bkz. VectorService.findSimilar).
-  async query({ embedding, limit, where }) {
+  // Bir kıyafetin kendi vektörünü okur (findSimilar/findCompanions'ın
+  // "başlangıç parçasının vektörünü oku" adımı). Kayıt yoksa `null` döner —
+  // hata değildir, "henüz indekslenmemiş" demektir.
+  async getEmbedding(id) {
     try {
-      const collection = await this.getCollection()
-      const result = await withTimeout(
-        collection.query({
-          queryEmbeddings: [embedding],
-          nResults: limit,
-          where,
-          include: ['metadatas', 'documents', 'distances'],
-        }),
-        'query',
+      const result = await this.pool.query(
+        'SELECT embedding FROM clothing_item_embeddings WHERE clothing_item_id = $1',
+        [id],
       )
+      if (result.rows.length === 0) return null
+      return fromVectorLiteral(result.rows[0].embedding)
+    } catch (error) {
+      console.error('VectorRepository.getEmbedding hatası:', error.message)
+      throw error
+    }
+  }
 
-      // Chroma sonuçları "sorgu başına bir dizi" olarak döndürür; tek sorgu
-      // gönderdiğimiz için ilk satırı düzleştirip sade bir liste veriyoruz.
-      const ids = result.ids?.[0] ?? []
-      return ids.map((id, index) => ({
-        id,
-        distance: result.distances?.[0]?.[index] ?? null,
-        document: result.documents?.[0]?.[index] ?? null,
-        metadata: result.metadatas?.[0]?.[index] ?? null,
+  // En yakın komşular. Kullanıcı izolasyonu BURADA DEĞİL çağıran katmanda
+  // kurulur ama `userId` olmadan asla sorgulanmamalıdır (bkz.
+  // VectorService.findSimilar/findCompanions/findByText) — bu yüzden
+  // `userId` ZORUNLU bir parametredir, ChromaDB'deki serbest `where` DSL'i
+  // gibi opsiyonel bir filtre değildir.
+  //
+  // `<=>` pgvector'ın kosinüs MESAFE operatörüdür (0 = birebir aynı yön) —
+  // ChromaDB'nin koleksiyonu `cosine` uzayında açılmasıyla AYNI ölçüt,
+  // sonuçlar birebir karşılaştırılabilir kalır.
+  async query({ embedding, limit, userId, categoryId = null }) {
+    try {
+      const vectorLiteral = toVectorLiteral(embedding)
+      const result =
+        categoryId === null
+          ? await this.pool.query(
+              `SELECT clothing_item_id AS id, category_id, document,
+                      embedding <=> $1::vector AS distance
+               FROM clothing_item_embeddings
+               WHERE user_id = $2
+               ORDER BY embedding <=> $1::vector
+               LIMIT $3`,
+              [vectorLiteral, userId, limit],
+            )
+          : await this.pool.query(
+              `SELECT clothing_item_id AS id, category_id, document,
+                      embedding <=> $1::vector AS distance
+               FROM clothing_item_embeddings
+               WHERE user_id = $2 AND category_id = $3
+               ORDER BY embedding <=> $1::vector
+               LIMIT $4`,
+              [vectorLiteral, userId, categoryId, limit],
+            )
+
+      return result.rows.map((row) => ({
+        id: row.id,
+        distance: row.distance === null ? null : Number(row.distance),
+        document: row.document,
+        categoryId: row.category_id,
       }))
     } catch (error) {
       console.error('VectorRepository.query hatası:', error.message)
@@ -123,10 +138,14 @@ class VectorRepository {
 
   // Bir kıyafetin vektörü var mı? (Toplu script "hangileri eksik" derken kullanır.)
   async getExistingIds(ids) {
+    if (!Array.isArray(ids) || ids.length === 0) return new Set()
+
     try {
-      const collection = await this.getCollection()
-      const result = await withTimeout(collection.get({ ids, include: [] }), 'get')
-      return new Set(result?.ids ?? [])
+      const result = await this.pool.query(
+        'SELECT clothing_item_id FROM clothing_item_embeddings WHERE clothing_item_id = ANY($1::uuid[])',
+        [ids],
+      )
+      return new Set(result.rows.map((row) => row.clothing_item_id))
     } catch (error) {
       console.error('VectorRepository.getExistingIds hatası:', error.message)
       throw error
@@ -134,9 +153,13 @@ class VectorRepository {
   }
 
   async deleteItems(ids) {
+    if (!Array.isArray(ids) || ids.length === 0) return true
+
     try {
-      const collection = await this.getCollection()
-      await withTimeout(collection.delete({ ids }), 'delete')
+      await this.pool.query(
+        'DELETE FROM clothing_item_embeddings WHERE clothing_item_id = ANY($1::uuid[])',
+        [ids],
+      )
       return true
     } catch (error) {
       console.error('VectorRepository.deleteItems hatası:', error.message)
@@ -146,50 +169,27 @@ class VectorRepository {
 
   async count() {
     try {
-      const collection = await this.getCollection()
-      return await withTimeout(collection.count(), 'count')
+      const result = await this.pool.query('SELECT COUNT(*)::int AS count FROM clothing_item_embeddings')
+      return result.rows[0].count
     } catch (error) {
       console.error('VectorRepository.count hatası:', error.message)
       throw error
     }
   }
 
-  // Koleksiyonu tamamen siler. Embedding modeli değiştiğinde gerekir:
-  // farklı modellerin vektörleri aynı uzayda olmadığı için koleksiyon
-  // karışık kalırsa mesafeler anlamsızlaşır (bkz. config/gemini.js).
+  // Tüm embedding'leri siler. Embedding modeli değiştiğinde gerekir: farklı
+  // modellerin vektörleri aynı uzayda olmadığı için tablo karışık kalırsa
+  // mesafeler anlamsızlaşır (bkz. config/gemini.js) — ChromaDB'deki
+  // "koleksiyonu sil"in karşılığı.
   async dropCollection() {
-    const client = getClient()
-    if (!client) throw new Error('ChromaDB devre dışı (CHROMA_ENABLED=false)')
-
     try {
-      await withTimeout(client.deleteCollection({ name: getCollectionName() }), 'deleteCollection')
-      VectorRepository.resetCache()
+      await this.pool.query('TRUNCATE clothing_item_embeddings')
       return true
     } catch (error) {
       console.error('VectorRepository.dropCollection hatası:', error.message)
       throw error
     }
   }
-
-  // Bağlantı sağlıklı mı? (/health ve test scriptleri için.)
-  async heartbeat() {
-    const client = getClient()
-    if (!client) throw new Error('ChromaDB devre dışı (CHROMA_ENABLED=false)')
-
-    try {
-      return await withTimeout(client.heartbeat(), 'heartbeat')
-    } catch (error) {
-      console.error('VectorRepository.heartbeat hatası:', error.message)
-      throw error
-    }
-  }
-
-  // Yapılandırma değişince (testlerde) önbelleklenmiş koleksiyon bayatlar.
-  static resetCache() {
-    cachedCollection = null
-    cachedKey = null
-  }
 }
 
 module.exports = VectorRepository
-module.exports.REQUEST_TIMEOUT_MS = REQUEST_TIMEOUT_MS

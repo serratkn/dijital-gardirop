@@ -64,7 +64,7 @@ class ClothingItemController extends BaseController {
 
       // Kıyafet gidince vektörü de gitmeli; kalsaydı benzer aramasında artık
       // var olmayan bir parça dönerdi. Yanıttan SONRA ve await EDİLMEDEN:
-      // silme işlemi ChromaDB yüzünden yavaşlamamalı ya da başarısız olmamalı.
+      // silme işlemi vektör deposu yüzünden yavaşlamamalı ya da başarısız olmamalı.
       this.vectorService?.removeItem(req.params.id)
     } catch (error) {
       this.handleError(error, res)
@@ -167,7 +167,7 @@ class ClothingItemController extends BaseController {
   // AŞAMA 4 — Kombin Öner'in RETRIEVAL ucu. Bir başlangıç parçası verilir,
   // istenen diğer kategorilerin her birinden en yakın adaylar döner.
   //
-  // Bu uç KASITLI OLARAK "dürüst"tür: Chroma erişilemezse 503 döner, boş liste
+  // Bu uç KASITLI OLARAK "dürüst"tür: vektör deposuna erişilemezse 503 döner, boş liste
   // değil. Rastgele seçime düşme kararı istemcinindir (Kombin Öner sayfası
   // hatayı yutup mevcut rastgele mantığa döner ve "akıllı seçim" rozetini
   // GÖSTERMEZ). Uç sessizce boş dönseydi arayüz aradaki farkı bilemezdi.
@@ -187,7 +187,7 @@ class ClothingItemController extends BaseController {
     }
   }
 
-  // Sınır makul bir aralığa çekilir: `?limit=100000` Chroma'yı gereksiz
+  // Sınır makul bir aralığa çekilir: `?limit=100000` vektör sorgusunu gereksiz
   // yere zorlar, `?limit=abc` ise NaN olarak sorguya gidip patlardı.
   #parseLimit(raw) {
     const value = Number(raw)

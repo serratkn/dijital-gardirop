@@ -1,16 +1,17 @@
 const { NotFoundError, ServiceUnavailableError, ValidationError } = require('../utils/errors')
 const { assertUuid } = require('../utils/validators')
 const { isConfigured } = require('../config/gemini')
-const { isEnabled } = require('../config/chroma')
+const { isEnabled } = require('../config/vectorStore')
 
 // Vektör veritabanı iş mantığı (Gemini Aşama 3).
 //
 // İKİ AYRI SÖZLEŞME — hangi yolun kullanıldığına bağlı:
 //
 //   YAZMA (indexItem / removeItem): ASLA FIRLATMAZ. Embedding üretimi, kıyafet
-//   ekleme akışının parçası değil üstüne konan bir zenginleştirmedir; Chroma
-//   kapalıysa, kota dolduysa veya ağ düştüyse kıyafet kaydı ve analizi yerinde
-//   durur, kullanıcı hiçbir şey görmez. (ClothingAnalysisService ile aynı ilke.)
+//   ekleme akışının parçası değil üstüne konan bir zenginleştirmedir; vektör
+//   deposu kapalıysa, kota dolduysa veya Gemini'ye ulaşılamıyorsa kıyafet
+//   kaydı ve analizi yerinde durur, kullanıcı hiçbir şey görmez.
+//   (ClothingAnalysisService ile aynı ilke.)
 //
 //   OKUMA (findSimilar): FIRLATIR. Burada kullanıcı doğrudan "benzerleri göster"
 //   demiştir; sessizce boş liste dönmek "benzer parça yok" gibi YANLIŞ bir cevap
@@ -35,16 +36,18 @@ const RATE_LIMIT_COOLDOWN_MS = 60_000
 const MAX_ATTEMPTS = 2
 const RETRY_DELAY_MS = 1500
 
-// Chroma'da saklanan özet metnin üst sınırı. Embedding modeli çok daha uzununu
-// kabul eder ama özet zaten kısa alan etiketlerinden üretiliyor; sınır yalnızca
-// bozuk bir analizin devasa bir belgeye dönüşmesini engelliyor.
+// Veritabanında saklanan özet metnin üst sınırı. Embedding modeli çok daha
+// uzununu kabul eder ama özet zaten kısa alan etiketlerinden üretiliyor;
+// sınır yalnızca bozuk bir analizin devasa bir belgeye dönüşmesini engelliyor.
 const MAX_DOCUMENT_LENGTH = 2000
 
-// Kombin Öner (Aşama 4) için üst süre sınırı. VectorRepository'nin kendi 10 sn'lik
-// sınırı burada FAZLA UZUN: orada kullanıcı bir fotoğraf yükleyip işine bakıyor,
-// burada öneri ekranına bakıp bekliyor. Chroma yerel ağda olduğu için normal
-// yanıt ~100-500 ms; 3 sn aşıldıysa beklemek yerine rastgele seçime düşmek
-// (çağıranın işi) her zaman daha iyi.
+// Kombin Öner (Aşama 4) için üst süre sınırı. pgvector sorguları AYNI Postgres
+// bağlantı havuzu üzerinden gittiği için normalde birkaç milisaniye sürer
+// (kullanıcı başına birkaç yüz satırlık bir tablo, index'li WHERE); bu sınır
+// artık "ayrı bir servise ağ turu" değil, genel bir güvenlik ağıdır — sorgu
+// beklenmedik şekilde asılı kalırsa (ör. veritabanı o an aşırı yüklüyse)
+// öneri ekranı süresiz beklemesin diye. 3 sn aşıldıysa beklemek yerine
+// rastgele seçime düşmek (çağıranın işi) her zaman daha iyi.
 const COMPANION_TIMEOUT_MS = 3000
 
 // Kategori başına döndürülen aday sayısı. "Başka Öneri Göster" bu havuzun
@@ -168,7 +171,7 @@ class VectorService {
   }
 
   async indexItem(itemId, { force = false } = {}) {
-    if (!isEnabled()) return this.#skip(itemId, 'chroma-devre-disi')
+    if (!isEnabled()) return this.#skip(itemId, 'vektor-devre-disi')
     if (!isConfigured()) return this.#skip(itemId, 'anahtar-yok')
     if (Date.now() < this.cooldownUntil) return this.#skip(itemId, 'kota-soguma-suresi')
     if (this.inFlight.has(itemId)) return this.#skip(itemId, 'zaten-indeksleniyor')
@@ -197,9 +200,9 @@ class VectorService {
           const mevcut = await this.vectorRepository.getExistingIds([itemId])
           if (mevcut.has(itemId)) return this.#skip(itemId, 'zaten-indekslenmis')
         } catch (error) {
-          // Chroma'ya ulaşılamıyorsa zaten yazma da başarısız olacak.
+          // Veritabanına ulaşılamıyorsa zaten yazma da başarısız olacak.
           console.error(`Embedding kontrolü başarısız (${itemId}):`, error.message)
-          return { durum: DURUM.BASARISIZ, sebep: 'chroma-erisilemiyor' }
+          return { durum: DURUM.BASARISIZ, sebep: 'vektor-erisilemiyor' }
         }
       }
 
@@ -259,9 +262,9 @@ class VectorService {
         embedding: vector,
         document,
         // METADATA yalnızca DEĞİŞMEYEN alanlardan seçildi. is_clean veya
-        // is_favorite buraya konsaydı kullanıcı her toggle'da Chroma'yı da
+        // is_favorite buraya konsaydı kullanıcı her toggle'da bu tabloyu da
         // güncellemek zorunda kalırdı; kalmasaydı filtre bayat veriyle çalışırdı.
-        // Değişken durum her zaman Postgres'ten okunur.
+        // Değişken durum her zaman clothing_items'tan (ana tablo) okunur.
         metadata: {
           user_id: item.user_id,
           category_id: item.category_id,
@@ -271,8 +274,8 @@ class VectorService {
         },
       })
     } catch (error) {
-      console.error(`Embedding ChromaDB'ye yazılamadı (${item.id}):`, error.message)
-      return { durum: DURUM.BASARISIZ, sebep: 'chroma-yazma-hatasi' }
+      console.error(`Embedding veritabanına yazılamadı (${item.id}):`, error.message)
+      return { durum: DURUM.BASARISIZ, sebep: 'vektor-yazma-hatasi' }
     }
 
     console.log(
@@ -293,7 +296,7 @@ class VectorService {
     const sonuclar = new Map(itemIds.map((id) => [id, { durum: DURUM.ATLANDI, sebep: 'islenmedi' }]))
 
     if (!isEnabled()) {
-      itemIds.forEach((id) => sonuclar.set(id, { durum: DURUM.ATLANDI, sebep: 'chroma-devre-disi' }))
+      itemIds.forEach((id) => sonuclar.set(id, { durum: DURUM.ATLANDI, sebep: 'vektor-devre-disi' }))
       return sonuclar
     }
     if (!isConfigured()) {
@@ -310,7 +313,7 @@ class VectorService {
       } catch (error) {
         console.error('Toplu embedding kontrolü başarısız:', error.message)
         itemIds.forEach((id) =>
-          sonuclar.set(id, { durum: DURUM.BASARISIZ, sebep: 'chroma-erisilemiyor' }),
+          sonuclar.set(id, { durum: DURUM.BASARISIZ, sebep: 'vektor-erisilemiyor' }),
         )
         return sonuclar
       }
@@ -403,8 +406,8 @@ class VectorService {
           })
           sonuclar.set(item.id, { durum: DURUM.TAMAMLANDI, boyut: vectors[j].length })
         } catch (error) {
-          console.error(`Embedding ChromaDB'ye yazılamadı (${item.id}):`, error.message)
-          sonuclar.set(item.id, { durum: DURUM.BASARISIZ, sebep: 'chroma-yazma-hatasi' })
+          console.error(`Embedding veritabanına yazılamadı (${item.id}):`, error.message)
+          sonuclar.set(item.id, { durum: DURUM.BASARISIZ, sebep: 'vektor-yazma-hatasi' })
         }
       }
     }
@@ -413,17 +416,17 @@ class VectorService {
   }
 
   // Kıyafet silindiğinde vektörü de gitmeli; yoksa benzer aramasında var
-  // olmayan bir parça dönerdi. Bu da fırlatmaz: silme işlemi Chroma yüzünden
-  // başarısız sayılmamalı.
+  // olmayan bir parça dönerdi. Bu da fırlatmaz: silme işlemi vektör deposu
+  // yüzünden başarısız sayılmamalı.
   async removeItem(itemId) {
-    if (!isEnabled()) return { durum: DURUM.ATLANDI, sebep: 'chroma-devre-disi' }
+    if (!isEnabled()) return { durum: DURUM.ATLANDI, sebep: 'vektor-devre-disi' }
 
     try {
       await this.vectorRepository.deleteItems([itemId])
       return { durum: DURUM.TAMAMLANDI }
     } catch (error) {
       console.error(`Embedding silinemedi (${itemId}):`, error.message)
-      return { durum: DURUM.BASARISIZ, sebep: 'chroma-silme-hatasi' }
+      return { durum: DURUM.BASARISIZ, sebep: 'vektor-silme-hatasi' }
     }
   }
 
@@ -445,11 +448,11 @@ class VectorService {
     }
 
     if (!isEnabled()) {
-      throw new ServiceUnavailableError('Vektör veritabanı devre dışı (CHROMA_ENABLED=false)')
+      throw new ServiceUnavailableError('Vektör veritabanı devre dışı (VECTOR_STORE_ENABLED=false)')
     }
 
-    // Parçanın KENDİ vektörü Chroma'da zaten var; yeniden embedding üretmek
-    // gereksiz bir Gemini çağrısı (ve para) olurdu.
+    // Parçanın KENDİ vektörü veritabanında zaten var; yeniden embedding
+    // üretmek gereksiz bir Gemini çağrısı (ve para) olurdu.
     const kendiVektor = await this.#readOwnVector(itemId)
 
     // Henüz indekslenmemiş parça bir HATA DEĞİLDİR: analizi yeni bitmiş ya da
@@ -465,25 +468,24 @@ class VectorService {
     }
 
     // KULLANICI FİLTRESİ ZORUNLU: filtresiz sorgu başka kullanıcıların
-    // gardıroplarından sonuç döndürürdü.
-    const where =
-      categoryId === null
-        ? { user_id: userId }
-        : { $and: [{ user_id: userId }, { category_id: Number(categoryId) }] }
-
+    // gardıroplarından sonuç döndürürdü — `userId` bu yüzden VectorRepository.
+    // query()'e ayrı bir parametre olarak geçer, opsiyonel bir filtre değil.
+    //
     // Parçanın kendisi daima en yakın komşusudur (mesafe 0); bir fazla isteyip
-    // kendisini eliyoruz. Chroma'nın $ne filtresine güvenmek yerine böyle
-    // yapmak, filtre söz diziminden bağımsız ve okunması kolay.
+    // kendisini SQL sonucundan eliyoruz (aşağıdaki filter) — sorgunun kendisine
+    // "kendini hariç tut" koşulu eklemek yerine böylesi filtre mantığından
+    // bağımsız ve okunması kolay.
     const komsular = await this.vectorRepository.query({
       embedding: kendiVektor,
       limit: Number(limit) + 1,
-      where,
+      userId,
+      categoryId: categoryId === null ? null : Number(categoryId),
     })
 
     const digerleri = komsular.filter((row) => row.id !== itemId).slice(0, Number(limit))
 
     // Postgres'ten zenginleştir. Silinmiş parçalar findById'de null döner ve
-    // listeden düşer: Chroma'da bayat bir kayıt kalsa bile yanıta sızmaz.
+    // listeden düşer: vektör tablosunda bayat bir kayıt kalsa bile yanıta sızmaz.
     const zenginlestirilmis = await Promise.all(
       digerleri.map(async (row) => {
         const komsu = await this.clothingItemRepository.findById(row.id)
@@ -499,7 +501,7 @@ class VectorService {
           // dönüyor: bu satırlar arayüzde paylaşılan kıyafet kartına besleniyor
           // ve kart, favori kalbini ve "Kirli" rozetini bu alanlardan çiziyor.
           // Eksik olsalardı favorilenmiş bir parça boş kalple görünürdü.
-          // DEĞİŞKEN DURUM DAİMA POSTGRES'TEN gelir, Chroma metadata'sından değil.
+          // DEĞİŞKEN DURUM DAİMA clothing_items'tan gelir, embedding tablosundan değil.
           season: komsu.season,
           is_clean: komsu.is_clean,
           is_favorite: komsu.is_favorite,
@@ -526,13 +528,13 @@ class VectorService {
   // hava durumu, hangi slot hangi kategoriden) BURADA DEĞİL çağıranda kalır:
   // bu metot yalnızca "vektör uzayında bunlar yakın" der.
   //
-  // NEDEN KATEGORİ BAŞINA AYRI SORGU? Tek bir büyük sorgu (nResults=50)
+  // NEDEN KATEGORİ BAŞINA AYRI SORGU? Tek bir büyük sorgu (ör. LIMIT 50)
   // istatistiksel olarak çok parçalı bir kategoriyi öne alır ve az parçalı
   // kategoriden hiç sonuç döndürmeyebilirdi — kombin ise her slotu doldurmak
-  // zorunda. Sorgular paralel gider; Chroma yerel ağda.
+  // zorunda. Sorgular paralel gider; aynı Postgres bağlantı havuzu üzerinden.
   //
-  // SÖZLEŞME findSimilar ile aynı: FIRLATIR. Chroma erişilemezse 503 döner,
-  // boş liste değil. "Sessizce rastgeleye düş" kararı ÇAĞIRANIN işidir
+  // SÖZLEŞME findSimilar ile aynı: FIRLATIR. Vektör deposuna ulaşılamazsa 503
+  // döner, boş liste değil. "Sessizce rastgeleye düş" kararı ÇAĞIRANIN işidir
   // (Kombin Öner sayfası tam olarak bunu yapar) — API'nin kendisi yalan
   // söylememeli, yoksa arayüz akıllı olmayan bir öneriyi akıllı sanardı.
   async findCompanions(itemId, userId, { categoryIds, limit = COMPANION_DEFAULT_LIMIT } = {}) {
@@ -553,7 +555,7 @@ class VectorService {
     }
 
     if (!isEnabled()) {
-      throw new ServiceUnavailableError('Vektör veritabanı devre dışı (CHROMA_ENABLED=false)')
+      throw new ServiceUnavailableError('Vektör veritabanı devre dışı (VECTOR_STORE_ENABLED=false)')
     }
 
     const sinir = Math.min(Math.max(Math.floor(Number(limit)) || COMPANION_DEFAULT_LIMIT, 1),
@@ -581,7 +583,8 @@ class VectorService {
         // Başlangıç parçası teoride aynı kategoriye düşemez (yukarıda elendi)
         // ama bir fazla istemek bedava bir güvenlik payı.
         limit: sinir + 1,
-        where: { $and: [{ user_id: userId }, { category_id: categoryId }] },
+        userId,
+        categoryId,
       })
       return [categoryId, komsular.filter((row) => row.id !== itemId).slice(0, sinir)]
     })
@@ -596,7 +599,7 @@ class VectorService {
     }
 
     // Postgres'ten TEK sorguda zenginleştir. Silinmiş parçalar findByIds'te
-    // hiç dönmez: Chroma'da bayat bir kayıt kalsa bile yanıta sızmaz.
+    // hiç dönmez: embedding tablosunda bayat bir kayıt kalsa bile yanıta sızmaz.
     const tumIds = gruplar.flatMap(([, komsular]) => komsular.map((row) => row.id))
     const kayitlar = new Map(
       (await this.clothingItemRepository.findByIds([...new Set(tumIds)]))
@@ -617,11 +620,11 @@ class VectorService {
             category_id: kayit.category_id,
             color: kayit.color,
             image_url: kayit.image_url,
-            // DEĞİŞKEN DURUM POSTGRES'TEN GELİR, Chroma metadata'sından değil
-            // (bkz. §8: is_clean/season metadata'ya konsaydı her toggle'da
-            // Chroma'yı da güncellemek gerekirdi). Çağıran temiz/kirli ve hava
-            // durumu filtrelerini bu iki alanla uygular — vektör benzerliği
-            // filtreleri ATLAMAZ.
+            // DEĞİŞKEN DURUM POSTGRES'TEN (clothing_items) GELİR, embedding
+            // tablosundan değil (bkz. §8: is_clean/season orada saklansaydı
+            // her toggle'da o tabloyu da güncellemek gerekirdi). Çağıran
+            // temiz/kirli ve hava durumu filtrelerini bu iki alanla uygular —
+            // vektör benzerliği filtreleri ATLAMAZ.
             season: kayit.season,
             is_clean: kayit.is_clean,
             mesafe: row.distance,
@@ -636,11 +639,12 @@ class VectorService {
 
   // AŞAMA 5 — Kombin Öner'in serbest metin (mood) yorumlamasını besleyen ikinci
   // RETRIEVAL yolu. findCompanions/findSimilar'dan TEMEL bir farkı var: onlar
-  // VAR OLAN bir parçanın Chroma'da zaten duran vektörünü OKUR; bu metod
+  // VAR OLAN bir parçanın veritabanında zaten duran vektörünü OKUR; bu metod
   // kullanıcının serbest metnini (arama_metni) YENİ bir embedding'e çevirir ve
   // kullanıcının TÜM indekslenmiş gardırobunu bu embedding'e yakınlığa göre
   // sıralar. Bu yüzden HER ÇAĞRIDA gerçek bir Gemini embedding isteği atar —
-  // findSimilar/findCompanions ise hiç Gemini çağırmaz (yalnızca Chroma okur).
+  // findSimilar/findCompanions ise hiç Gemini çağırmaz (yalnızca var olan
+  // vektörü okur).
   //
   // Kategoriye göre GRUPLANMAZ (findCompanions'ın aksine): çağıran (seed parça
   // seçimi) "hangi kategoriden" değil "genel olarak en yakın hangi parça"
@@ -655,7 +659,7 @@ class VectorService {
     }
 
     if (!isEnabled()) {
-      throw new ServiceUnavailableError('Vektör veritabanı devre dışı (CHROMA_ENABLED=false)')
+      throw new ServiceUnavailableError('Vektör veritabanı devre dışı (VECTOR_STORE_ENABLED=false)')
     }
     if (!isConfigured()) {
       throw new ServiceUnavailableError(
@@ -687,7 +691,7 @@ class VectorService {
     let komsular
     try {
       komsular = await this.#withDeadline(
-        this.vectorRepository.query({ embedding: vektor, limit: sinir, where: { user_id: userId } }),
+        this.vectorRepository.query({ embedding: vektor, limit: sinir, userId }),
         'benzerlik sorgusu',
       )
     } catch (error) {
@@ -703,7 +707,7 @@ class VectorService {
       indekslendi: true,
       sonuclar: komsular.map((row) => ({
         id: row.id,
-        category_id: row.metadata?.category_id ?? null,
+        category_id: row.categoryId ?? null,
         mesafe: row.distance,
         benzerlik: row.distance === null ? null : Number((1 - row.distance).toFixed(4)),
       })),
@@ -719,22 +723,20 @@ class VectorService {
     return [...new Set(ids)]
   }
 
-  // Parçanın kendi vektörünü okur. Chroma'ya ulaşılamıyorsa 503 (findSimilar
+  // Parçanın kendi vektörünü okur. Veritabanına ulaşılamıyorsa 503 (findSimilar
   // ve findCompanions aynı yolu kullanır).
   async #readOwnVector(itemId) {
     try {
-      const collection = await this.vectorRepository.getCollection()
-      const kayit = await collection.get({ ids: [itemId], include: ['embeddings'] })
-      return kayit?.embeddings?.[0] ?? null
+      return await this.vectorRepository.getEmbedding(itemId)
     } catch (error) {
       console.error('Benzer arama için vektör okunamadı:', error.message)
       throw new ServiceUnavailableError('Vektör veritabanına şu anda ulaşılamıyor')
     }
   }
 
-  // Chroma askıda kalırsa öneri ekranı süresiz beklememeli. VectorRepository'nin
-  // kendi zaman aşımı var ama koleksiyon nesnesi üzerinden yapılan get/query
-  // çağrıları onun dışında kalıyor; bu yüzden sınır BURADA da uygulanıyor.
+  // Sorgu beklenmedik şekilde asılı kalırsa (ör. veritabanı o an aşırı
+  // yüklüyse) öneri ekranı süresiz beklememeli — bu sınır genel bir güvenlik
+  // ağıdır (bkz. COMPANION_TIMEOUT_MS tanımındaki not).
   #withDeadline(promise, label) {
     let zamanlayici
     const sinir = new Promise((_, reject) => {

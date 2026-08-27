@@ -29,10 +29,11 @@ const clothingItemService = new ClothingItemService(
 
 const geminiService = new GeminiService()
 
-// Vektör veritabanı (Aşama 3). Yazma yolu asla fırlatmaz; bağlanması fotoğraf
-// yükleme akışının davranışını değiştirmez.
+// Vektör veritabanı (Aşama 3, artık pgvector — bkz. §8 "Fotoğraf depolama"nın
+// hemen üstündeki "Vektör depolama" notu). Yazma yolu asla fırlatmaz;
+// bağlanması fotoğraf yükleme akışının davranışını değiştirmez.
 const vectorService = new VectorService(
-  new VectorRepository(),
+  new VectorRepository(pool),
   clothingItemRepository,
   geminiService,
 )
@@ -116,7 +117,7 @@ router.get('/clothing-items/:id/companions', (req, res) =>
 // başlangıç PARÇASI değil, kullanıcının kendi cümlesini (arama_metni) alır;
 // bu yüzden `/clothing-items/:id/...` desenine UYMAZ, kendi düz yoludur.
 // geminiLimiter: HER ÇAĞRIDA gerçek bir Gemini embedding isteği atar
-// (getSimilar/getCompanions atmaz, yalnızca Chroma okur).
+// (getSimilar/getCompanions atmaz, yalnızca var olan vektörü okur).
 router.post('/clothing-items/search-by-text', geminiLimiter, (req, res) =>
   clothingItemController.searchByText(req, res),
 )

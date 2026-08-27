@@ -12,7 +12,6 @@
     "@aws-sdk/client-s3": "^3.1119.0",
     "@google/genai": "^2.18.0",
     "bcrypt": "^6.0.0",
-    "chromadb": "^3.5.0",
     "cors": "^2.8.5",
     "dotenv": "^16.4.7",
     "express": "^4.21.2",

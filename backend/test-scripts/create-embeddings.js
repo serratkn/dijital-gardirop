@@ -9,14 +9,14 @@
 //   node test-scripts/create-embeddings.js                (yalnızca listeler)
 //   node test-scripts/create-embeddings.js --uygula
 //   node test-scripts/create-embeddings.js --uygula --limit 3
-//   node test-scripts/create-embeddings.js --sifirla --uygula   (koleksiyonu silip baştan)
+//   node test-scripts/create-embeddings.js --sifirla --uygula   (tabloyu boşaltıp baştan)
 //
 // VARSAYILAN DAVRANIŞ SALT OKUNURDUR (analyze-existing-items.js kalıbı):
 // her çağrı gerçek Gemini kotası harcadığı için hiçbir şey yanlışlıkla
 // üretilmesin.
 //
 // --sifirla EMBEDDING MODELİ DEĞİŞTİĞİNDE gerekir: farklı modellerin vektörleri
-// aynı uzayda değildir, karışık koleksiyonda mesafeler anlamsızlaşır.
+// aynı uzayda değildir, karışık bir tabloda mesafeler anlamsızlaşır.
 //
 // Sunucuya İHTİYAÇ DUYMAZ: servisleri doğrudan kurar.
 
@@ -25,7 +25,7 @@ require('dotenv').config({ path: path.join(__dirname, '..', '.env') })
 
 const pool = require('../src/config/database')
 const { isConfigured, getEmbeddingModel } = require('../src/config/gemini')
-const { isEnabled, getCollectionName, getHost, getPort } = require('../src/config/chroma')
+const { isEnabled } = require('../src/config/vectorStore')
 const ClothingItemRepository = require('../src/repositories/ClothingItemRepository')
 const VectorRepository = require('../src/repositories/VectorRepository')
 const VectorService = require('../src/services/VectorService')
@@ -38,7 +38,7 @@ const LIMIT = limitIndex !== -1 ? Number(process.argv[limitIndex + 1]) : null
 
 async function main() {
   if (!isEnabled()) {
-    console.log('ChromaDB devre dışı (CHROMA_ENABLED=false) — yapacak bir şey yok.')
+    console.log('Vektör deposu devre dışı (VECTOR_STORE_ENABLED=false) — yapacak bir şey yok.')
     return
   }
   if (!isConfigured()) {
@@ -46,35 +46,34 @@ async function main() {
     return
   }
 
-  const vectorRepository = new VectorRepository()
+  const vectorRepository = new VectorRepository(pool)
 
-  console.log(`ChromaDB: ${getHost()}:${getPort()} / koleksiyon "${getCollectionName()}"`)
+  console.log(`Vektör deposu: pgvector (clothing_item_embeddings tablosu)`)
   console.log(`Embedding modeli: ${getEmbeddingModel()}\n`)
 
   try {
     await vectorRepository.heartbeat()
   } catch {
-    console.log('ChromaDB yanıt vermiyor. Ayakta mı?  docker compose up -d')
+    console.log('Veritabanına ulaşılamıyor. Ayakta mı?  docker compose up -d')
     process.exitCode = 1
     return
   }
 
   if (SIFIRLA) {
     if (!UYGULA) {
-      console.log('--sifirla yalnızca --uygula ile birlikte çalışır (koleksiyon SİLİNİR).')
+      console.log('--sifirla yalnızca --uygula ile birlikte çalışır (tüm embeddingler SİLİNİR).')
       return
     }
     try {
       await vectorRepository.dropCollection()
-      console.log('Koleksiyon silindi; tüm embeddingler yeniden üretilecek.\n')
+      console.log('Vektör tablosu boşaltıldı; tüm embeddingler yeniden üretilecek.\n')
     } catch (error) {
-      // Koleksiyon zaten yoksa sorun değil.
-      console.log(`Koleksiyon silinemedi (muhtemelen zaten yok): ${error.message}\n`)
+      console.log(`Vektör tablosu boşaltılamadı: ${error.message}\n`)
     }
   }
 
-  // Analizi olan parçalar. Hangilerinin vektörü eksik olduğunu Chroma söyler;
-  // Postgres bunu bilemez (iki ayrı depo, aralarında bir bağ tablosu yok).
+  // Analizi olan parçalar. Hangilerinin vektörü eksik olduğunu
+  // clothing_item_embeddings söyler (aynı veritabanı, ayrı bir tablo).
   const { rows } = await pool.query(
     `SELECT ci.id, ci.name, c.name AS kategori
        FROM clothing_items ci
@@ -140,7 +139,7 @@ async function main() {
     `\nBitti: ${say('tamamlandi')} üretildi, ${say('atlandi')} atlandı, ` +
       `${say('basarisiz')} başarısız.`,
   )
-  console.log(`Koleksiyondaki toplam vektör: ${await vectorRepository.count()}`)
+  console.log(`Tablodaki toplam vektör: ${await vectorRepository.count()}`)
   console.log('\nDoğrulamak için: node test-scripts/test-vector.js')
 }
 

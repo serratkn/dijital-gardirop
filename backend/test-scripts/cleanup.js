@@ -14,8 +14,7 @@ require('dotenv').config({ path: path.join(__dirname, '..', '.env') })
 
 const fs = require('node:fs')
 const pool = require('../src/config/database')
-const { isEnabled: isChromaEnabled } = require('../src/config/chroma')
-const VectorRepository = require('../src/repositories/VectorRepository')
+const { isEnabled: isVectorStoreEnabled } = require('../src/config/vectorStore')
 const { UPLOAD_DIR, SELFIE_UPLOAD_DIR } = require('../src/config/upload')
 
 // Test scriptlerinin ürettiği kayıtlar bu kalıplarla adlandırılır.
@@ -115,10 +114,14 @@ async function main() {
     )
   }
 
-  // ChromaDB (Aşama 3) AYRI BİR DEPODUR: Postgres'ten silinen bir kıyafetin
-  // vektörü kendiliğinden gitmez. Uygulama akışında silme ucu bunu yapıyor
-  // ama doğrudan SQL ile silinen test kayıtları öksüz vektör bırakır — bu da
-  // benzer aramasında artık var olmayan bir parçanın dönmesi demektir.
+  // `clothing_item_embeddings.clothing_item_id` ON DELETE CASCADE taşır, yani
+  // yukarıdaki DOĞRUDAN SQL silmesi (satır ~104, gerçek bir HARD DELETE)
+  // embedding'i de kendiliğinden götürür. Bu fonksiyonun yakaladığı asıl
+  // durum farklı: uygulamanın kendi SOFT DELETE akışı (is_deleted = true)
+  // CASCADE'i hiç tetiklemez — normalde `ClothingItemController.delete`
+  // vektörü de silmeyi dener ama bu çağrı (Chroma'yken de, pgvector'da da)
+  // ASLA FIRLATMAZ; sessizce başarısız olursa öksüz bir kayıt kalabilir. Bu
+  // süpürme o payı kapatır.
   await temizleOksuzVektorler()
 
   // Diskteki fotoğraflar da AYRI bir depodur (dosya sistemi). Kullanıcı
@@ -132,45 +135,30 @@ async function main() {
   await pool.end()
 }
 
-// Chroma'da olup Postgres'te (artık) olmayan vektörleri siler.
+// clothing_item_embeddings'te olup clothing_items'ta (artık) canlı olmayan
+// vektörleri siler. ChromaDB döneminde bu iki AYRI depo arasında bir
+// karşılaştırma gerektiriyordu (id listesini çekip Postgres'e sorman
+// gerekiyordu); artık İKİSİ DE aynı veritabanında olduğu için TEK bir
+// anti-join sorgusu yeterli — bkz. CLAUDE.md §9, 2026-08-27 "ChromaDB'den
+// pgvector'a geçiş" kaydı.
 async function temizleOksuzVektorler() {
-  if (!isChromaEnabled()) return
-
-  const repo = new VectorRepository()
+  if (!isVectorStoreEnabled()) return
 
   try {
-    await repo.heartbeat()
-  } catch {
-    console.log('\nChromaDB yanıt vermiyor — vektör temizliği atlandı.')
-    return
-  }
-
-  try {
-    const collection = await repo.getCollection()
-    // include: [] → yalnızca id'ler gelir; embedding'leri çekmek gereksiz
-    // ağ trafiği olurdu (parça başına 3072 float).
-    const hepsi = await collection.get({ include: [] })
-    const vektorIdleri = hepsi?.ids ?? []
-    if (vektorIdleri.length === 0) return
-
-    const { rows } = await pool.query(
-      'SELECT id FROM clothing_items WHERE id = ANY($1::uuid[]) AND is_deleted = false',
-      [vektorIdleri],
-    )
-    const yasayanlar = new Set(rows.map((row) => row.id))
-    const oksuzler = vektorIdleri.filter((id) => !yasayanlar.has(id))
-
-    if (oksuzler.length === 0) {
-      console.log(`\nChromaDB: ${vektorIdleri.length} vektör, öksüz yok.`)
+    const result = await pool.query(`
+      DELETE FROM clothing_item_embeddings e
+      WHERE NOT EXISTS (
+        SELECT 1 FROM clothing_items ci
+        WHERE ci.id = e.clothing_item_id AND ci.is_deleted = false
+      )
+    `)
+    if (result.rowCount === 0) {
+      console.log('\nVektör tablosu: öksüz kayıt yok.')
       return
     }
-
-    await repo.deleteItems(oksuzler)
-    console.log(
-      `\nChromaDB: ${oksuzler.length} öksüz vektör silindi (${vektorIdleri.length} taranmıştı).`,
-    )
+    console.log(`\nVektör tablosu: ${result.rowCount} öksüz kayıt silindi.`)
   } catch (error) {
-    // Temizlik bir kolaylık aracıdır; Chroma yüzünden çökmemeli.
+    // Temizlik bir kolaylık aracıdır; vektör tablosu yüzünden çökmemeli.
     console.log(`\nVektör temizliği yapılamadı: ${error.message}`)
   }
 }

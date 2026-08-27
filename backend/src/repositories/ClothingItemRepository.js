@@ -49,7 +49,7 @@ class ClothingItemRepository {
   // döndürüyor; her biri için ayrı findById atmak veritabanına onlarca tur
   // demekti ve bu yol kullanıcı öneriyi beklerken çalışıyor.
   //
-  // Sıra KORUNMAZ: çağıran zaten benzerlik sırasını Chroma'dan biliyor ve
+  // Sıra KORUNMAZ: çağıran zaten benzerlik sırasını vektör sorgusundan biliyor ve
   // burada yalnızca id → kayıt eşlemesi kuruyor.
   async findByIds(ids) {
     if (!Array.isArray(ids) || ids.length === 0) return []

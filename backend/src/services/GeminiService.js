@@ -416,7 +416,7 @@ class GeminiService {
 
     const vectors = (response?.embeddings ?? []).map((item) => item?.values)
 
-    // Eksik/bozuk vektör sessizce geçilmemeli: Chroma'ya yarım veri yazmak,
+    // Eksik/bozuk vektör sessizce geçilmemeli: vektör tablosuna yarım veri yazmak,
     // sonradan teşhisi zor bir "benzerlik hep saçma" hatasına dönerdi.
     if (vectors.length !== temizler.length || vectors.some((v) => !Array.isArray(v) || !v.length)) {
       throw new ServiceUnavailableError('Gemini beklenen sayıda embedding döndürmedi')

@@ -10,7 +10,7 @@
 // Kullanım (backend/ klasöründen):
 //   node test-scripts/test-file-cleanup.js
 //
-// Sunucunun çalışıyor olması gerekir (`npm run dev`). Gemini/Chroma GEREKMEZ.
+// Sunucunun çalışıyor olması gerekir (`npm run dev`). Gemini/vektör deposu GEREKMEZ.
 
 const path = require('node:path')
 const fs = require('node:fs')

@@ -1,17 +1,20 @@
-// Gemini entegrasyonu — AŞAMA 3: vektör veritabanı (ChromaDB) testleri.
+// Gemini entegrasyonu — AŞAMA 3: vektör veritabanı (pgvector) testleri.
+// ChromaDB'den pgvector'a geçiş sonrası güncellendi (bkz. CLAUDE.md §9,
+// 2026-08-27 kaydı — "ChromaDB'den pgvector'a geçiş").
 //
 // Kullanım (backend/ klasöründen):
 //   node test-scripts/test-vector.js
-//   node test-scripts/test-vector.js --birim      (yalnızca birim; Chroma/anahtar GEREKMEZ)
+//   node test-scripts/test-vector.js --birim      (yalnızca birim; DB/anahtar GEREKMEZ)
 //   node test-scripts/test-vector.js --cleanup    (test verisini sonda siler)
 //
-// VARSAYILAN OLARAK TEST VERİSİ SİLİNMEZ: koleksiyonun gerçekten dolduğu
-// Chroma'dan / DBeaver'dan gözle doğrulanabilsin diye.
+// VARSAYILAN OLARAK TEST VERİSİ SİLİNMEZ: tablonun gerçekten dolduğu
+// DBeaver'dan gözle doğrulanabilsin diye.
 //
-// BÖLÜM 1 (birim) ÇALIŞAN CHROMA VE GEÇERLİ ANAHTAR GEREKTİRMEZ: sahte
-// katmanlarla çalışır ve asıl güvence buradadır — Chroma veya embedding API'si
-// düşse de kıyafet akışının kırılmaması.
-// BÖLÜM 2-4 çalışan Chroma container'ı + geçerli GEMINI_API_KEY ister.
+// BÖLÜM 1 (birim) ÇALIŞAN VERİTABANI VE GEÇERLİ ANAHTAR GEREKTİRMEZ: sahte
+// katmanlarla çalışır ve asıl güvence buradadır — vektör deposu veya embedding
+// API'si düşse de kıyafet akışının kırılmaması.
+// BÖLÜM 2-4 çalışan Postgres (migration 011 uygulanmış) + geçerli
+// GEMINI_API_KEY ister.
 //
 // ÖNEMLİ: Bölüm 3 ai_analysis'i ELLE yazar (sentetik), Gemini'ye görsel analizi
 // YAPTIRMAZ. Sebep iki türlü: (1) generateContent ücretsiz kotası günde 20
@@ -26,9 +29,9 @@ require('dotenv').config({ path: path.join(__dirname, '..', '.env') })
 const BASE_URL = `http://localhost:${process.env.PORT || 3001}/api`
 const SERVER_FILE = path.join(__dirname, '..', 'server.js')
 
-// Chroma'sı ölü bir porta bakan ikinci sunucunun portu.
+// Vektör deposu devre dışı bırakılmış ikinci sunucunun portu (bkz.
+// vektorDevreDisiSunucuTesti).
 const BROKEN_PORT = 3198
-const DEAD_CHROMA_PORT = 9
 
 const CLEANUP = process.argv.includes('--cleanup')
 const ONLY_UNIT = process.argv.includes('--birim')
@@ -135,8 +138,8 @@ function sahteVectorRepo(overrides = {}) {
     async deleteItems() {
       return true
     },
-    async getCollection() {
-      return { async get() { return { ids: [], embeddings: [] } } }
+    async getEmbedding() {
+      return null
     },
     ...overrides,
   }
@@ -221,11 +224,11 @@ async function birimTestleri() {
     service.buildSummaryText({ ai_analysis: { veri: {} } }).trim() === '',
   )
 
-  console.log('\n2) VectorService — YAZMA yolu Chroma/Gemini çökse de FIRLATMAZ')
+  console.log('\n2) VectorService — YAZMA yolu veritabanı/Gemini çökse de FIRLATMAZ')
 
-  const originalEnabled = process.env.CHROMA_ENABLED
+  const originalEnabled = process.env.VECTOR_STORE_ENABLED
   const originalKey = process.env.GEMINI_API_KEY
-  process.env.CHROMA_ENABLED = 'true'
+  process.env.VECTOR_STORE_ENABLED = 'true'
   process.env.GEMINI_API_KEY = 'test-anahtari'
 
   {
@@ -244,34 +247,34 @@ async function birimTestleri() {
     }
     check('Embedding API hata verince FIRLATMAZ', !firlattiMi)
     check('Sonuç "basarisiz" bildirilir', sonuc?.durum === DURUM.BASARISIZ, sonuc?.sebep)
-    check('Hata durumunda Chroma\'ya YAZILMAZ', repo.yazilanlar.length === 0)
+    check('Hata durumunda veritabanına YAZILMAZ', repo.yazilanlar.length === 0)
   }
 
   {
     const repo = sahteVectorRepo({
       async upsertItem() {
-        throw new Error('ChromaDB yanıt vermiyor')
+        throw new Error('Veritabanı yanıt vermiyor')
       },
     })
     const s = new VectorService(repo, sahteItemRepo(sahteParca()), sahteGemini())
     const sonuc = await s.indexItem(sahteParca().id)
     check(
-      'ChromaDB yazma hatası da FIRLATMAZ',
-      sonuc.durum === DURUM.BASARISIZ && sonuc.sebep === 'chroma-yazma-hatasi',
+      'Veritabanı yazma hatası da FIRLATMAZ',
+      sonuc.durum === DURUM.BASARISIZ && sonuc.sebep === 'vektor-yazma-hatasi',
     )
   }
 
   {
     const repo = sahteVectorRepo({
       async getExistingIds() {
-        throw new Error('ChromaDB kapalı')
+        throw new Error('Veritabanı kapalı')
       },
     })
     const gemini = sahteGemini()
     const s = new VectorService(repo, sahteItemRepo(sahteParca()), gemini)
     const sonuc = await s.indexItem(sahteParca().id)
     check(
-      'Chroma erişilemezken embedding HİÇ üretilmez (boşa para harcanmaz)',
+      'Vektör deposuna erişilemezken embedding HİÇ üretilmez (boşa para harcanmaz)',
       sonuc.durum === DURUM.BASARISIZ && gemini.cagriSayisi === 0,
       sonuc.sebep,
     )
@@ -387,17 +390,17 @@ async function birimTestleri() {
   }
 
   {
-    process.env.CHROMA_ENABLED = 'false'
+    process.env.VECTOR_STORE_ENABLED = 'false'
     const gemini = sahteGemini()
     const s = new VectorService(sahteVectorRepo(), sahteItemRepo(sahteParca()), gemini)
     const sonuc = await s.indexItem('x')
     check(
-      'CHROMA_ENABLED=false iken hiçbir şey yapılmaz',
+      'VECTOR_STORE_ENABLED=false iken hiçbir şey yapılmaz',
       sonuc.durum === DURUM.ATLANDI &&
-        sonuc.sebep === 'chroma-devre-disi' &&
+        sonuc.sebep === 'vektor-devre-disi' &&
         gemini.cagriSayisi === 0,
     )
-    process.env.CHROMA_ENABLED = 'true'
+    process.env.VECTOR_STORE_ENABLED = 'true'
   }
 
   {
@@ -424,7 +427,7 @@ async function birimTestleri() {
 
   {
     const s = new VectorService(
-      sahteVectorRepo({ async deleteItems() { throw new Error('Chroma kapalı') } }),
+      sahteVectorRepo({ async deleteItems() { throw new Error('Veritabanı kapalı') } }),
       sahteItemRepo(sahteParca()),
       sahteGemini(),
     )
@@ -469,8 +472,8 @@ async function birimTestleri() {
   {
     const s = new VectorService(
       sahteVectorRepo({
-        async getCollection() {
-          throw new Error('ChromaDB yanıt vermiyor')
+        async getEmbedding() {
+          throw new Error('Veritabanı yanıt vermiyor')
         },
       }),
       sahteItemRepo(sahteParca()),
@@ -483,7 +486,7 @@ async function birimTestleri() {
       hata = error
     }
     check(
-      'OKUMA yolu Chroma düştüğünde 503 FIRLATIR (sessizce boş dönmez)',
+      'OKUMA yolu vektör deposu düştüğünde 503 FIRLATIR (sessizce boş dönmez)',
       hata?.statusCode === 503,
       hata?.message,
     )
@@ -504,10 +507,10 @@ async function birimTestleri() {
   }
 
   {
-    // KRİTİK GÜVENLİK: sorgu daima user_id ile filtrelenmeli.
+    // KRİTİK GÜVENLİK: sorgu daima userId ile filtrelenmeli.
     const repo = sahteVectorRepo({
-      async getCollection() {
-        return { async get() { return { ids: ['x'], embeddings: [[1, 2, 3]] } } }
+      async getEmbedding() {
+        return [1, 2, 3]
       },
     })
     const s = new VectorService(repo, sahteItemRepo(sahteParca()), sahteGemini())
@@ -515,20 +518,19 @@ async function birimTestleri() {
     await s.findSimilar(sahteParca().id, 'user-1')
     check(
       'Sorguda KULLANICI FİLTRESİ var (başkasının gardırobu sızmaz)',
-      JSON.stringify(repo.sorgular[0]?.where ?? {}).includes('user-1'),
-      JSON.stringify(repo.sorgular[0]?.where),
+      repo.sorgular[0]?.userId === 'user-1',
+      JSON.stringify(repo.sorgular[0]),
     )
     check(
-      'Kendi vektörü yeniden ÜRETİLMEZ (Chroma\'dan okunur)',
+      'Kendi vektörü yeniden ÜRETİLMEZ (veritabanından okunur)',
       repo.sorgular[0]?.embedding?.length === 3,
     )
 
     await s.findSimilar(sahteParca().id, 'user-1', { categoryId: 3 })
-    const where = JSON.stringify(repo.sorgular[1]?.where ?? {})
     check(
       'Kategori filtresi kullanıcı filtresine EK olarak uygulanır',
-      where.includes('user-1') && where.includes('category_id') && where.includes('3'),
-      where,
+      repo.sorgular[1]?.userId === 'user-1' && repo.sorgular[1]?.categoryId === 3,
+      JSON.stringify(repo.sorgular[1]),
     )
 
     await s.findSimilar(sahteParca().id, 'user-1', { limit: 5 })
@@ -539,53 +541,52 @@ async function birimTestleri() {
     )
   }
 
-  if (originalEnabled === undefined) delete process.env.CHROMA_ENABLED
-  else process.env.CHROMA_ENABLED = originalEnabled
+  if (originalEnabled === undefined) delete process.env.VECTOR_STORE_ENABLED
+  else process.env.VECTOR_STORE_ENABLED = originalEnabled
   if (originalKey === undefined) delete process.env.GEMINI_API_KEY
   else process.env.GEMINI_API_KEY = originalKey
 }
 
-// ---- BÖLÜM 2: ChromaDB container'ı ----
-async function chromaBaglantiTesti() {
-  console.log('\n4) ChromaDB container bağlantısı')
+// ---- BÖLÜM 2: pgvector bağlantısı ----
+// ChromaDB döneminde bu bölüm AYRI bir servisin (ayrı host/port/container)
+// ayakta olduğunu doğruluyordu. Artık vektör deposu aynı Postgres bağlantı
+// havuzunu paylaştığı için "bağlantı" testi büyük ölçüde /health ile
+// ÇAKIŞIYOR — yine de `vector` uzantısının kurulu ve `clothing_item_embeddings`
+// tablosunun gerçekten var olduğunu (migration 011 uygulanmış mı) ayrıca
+// doğrulamaya değer, çünkü Postgres ayakta olsa bile bu migration unutulmuş
+// olabilir.
+async function pgvectorBaglantiTesti() {
+  console.log('\n4) pgvector bağlantısı ve tablo varlığı')
 
   const VectorRepository = require('../src/repositories/VectorRepository')
-  const { getHost, getPort, getCollectionName } = require('../src/config/chroma')
-  const repo = new VectorRepository()
+  const pool = require('../src/config/database')
+  const repo = new VectorRepository(pool)
 
-  let heartbeat = null
+  let heartbeat = false
   try {
     heartbeat = await repo.heartbeat()
   } catch {
-    heartbeat = null
+    heartbeat = false
   }
-  check(
-    `ChromaDB ayakta (${getHost()}:${getPort()})`,
-    typeof heartbeat === 'number' || typeof heartbeat === 'bigint',
-    'docker compose up -d ile başlar',
-  )
-  if (heartbeat === null) return false
+  check('Postgres bağlantı havuzu ayakta', heartbeat === true, 'docker compose up -d ile başlar')
+  if (!heartbeat) return false
 
-  // Docker Compose'un iki servisi de ayağa kaldırdığını doğrula: Postgres'e
-  // giden asıl uygulama yolu zaten çalışıyorsa /health 200 döner.
   const { status, data } = await call('GET', '/health')
-  check('Postgres ile birlikte çalışıyor (/health 200)', status === 200, data?.status)
-
-  let collection = null
-  try {
-    collection = await repo.getCollection()
-  } catch {
-    collection = null
-  }
-  check(`Koleksiyon açılabiliyor ("${getCollectionName()}")`, collection !== null)
+  check('Uygulama sunucusu da çalışıyor (/health 200)', status === 200, data?.status)
 
   let sayi = null
   try {
     sayi = await repo.count()
-  } catch {
+  } catch (error) {
     sayi = null
+    check(
+      'clothing_item_embeddings tablosu mevcut (migration 011 uygulanmış)',
+      false,
+      error.message,
+    )
+    return true
   }
-  check('Koleksiyon sayılabiliyor', typeof sayi === 'number', `${sayi} vektör`)
+  check('clothing_item_embeddings tablosu sayılabiliyor', typeof sayi === 'number', `${sayi} vektör`)
 
   return true
 }
@@ -728,7 +729,7 @@ async function benzerlikTesti() {
   ]
 
   const clothingItemRepository = new ClothingItemRepository(pool)
-  const vectorRepository = new VectorRepository()
+  const vectorRepository = new VectorRepository(pool)
   const service = new VectorService(
     vectorRepository,
     clothingItemRepository,
@@ -750,7 +751,7 @@ async function benzerlikTesti() {
 
   const sonuclar = await service.indexItems(Object.values(idler))
   const basarili = [...sonuclar.values()].filter((r) => r.durum === 'tamamlandi').length
-  check('Embeddingler ÜRETİLDİ ve ChromaDB\'ye yazıldı', basarili === 4, `${basarili}/4`)
+  check('Embeddingler ÜRETİLDİ ve veritabanına yazıldı', basarili === 4, `${basarili}/4`)
   if (basarili !== 4) {
     console.log('      (embedding üretilemedi — kota veya bağlantı; sonraki kontroller atlanıyor)')
     return { userId: auth.user.id, token: auth.token, email, idler }
@@ -930,9 +931,21 @@ async function benzerlikTesti() {
   return { userId: auth.user.id, token: auth.token, email, idler }
 }
 
-// ---- BÖLÜM 4: ChromaDB erişilemezken uygulama ayakta ----
-async function chromasizSunucuTesti() {
-  console.log('\n6) KRİTİK — ChromaDB erişilemezken kıyafet akışı')
+// ---- BÖLÜM 4: vektör deposu devre dışıyken uygulama ayakta ----
+//
+// ChromaDB döneminde bu bölüm İKİNCİ bir sunucuyu ÖLÜ BİR PORTA bakan bir
+// Chroma adresiyle açıp "ayrı bir servise ağ erişimi olmasa da uygulama
+// çöker mi" sorusunu sınıyordu. Vektör deposu artık AYNI Postgres bağlantı
+// havuzunu paylaştığı için bu senaryo (Postgres ayakta, yalnızca vektör
+// deposu erişilemez) fiilen İMKÂNSIZ hâle geldi — pgvector düşerse zaten
+// tüm uygulama düşer. Test edilecek asıl garanti aynı kaldı ("vektör
+// katmanı bir kıyafet ekleme isteğini asla düşürmemeli"); bu yüzden
+// senaryo VECTOR_STORE_ENABLED=false ile DEVRE DIŞI BIRAKMAYA çevrildi —
+// `isEnabled()` kontrolü her yazma/okuma yolunun EN BAŞINDA olduğu için
+// (gerçek bir Postgres sorgusuna hiç gidilmeden) bu, "erişilemez" ile
+// BİREBİR AYNI kod yolunu (write: sessizce atla, read: 503) egzersiz eder.
+async function vektorDevreDisiSunucuTesti() {
+  console.log('\n6) KRİTİK — vektör deposu devre dışıyken kıyafet akışı')
 
   const brokenBase = `http://localhost:${BROKEN_PORT}/api`
   const child = spawn(process.execPath, [SERVER_FILE], {
@@ -940,8 +953,7 @@ async function chromasizSunucuTesti() {
     env: {
       ...process.env,
       PORT: String(BROKEN_PORT),
-      // Hiçbir şeyin dinlemediği bir port: her Chroma çağrısı bağlantı hatası.
-      CHROMA_PORT: String(DEAD_CHROMA_PORT),
+      VECTOR_STORE_ENABLED: 'false',
     },
     stdio: ['ignore', 'pipe', 'pipe'],
   })
@@ -961,7 +973,7 @@ async function chromasizSunucuTesti() {
         // henüz dinlemiyor
       }
     }
-    check('ChromaDB erişilemezken sunucu AÇILIYOR', hazir)
+    check('Vektör deposu devre dışıyken sunucu AÇILIYOR', hazir)
     if (!hazir) return
 
     const email = `vektor-kirik-${Date.now()}@example.com`
@@ -975,12 +987,12 @@ async function chromasizSunucuTesti() {
     const { status: createStatus, data: item } = await call('POST', '/clothing-items', {
       baseUrl: brokenBase,
       token: auth.token,
-      body: { categoryId: 1, name: '[test] Chroma yokken eklenen parça', color: 'Siyah' },
+      body: { categoryId: 1, name: '[test] Vektör deposu kapalıyken eklenen parça', color: 'Siyah' },
     })
     check('Kıyafet eklenebiliyor (201)', createStatus === 201, `durum: ${createStatus}`)
 
-    // Analizi elle yaz ve indekslemeyi tetikle: Chroma ölü olduğu için
-    // başarısız olmalı ama HİÇBİR ŞEYİ KIRMAMALI.
+    // Analizi elle yaz ve indekslemeyi tetikle: vektör deposu kapalı olduğu
+    // için atlanmalı ama HİÇBİR ŞEYİ KIRMAMALI.
     const pool = require('../src/config/database')
     const ClothingItemRepository = require('../src/repositories/ClothingItemRepository')
     await new ClothingItemRepository(pool).updateAiAnalysis(item.id, {
@@ -994,7 +1006,7 @@ async function chromasizSunucuTesti() {
       token: auth.token,
     })
     check('Kıyafet okunabiliyor', readStatus === 200)
-    check('Kayıt yerinde (Chroma yokken de)', after?.name === item.name)
+    check('Kayıt yerinde (vektör deposu kapalıyken de)', after?.name === item.name)
     check('Analiz kolonu etkilenmemiş', after?.ai_analysis !== null)
 
     // /similar bu durumda SESSİZ KALMAMALI: kullanıcı bir cevap bekliyor.
@@ -1028,7 +1040,7 @@ async function ozet(sonuc) {
     const pool = require('../src/config/database')
     const GeminiService = require('../src/services/GeminiService')
     const service = new VectorService(
-      new VectorRepository(),
+      new VectorRepository(pool),
       new ClothingItemRepository(pool),
       new GeminiService(),
     )
@@ -1036,13 +1048,14 @@ async function ozet(sonuc) {
     await call('DELETE', `/users/${sonuc.userId}`, { token: sonuc.token })
     console.log('\nTest verisi silindi (--cleanup).')
   } else if (sonuc) {
-    const { getCollectionName } = require('../src/config/chroma')
     console.log('\n─────────────────────────────────────────────')
     console.log('Test verisi BIRAKILDI (gözle doğrulama için):')
-    console.log(`  kullanıcı  : ${sonuc.email}`)
-    console.log(`  koleksiyon : ${getCollectionName()}`)
+    console.log(`  kullanıcı : ${sonuc.email}`)
+    console.log('  tablo     : clothing_item_embeddings')
     console.log('\n  Vektör sayısı:')
-    console.log("    node -e \"const R=require('./src/repositories/VectorRepository');new R().count().then(console.log)\"")
+    console.log(
+      "    node -e \"const p=require('./src/config/database');const R=require('./src/repositories/VectorRepository');new R(p).count().then(console.log).finally(()=>p.end())\"",
+    )
     console.log('\n  Silmek için: node test-scripts/test-vector.js --cleanup')
     console.log('─────────────────────────────────────────────')
   }
@@ -1057,7 +1070,7 @@ async function main() {
   await birimTestleri()
 
   if (ONLY_UNIT) {
-    console.log('(--birim) Chroma ve HTTP bölümleri atlandı.')
+    console.log('(--birim) Veritabanı ve HTTP bölümleri atlandı.')
     return ozet(null)
   }
 
@@ -1075,15 +1088,15 @@ async function main() {
     return ozet(null)
   }
 
-  const chromaVar = await chromaBaglantiTesti()
-  if (!chromaVar) {
-    console.log('\n! ChromaDB yanıt vermiyor — kalan bölümler atlanıyor.')
+  const pgvectorVar = await pgvectorBaglantiTesti()
+  if (!pgvectorVar) {
+    console.log('\n! Veritabanına ulaşılamıyor — kalan bölümler atlanıyor.')
     console.log('  Başlatmak için: docker compose up -d')
     return ozet(null)
   }
 
   const sonuc = await benzerlikTesti()
-  await chromasizSunucuTesti()
+  await vektorDevreDisiSunucuTesti()
   await ozet(sonuc)
 }
 
