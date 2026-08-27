@@ -9,6 +9,7 @@
     "dev": "node --watch server.js"
   },
   "dependencies": {
+    "@aws-sdk/client-s3": "^3.1119.0",
     "@google/genai": "^2.18.0",
     "bcrypt": "^6.0.0",
     "chromadb": "^3.5.0",

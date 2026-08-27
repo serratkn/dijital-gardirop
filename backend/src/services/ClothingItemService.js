@@ -22,9 +22,13 @@ class ClothingItemService {
   // (bkz. #assertUnderItemLimit). Diğer katmanlardaki "opsiyonel bağımlılık"
   // deseninden BİLEREK farklı: limit kontrolü ana yazma yolunun ayrılmaz bir
   // parçası, analiz/embedding gibi üstüne konan bir zenginleştirme değil.
-  constructor(clothingItemRepository, userRepository) {
+  // storageRepository OPSİYONELDİR (clothingAnalysisService/vectorService ile
+  // AYNI desen): verilmezse fotoğraflar yalnızca yerel diske yazılır/silinir,
+  // R2 hiç devreye girmez.
+  constructor(clothingItemRepository, userRepository, storageRepository = null) {
     this.clothingItemRepository = clothingItemRepository
     this.userRepository = userRepository
+    this.storageRepository = storageRepository
   }
 
   async getItems(userId, categoryId) {
@@ -101,9 +105,9 @@ class ClothingItemService {
 
     const deleted = await this.clothingItemRepository.softDelete(id)
 
-    // Kayıt soft delete edilse de dosya diskte tutulmaz: erişilemeyen
+    // Kayıt soft delete edilse de dosya diskte/R2'de tutulmaz: erişilemeyen
     // fotoğraflar yer kaplamasın.
-    await removeUploadedFile(fileNameFromImageUrl(existingItem.image_url))
+    await this.#removeStoredImage(existingItem.image_url)
 
     return deleted
   }
@@ -129,7 +133,7 @@ class ClothingItemService {
     // Yeni fotoğraf kaydedildikten SONRA eskisi silinir; sıra tersine olsaydı
     // veritabanı güncellemesi patladığında kullanıcı fotoğrafsız kalırdı.
     if (existingItem.image_url && existingItem.image_url !== imageUrl) {
-      await removeUploadedFile(fileNameFromImageUrl(existingItem.image_url))
+      await this.#removeStoredImage(existingItem.image_url)
     }
 
     return updated
@@ -145,9 +149,34 @@ class ClothingItemService {
     }
 
     const updated = await this.clothingItemRepository.updateImageUrl(id, null)
-    await removeUploadedFile(fileNameFromImageUrl(existingItem.image_url))
+    await this.#removeStoredImage(existingItem.image_url)
 
     return updated
+  }
+
+  // Eski görseli HEM yerelden HEM (yapılandırılmışsa) R2'den kaldırır.
+  // Yerel silme HER ZAMAN denenir — R2'ye yüklenen bir fotoğrafın arka plan
+  // analizi (ClothingAnalysisService) için okunan yerel GEÇİCİ kopyası da
+  // aynı dosya adını taşır (bkz. §8 "Fotoğraf depolama — Cloudflare R2"),
+  // bu yüzden tek bir silme çağrısı ikisini de temizler. R2 silme yalnızca
+  // `imageUrl` mutlak bir HTTP(S) adresiyse denenir (yerel `/uploads/...`
+  // yolları R2'ye hiç yüklenmemiştir) ve BAŞARISIZLIĞI FIRLATILMAZ — bir
+  // R2 objesinin silinememesi, kıyafetin kendisinin silinmesini engellememeli
+  // (WeatherService/GeminiService'teki "isteğe bağlı zenginleştirme hata
+  // yolu" ilkesiyle aynı ruh, burada "temizlik" için uygulanıyor).
+  async #removeStoredImage(imageUrl) {
+    if (!imageUrl) return
+
+    await removeUploadedFile(fileNameFromImageUrl(imageUrl))
+
+    if (this.storageRepository?.isConfigured && /^https?:\/\//i.test(imageUrl)) {
+      const key = `clothing-items/${fileNameFromImageUrl(imageUrl)}`
+      try {
+        await this.storageRepository.remove(key)
+      } catch (error) {
+        console.error('R2 dosyası silinemedi:', key, error.message)
+      }
+    }
   }
 
   async toggleFavorite(id, userId) {

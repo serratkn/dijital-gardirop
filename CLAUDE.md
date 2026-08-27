@@ -326,8 +326,10 @@ olduğu için iskelet oraya taşındı, kombin üretimi istemci tarafında anlı
 | **E-posta doğrulama yok** | `email_verified` kolonu var ama hep `false`; doğrulama akışı kurulmadı. |
 | **Ödeme sağlayıcısı entegrasyonu yok** | `subscription_tier` artık GERÇEKTEN uygulanıyor (bkz. §8 "Premium sınırları") ama kullanıcıyı `free`'den `premium`'a geçiren bir ödeme akışı (Stripe vb.) yok — "Premium'a Geç" düğmesi şu an dürüstçe "yakında" diyen bir sayfaya gider. |
 | **Çoklu cihaz oturum yönetimi yok** | Kullanıcı başına TEK bir aktif refresh token vardır (`users` tablosunun kendi satırında, ayrı bir "sessions" tablosu değil). Yeni bir cihaz/tarayıcıda giriş yapmak ÖNCEKİ refresh token'ı geçersiz kılar (üzerine yazar) — o cihazdaki oturum, access token'ı süresi dolana kadar (15dk-1sa) çalışmaya devam eder ama sonraki sessiz yenilemesi başarısız olur ve Login'e düşer. Bilinçli bir sınırlama (bkz. §8, migration `007`). |
-| **Fotoğraflar yerel diskte** | `backend/uploads/` altında tutulur; çok sunuculu bir kurulumda paylaşılan depolamaya (S3 vb.) taşınması gerekir. Dosyalar `/uploads` yolundan **token'sız** servis edilir — ad tahmin edilemez UUID olduğu için kabul edilebilir sayıldı. |
+| **Kıyafet fotoğrafları KISMEN kalıcı hale getirildi (Cloudflare R2)** | `R2_*` env değişkenleri tanımlıysa yeni yüklenen fotoğraflar R2'ye de yansıtılır ve `image_url` R2'nin genel adresini taşır — Render'ın ephemeral diskine bağımlılık ortadan kalkar (bkz. §8 "Fotoğraf depolama"). Tanımlı DEĞİLSE (yerel geliştirme, ya da R2 henüz kurulmadıysa) davranış eskisi gibidir: yalnızca `backend/uploads/` altına yazılır, token'sız `/uploads` yolundan servis edilir. **Selfie'ler bu kapsamda DEĞİL** — hâlâ yalnızca yerel diskte, bilinçli bir sınır (bkz. §8). Var olan yerel fotoğraflar `migrate-photos-to-r2.js` ile geriye dönük taşınabilir. |
 | **Fotoğraf boyutlandırma yok** | Yüklenen görsel olduğu gibi saklanır; küçük resim (thumbnail) üretilmez. Native tarafta Capacitor `width: 1600` ile ön küçültme yapar, web'de böyle bir sınır yoktur. |
+| **Selfie'ler R2'ye taşınmadı, hâlâ yalnızca yerel diskte** | Kıyafet fotoğrafları R2'ye yansıtılıyor (bkz. §8) ama selfie'ler BİLEREK bu kapsamın dışında bırakıldı: kıyafet fotoğrafları herkese açık/token'sız servis ediliyor (R2'nin genel URL modeliyle bire bir örtüşüyor), selfie'ler ise özel/token'lı bir uçtan servis ediliyor — R2'nin genel bucket'ını selfie için kullanmak bu güvenlik modelini kırardı. Doğru çözüm (özel bucket + imzalı URL ya da backend proxy) ayrı bir iştir. |
+| **Cloudflare R2 gerçek bir hesapla uçtan uca denenmedi** | Kod tarafı "yapılandırılmamış" durumda tam regresyonla doğrulandı (bkz. §8 "Fotoğraf depolama", `test-storage.js`) ama gerçek bir R2 hesabı/bucket/API token'ı henüz oluşturulmadı — asıl akış (yükle → R2'de gerçekten var mı → sil → gerçekten kalkıyor mu) ve bucket'ın CORS ayarı (paylaşım görseli akışının `fetch` ile fotoğrafı `data:` URI'ye çevirmesi için gerekli) henüz gözlemlenmedi. |
 | **Yardım & Destek** | "Yakında" sayfasıdır, işlevi yoktur. (**Bildirimler artık gerçek** — bkz. §8 "Bildirimler sayfası".) |
 | **Android paylaşım akışı gerçek cihaz/emülatörde henüz DENENMEDİ** | Kod tarafı tamamlandı: `downloadBlob` artık `Capacitor.isNativePlatform()` ile dallanıyor, Android'de Filesystem + Share ile native paylaşım menüsünü açıyor (bkz. §8). Bu makinede yerel `./gradlew` çağrısı, ortamdaki JDK sürümleriyle (26 ve Android Studio JBR 25) Gradle 8.14.3 uyumsuzluğu yüzünden çalışmıyor (`Unsupported class file major version`) — bu, koddan bağımsız bir ortam sorunu. Doğrulama şu ana kadar yalnızca **kaynak kod seviyesinde** yapıldı (Capacitor'ın `SharePlugin`/`FilesystemPlugin` Android kaynağı okunarak `Directory.Cache` + mevcut `FileProvider` yapılandırmasının doğru çalışacağı doğrulandı) ve **web regresyonuyla** (`<a download>` yolunun bozulmadığı kanıtlandı). Gerçek bir Android Studio/emülatör çalıştırması hâlâ gerekiyor. |
 | **Gemini ücretsiz kotası günde 20 istek** | Ölçüldü (`GenerateRequestsPerDayPerProjectPerModel-FreeTier`, limit 20, `gemini-3.6-flash`). Kota dolduğunda analiz sessizce atlanır ve parça analizsiz kalır; **kendiliğinden yeniden deneyen bir mekanizma yoktur** — `analyze-existing-items.js --uygula` ertesi gün elle çalıştırılır. Gerçek kullanım ücretli plan ister. |
@@ -1269,6 +1271,17 @@ node test-scripts/test-skin-tone.js --kotasiz
 node test-scripts/migrate-selfie-photos.js                # yalnızca listeler
 node test-scripts/migrate-selfie-photos.js --uygula
 
+# Cloudflare R2 depolama katmanı — yapılandırma/zarif geri düşüş (15 kontrol).
+# GERÇEK bir R2 hesabı GEREKTİRMEZ; yalnızca "anahtarlar eksikken zarar
+# vermiyor" garantisini kapsar.
+node test-scripts/test-storage.js
+
+# Var olan yerel kıyafet fotoğraflarını Cloudflare R2'ye taşır (R2 env
+# değişkenleri .env'de dolu olmalı). VARSAYILAN SALT OKUNURDUR, İDEMPOTENTTİR,
+# yerel dosyayı SİLMEZ.
+node test-scripts/migrate-photos-to-r2.js                 # yalnızca listeler
+node test-scripts/migrate-photos-to-r2.js --uygula
+
 # GeminiService — anahtar/bağlantı yolları (15 kontrol). SUNUCUYA HTTP İSTEĞİ
 # ATMAZ (2026-08-24'te kaldırılan /gemini/test-analyze ucuna artık bağlı
 # değildir) — GeminiService'i DOĞRUDAN çağırır. Birinci bölüm GEÇERLİ ANAHTAR
@@ -1960,6 +1973,105 @@ bağlanmayı bekliyor" iddiasının doğrudan kanıtıdır.
   çıktığı ve iki bölümün birlikte göründüğü; **sıcak havada uyarının HİÇ
   çıkmadığı**; temiz konsol.
 - Regresyon: backend'e hiç dokunulmadı; frontend lint + build temiz.
+
+**Fotoğraf depolama — Cloudflare R2 (`config/r2.js`, `StorageRepository`).**
+Render'ın disk alanı **ephemeral**'dır — bu depoda daha önce gerçekten yaşanan
+bir sorun: canlıya taşınan bir hesabın kıyafet fotoğrafları bir deploy sonrası
+kayboldu ve elle yeniden yüklenmek zorunda kalındı. Bu, kalıcı bir çözümle
+kapatıldı ama **yalnızca kıyafet fotoğrafları için** (aşağıdaki "Kapsam dışı"
+notuna bakın).
+
+- **`config/r2.js`, `config/chroma.js`/`config/gemini.js` ile AYNI rol:**
+  istemci lazy kurulur ve anahtarlara bağlı önbelleklenir (`resetClient`,
+  testler için). R2, S3 API'siyle uyumlu olduğu için resmi
+  `@aws-sdk/client-s3` kullanılır — R2'ye özel bir SDK yoktur, Cloudflare'ın
+  kendi dokümanları da bunu önerir.
+- **BEŞ env değişkeninin HEPSİ dolu olmalı** (`R2_ACCOUNT_ID`,
+  `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `R2_BUCKET_NAME`,
+  `R2_PUBLIC_URL`) — `isConfigured()` biri bile eksikse `false` döner ve
+  istemci HİÇ kurulmaz. Yarım yapılandırmayla denemek, yüklemenin ortasında
+  patlayan bir isteğe yol açardı; WeatherService/GeminiService'teki "anahtar
+  yoksa dış servise hiç gidilmez" ilkesiyle AYNI disiplin.
+- **`StorageRepository` — "dış servis de repository'dir" ailesinin YENİ
+  üyesi** (`WeatherRepository`/`EmailRepository` ile AYNI rol): yalnızca
+  `upload`/`remove`, iş kuralı yok, **FIRLATIR** — hangi hatanın "önemli"
+  olduğuna çağıran (controller/service) karar verir.
+- **YEREL DOSYA SİLİNMEZ — bilinçli bir mimari karar, performans/tembellik
+  değil.** R2 yapılandırıldığında fotoğraf HEM yerel diske (multer'ın zaten
+  yaptığı gibi) HEM R2'ye yazılır; `image_url` kolonuna R2'nin genel adresi
+  kaydedilir. Yerel kopyanın SİLİNMEMESİNİN sebebi: `ClothingAnalysisService`
+  (arka plan Gemini analizi) görseli HÂLÂ yerel diskten, dosya adıyla okuyor
+  (`UPLOAD_DIR` + `fileNameFromImageUrl`) — bu okuma yoluna HİÇ dokunulmadı.
+  Analiz normal koşullarda saniyeler içinde tamamlandığı için yerel kopyanın
+  bir sonraki deploy'a kadar HAYATTA KALMASI yeterli; kaybolsa bile artık
+  ÖNEMLİ DEĞİL çünkü kalıcı referans (`image_url`) zaten R2'yi gösteriyor.
+- **R2 yüklemesi BAŞARISIZ olursa sessizce yerel yola düşülür**
+  (`ClothingItemController.uploadImage`) — bir bulut deposu sorunu asla bir
+  kıyafet ekleme isteğini düşürmemeli; hata yalnızca loglanır.
+- **Silme yolları da yansıtılır** (`ClothingItemService.#removeStoredImage`,
+  kıyafet silinince/fotoğraf değiştirilince/fotoğraf kaldırılınca çağrılan TEK
+  nokta): yerel dosya HER ZAMAN silinir, `image_url` mutlak bir `http(s)`
+  adresiyse (yani R2'de duruyorsa) R2 objesi de silinir. **R2 silme hatası
+  FIRLATILMAZ** (yalnızca loglanır) — bir bulut objesinin silinememesi,
+  kıyafetin kendisinin silinmesini asla engellememeli.
+- **`ClothingItemService`/`ClothingItemController` üçüncü/dördüncü OPSİYONEL
+  bağımlılık aldı** (`storageRepository`) — `clothingAnalysisService`/
+  `vectorService` ile AYNI desen: verilmezse (ya da yapılandırılmamışsa)
+  davranış BİREBİR eskisi gibi kalır, testler ve bu özelliği istemeyen bir
+  kurulum hiç etkilenmez.
+- **R2 anahtarı R2'nin nesne adı olarak kıyafetin dosya adını (UUID+uzantı)
+  KORUR** (`clothing-items/<dosya-adı>`) — yerel dosya adıyla R2 anahtarı
+  AYNI kalır ki `fileNameFromImageUrl` (basit `path.basename`) her iki
+  URL biçiminde de (yerel `/uploads/...` ve R2'nin tam `https://...` adresi)
+  doğru dosya adını çıkarabilsin; ayrı bir eşleme tablosu gerekmedi.
+- **Geriye dönük taşıma: `test-scripts/migrate-photos-to-r2.js`** —
+  `migrate-selfie-photos.js` ile BİREBİR AYNI kalıp (VARSAYILAN SALT OKUNUR,
+  `--uygula` ile gerçekten yükler, İDEMPOTENTTİR — `image_url` zaten
+  `http` ile başlayan kayıtlar atlanır). Yerel dosya burada da SİLİNMEZ.
+- **BİLİNÇLİ OLARAK KAPSAM DIŞI BIRAKILAN İKİ NOKTA:**
+  1. **Selfie'ler R2'ye taşınmadı.** Kıyafet fotoğrafları herkese açık ve
+     token'sız servis ediliyor (R2'nin genel URL'si bu modelle bire bir
+     örtüşüyor); selfie'ler ise BİLEREK özel/token'lı bir uçtan servis
+     ediliyor (`GET /users/skin-tone-analysis/photo`, bkz. §8). R2'nin
+     genel bucket URL'sini selfie için kullanmak bu güvenlik modelini
+     kırardı — doğru çözüm (özel bucket + imzalı/süreli URL ya da backend
+     üzerinden proxy) bu oturumun kapsamına alınmadı, "Eksikler" tablosuna
+     işlendi.
+  2. **Gerçek zamanlı R2 öksüz-obje temizliği yok.** `cleanup.js`'in yerel
+     disk için yaptığı `temizleOksuzDosyalar()` süpürmesi R2'ye HENÜZ
+     GENİŞLETİLMEDİ — bir R2 yükleme/silme çağrısı beklenmedik şekilde
+     yarım kalırsa (ör. süreç R2'ye yazdıktan hemen sonra çöker) o obje
+     R2'de öksüz kalabilir. Düşük olasılıklı ve zararsız (yalnızca depolama
+     alanı israfı, CLAUDE.md'de belgeli); gerçek kullanıcı verisiyle test
+     edildikten sonra bir sonraki adımda eklenebilir.
+- **Doğrulama — `backend/test-scripts/test-storage.js` (YENİ, 15 kontrol,
+  GERÇEK bir R2 hesabı GEREKTİRMEZ):** yapılandırılmamışken `isConfigured`
+  false + `getClient()` null + `upload`/`remove` network denemeden fırlıyor;
+  5 alandan biri eksikken yine devre dışı; tam (sahte) yapılandırmada istemci
+  gerçekten kuruluyor ve bucket/URL doğru okunuyor; anahtar değişince istemci
+  önbelleğinin doğru geçersiz kılınması; `ClothingItemService`'in
+  `storageRepository` verilmeden de constructor'da patlamaması.
+  **Gerçek bir R2 yükleme/silme burada TEST EDİLMEDİ** — gerçek kimlik
+  bilgileri elde olduğunda `POST /clothing-items/:id/image` uçtan uca
+  doğrulanmalı (aşağıdaki "Açık iş"e bakın).
+- **Regresyon (R2 YAPILANDIRILMAMIŞ ortamda, yani mevcut CI/geliştirme
+  durumu):** `test-all-endpoints` 77/77, `test-image-upload` 29/29 (kritik —
+  bu değişikliğin YEREL diske hiç dokunmadığının kanıtı), `test-auth` 71/71,
+  `test-stats` 60/60, `test-clean-status` 26/26, `test-item-outfits` 27/27,
+  `test-premium-and-reset` 19/19, tüm dosyalar `node --check` ile sözdizimi
+  doğrulaması temiz.
+- **AÇIK İŞ — gerçek bir Cloudflare R2 hesabıyla UÇTAN UCA henüz
+  denenmedi.** Bu, bir hesap/bucket/API token oluşturmayı ve gerçek kimlik
+  bilgilerini `.env`'e (ve Render'ın env değişkenlerine) girmeyi gerektiriyor
+  — yalnızca kullanıcının yapabileceği bir adım. Kod tarafı "yapılandırılmamış"
+  durumda TAM regresyonla doğrulandı; gerçek kimlik bilgileriyle asıl akış
+  (yükle → R2'de gerçekten var mı → `<img>` R2'den gerçekten yükleniyor mu →
+  sil → R2'den gerçekten kalkıyor mu) henüz GÖZLEMLENMEDİ. Ayrıca R2
+  bucket'ında **CORS politikasının** frontend origin'ine izin verecek şekilde
+  açılması gerekiyor — `shareCard.js`'in fotoğrafları `fetch` ile `data:`
+  URI'ye çevirdiği paylaşım akışı, R2 CORS başlık göndermezse cross-origin
+  `fetch` ile kırılır (kart o fotoğraf için yer tutucuya düşer, tüm paylaşım
+  engellenmez — ama bu da doğrulanmadı).
 
 **Güvenlik middleware'leri (`server.js`, en üstte, tüm route'lardan önce).**
 
@@ -2772,6 +2884,47 @@ tamamlayıp kaldırıldı:
 
 > Bundan sonraki her çalışma buraya tarihiyle işlenir: eklenen özellikler, düzeltilen
 > hatalar, alınan mimari kararlar. En yeni kayıt en üstte.
+
+### 2026-08-27 — Kıyafet fotoğrafları Cloudflare R2'ye yansıtılabiliyor (kod hazır, hesap kurulumu bekliyor)
+- **Bağlam:** Aynı profesyonelleştirme yol haritasının "Hemen kazanç" şeridindeki
+  son madde. Render'ın disk alanı ephemeral olduğu için bu ay yaşanan gerçek bir
+  olay vardı: canlıya taşınan bir hesabın kıyafet fotoğrafları bir deploy sonrası
+  kayboldu, elle yeniden yüklendi. Kullanıcı sağlayıcı olarak Cloudflare R2'yi
+  seçti (S3 uyumlu, geniş ücretsiz katman). Tam mimari not için bkz. §8
+  "Fotoğraf depolama — Cloudflare R2".
+- **Yeni `config/r2.js` + `repositories/StorageRepository.js`** —
+  `config/chroma.js`/`WeatherRepository` ile AYNI iki desen: lazy + anahtara
+  bağlı önbelleklenen istemci, "dış servis de repository'dir, fırlatır" kuralı.
+  BEŞ env değişkeninin (`R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`,
+  `R2_SECRET_ACCESS_KEY`, `R2_BUCKET_NAME`, `R2_PUBLIC_URL`) hepsi dolu
+  değilse özellik TAMAMEN devre dışı kalır, davranış eskisi gibi kalır.
+- **`ClothingItemService`/`ClothingItemController`'a OPSİYONEL üçüncü/dördüncü
+  bağımlılık eklendi** (`storageRepository`) — `clothingAnalysisService`/
+  `vectorService` ile AYNI "verilmezse eskisi gibi çalışır" deseni.
+- **Yerel dosya BİLEREK silinmiyor** — R2 yalnızca yerel diskin YANINA
+  ekleniyor, yerine geçmiyor: arka plan Gemini analizi hâlâ yerel dosyayı
+  okuyor, bu okuma yoluna hiç dokunulmadı. Kalıcılık artık `image_url`
+  kolonundaki R2 adresinden geliyor; yerel kopyanın bir redeploy'da
+  kaybolması artık ÖNEMLİ DEĞİL.
+- **Yeni `test-scripts/migrate-photos-to-r2.js`** — var olan yerel fotoğrafları
+  geriye dönük R2'ye taşır, `migrate-selfie-photos.js` ile birebir aynı kalıp
+  (salt okunur varsayılan, `--uygula`, idempotent, yerel dosyayı silmez).
+- **Doğrulama — `test-scripts/test-storage.js` (YENİ, 15 kontrol, gerçek R2
+  hesabı GEREKTİRMEZ):** yapılandırılmamışken/yarım yapılandırmadayken devre
+  dışı kalma, tam (sahte) yapılandırmada istemcinin gerçekten kurulması,
+  anahtar değişince önbelleğin geçersiz kılınması, geriye dönük uyumluluk.
+- **Regresyon (R2 yapılandırılmamış — mevcut durum):** `test-all-endpoints`
+  77/77, **`test-image-upload` 29/29 (kritik — yerel diske hiç dokunulmadığının
+  kanıtı)**, `test-auth` 71/71, `test-stats` 60/60, `test-clean-status` 26/26,
+  `test-item-outfits` 27/27, `test-premium-and-reset` 19/19.
+- **Yeni bağımlılık:** `@aws-sdk/client-s3` (backend).
+- **AÇIK İŞ — kullanıcı henüz gerçek bir Cloudflare R2 hesabı/bucket/API token'ı
+  OLUŞTURMADI.** Kod "yapılandırılmamış" durumda tam regresyonla doğrulandı;
+  gerçek kimlik bilgileri girildiğinde uçtan uca (yükle → sil, bucket CORS
+  ayarı dahil) doğrulama YAPILMASI GEREKİYOR. **Bilinçli olarak kapsam dışı
+  bırakılan iki nokta:** selfie'ler R2'ye taşınmadı (özel/token'lı servis
+  modeliyle R2'nin genel URL'si çelişir); R2 için gerçek zamanlı öksüz-obje
+  temizliği (`cleanup.js` sweep'i) henüz eklenmedi.
 
 ### 2026-08-27 — "Bildirimler" sayfası gerçek bir özelliğe dönüştürüldü
 - **Bağlam:** Aynı profesyonelleştirme yol haritasının "Hemen kazanç" şeridindeki

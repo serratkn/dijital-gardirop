@@ -6,6 +6,7 @@ const { geminiLimiter } = require('../middleware/rateLimiters')
 const ClothingItemRepository = require('../repositories/ClothingItemRepository')
 const CategoryRepository = require('../repositories/CategoryRepository')
 const UserRepository = require('../repositories/UserRepository')
+const StorageRepository = require('../repositories/StorageRepository')
 const ClothingItemService = require('../services/ClothingItemService')
 const VectorRepository = require('../repositories/VectorRepository')
 const ClothingAnalysisService = require('../services/ClothingAnalysisService')
@@ -14,9 +15,17 @@ const GeminiService = require('../services/GeminiService')
 const ClothingItemController = require('../controllers/ClothingItemController')
 
 const clothingItemRepository = new ClothingItemRepository(pool)
+// StorageRepository (Cloudflare R2) üçüncü bağımlılık: R2_* env değişkenleri
+// tanımlı değilse `isConfigured` false döner ve fotoğraflar eskisi gibi
+// yalnızca yerel diske yazılır — bkz. §8 "Fotoğraf depolama".
+const storageRepository = new StorageRepository()
 // UserRepository ikinci bağımlılık: ücretsiz plan sınırını kontrol etmek için
 // (bkz. ClothingItemService > #assertUnderItemLimit, config/plans.js).
-const clothingItemService = new ClothingItemService(clothingItemRepository, new UserRepository(pool))
+const clothingItemService = new ClothingItemService(
+  clothingItemRepository,
+  new UserRepository(pool),
+  storageRepository,
+)
 
 const geminiService = new GeminiService()
 
@@ -43,6 +52,7 @@ const clothingItemController = new ClothingItemController(
   clothingItemService,
   clothingAnalysisService,
   vectorService,
+  storageRepository,
 )
 
 const router = Router()

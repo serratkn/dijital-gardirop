@@ -1,16 +1,23 @@
+const fs = require('node:fs')
 const BaseController = require('./BaseController')
 const { removeUploadedFile } = require('../config/upload')
 
 class ClothingItemController extends BaseController {
-  // clothingAnalysisService ve vectorService OPSİYONELDİR: verilmezse fotoğraf
-  // yükleme eskisi gibi çalışır, yalnızca otomatik analiz / embedding devreye
-  // girmez. Testlerin ve bu davranışı kapatmak isteyen bir kurulumun işini
-  // kolaylaştırır.
-  constructor(clothingItemService, clothingAnalysisService = null, vectorService = null) {
+  // clothingAnalysisService, vectorService ve storageRepository OPSİYONELDİR:
+  // verilmezse fotoğraf yükleme eskisi gibi çalışır, yalnızca otomatik analiz /
+  // embedding / R2 yansıtması devreye girmez. Testlerin ve bu davranışları
+  // kapatmak isteyen bir kurulumun işini kolaylaştırır.
+  constructor(
+    clothingItemService,
+    clothingAnalysisService = null,
+    vectorService = null,
+    storageRepository = null,
+  ) {
     super()
     this.clothingItemService = clothingItemService
     this.clothingAnalysisService = clothingAnalysisService
     this.vectorService = vectorService
+    this.storageRepository = storageRepository
   }
 
   async getAll(req, res) {
@@ -232,9 +239,32 @@ class ClothingItemController extends BaseController {
       return res.status(400).json({ error: 'Fotoğraf dosyası zorunludur' })
     }
 
-    // Tam URL değil GÖRELİ yol saklanır: web localhost'tan, Android
-    // 10.0.2.2'den erişir; host'u istemci kendi tarafında ekler.
-    const imageUrl = `/uploads/${req.file.filename}`
+    // Varsayılan: GÖRELİ yerel yol (web localhost'tan, Android 10.0.2.2'den
+    // erişir; host'u istemci kendi tarafında ekler).
+    let imageUrl = `/uploads/${req.file.filename}`
+
+    // R2 YAPILANDIRILMIŞSA fotoğraf oraya da YANSITILIR ve kaydedilen URL
+    // R2'ninki olur — Render'ın diski ephemeral, bir sonraki deploy yerel
+    // dosyayı sessizce kaybedebilir (bu risk gerçekten yaşandı, bkz. §8
+    // "Fotoğraf depolama"); R2 kopyası buna bağışıktır. YEREL DOSYA SİLİNMEZ:
+    // arka plandaki otomatik analiz (aşağıda) görseli hâlâ YERELDEN okuyor,
+    // bu akışa hiç dokunmadan iki kopyayı birlikte tutmak en düşük riskli
+    // değişiklik. R2 yüklemesi BAŞARISIZ olursa hata YUTULUR ve yerel yol
+    // kullanılmaya devam edilir — WeatherService/GeminiService'teki "isteğe
+    // bağlı zenginleştirme" ilkesiyle aynı: bir bulut deposu sorunu, bir
+    // kıyafet ekleme isteğini asla düşürmemeli.
+    if (this.storageRepository?.isConfigured) {
+      try {
+        const buffer = await fs.promises.readFile(req.file.path)
+        imageUrl = await this.storageRepository.upload(
+          `clothing-items/${req.file.filename}`,
+          buffer,
+          req.file.mimetype,
+        )
+      } catch (error) {
+        console.error('R2 yüklemesi başarısız, yerel yol kullanılacak:', error.message)
+      }
+    }
 
     try {
       const item = await this.clothingItemService.setImage(req.params.id, req.userId, imageUrl)
@@ -249,9 +279,12 @@ class ClothingItemController extends BaseController {
       // gönderilmiştir ve fotoğraf yükleme başarılıdır.
       this.clothingAnalysisService?.analyzeItemInBackground(req.params.id)
     } catch (error) {
-      // Kayıt güncellenemediyse (yetki/doğrulama hatası) diske yazılmış dosya
-      // öksüz kalmamalı.
+      // Kayıt güncellenemediyse (yetki/doğrulama hatası) diske/R2'ye
+      // yazılmış dosya öksüz kalmamalı.
       await removeUploadedFile(req.file.filename)
+      if (this.storageRepository?.isConfigured && imageUrl.startsWith('http')) {
+        await this.storageRepository.remove(`clothing-items/${req.file.filename}`).catch(() => {})
+      }
       this.handleError(error, res)
     }
   }
