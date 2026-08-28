@@ -33,9 +33,20 @@ function resolveSslOption() {
   const certPath = process.env.DB_CA_CERT_PATH || path.join(__dirname, '..', '..', 'certs', 'neon-ca-bundle.pem')
   debug.certPath = certPath
   try {
-    const ca = fs.readFileSync(certPath, 'utf8')
+    const bundle = fs.readFileSync(certPath, 'utf8')
+    // TEK BİRLEŞİK STRING DEĞİL, DİZİ olarak geçiriliyor — Render'da (farklı
+    // Node/OpenSSL sürümü) tek bir string içine art arda eklenmiş birden
+    // fazla PEM bloğu sessizce yalnızca İLKİNİ yükledi (yerelde çalışıyordu,
+    // Render'da "self-signed certificate" ile düşüyordu — /health'teki
+    // certCount doğruydu ama TLS yalnızca ilk sertifikayı kullanıyordu).
+    // `ca: [cert1, cert2, ...]` Node'un resmi olarak önerdiği, sürümden
+    // bağımsız çalışan biçim.
+    const ca = bundle
+      .split(/(?=-----BEGIN CERTIFICATE-----)/)
+      .map((block) => block.trim())
+      .filter(Boolean)
     debug.certRead = true
-    debug.certCount = (ca.match(/BEGIN CERTIFICATE/g) || []).length
+    debug.certCount = ca.length
     resolveSslOption.debug = debug
     return { ca }
   } catch (error) {
