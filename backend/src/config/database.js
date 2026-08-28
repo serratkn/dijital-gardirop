@@ -19,16 +19,30 @@ const { Pool } = require('pg')
 // taşır. Dosya yoksa (`DB_CA_CERT_PATH` boş/geçersizse) sessizce `ssl: true`
 // bırakılır — yerel geliştirme ya da başka bir Postgres sağlayıcısı bundan
 // etkilenmez.
+// GEÇİCİ TEŞHİS — Render'daki canlı bağlantı hatasını /health üzerinden
+// gözlemlemek için (sunucu loglarına erişim yok). Sorun çözülünce
+// `dgSslDebug` ataması ve HealthService'teki okunması kaldırılabilir.
 function resolveSslOption() {
-  if (process.env.DB_SSL !== 'true') return false
+  const debug = { dbSslEnv: process.env.DB_SSL, certPath: null, certRead: false, certError: null, certCount: 0 }
+
+  if (process.env.DB_SSL !== 'true') {
+    resolveSslOption.debug = debug
+    return false
+  }
 
   const certPath = process.env.DB_CA_CERT_PATH || path.join(__dirname, '..', '..', 'certs', 'neon-ca-bundle.pem')
+  debug.certPath = certPath
   try {
     const ca = fs.readFileSync(certPath, 'utf8')
+    debug.certRead = true
+    debug.certCount = (ca.match(/BEGIN CERTIFICATE/g) || []).length
+    resolveSslOption.debug = debug
     return { ca }
-  } catch {
+  } catch (error) {
     // Bundle yok/okunamıyor — yine de bağlan, Node'un kendi kök listesiyle
     // dener (birçok sağlayıcı için zaten yeterlidir).
+    debug.certError = error.message
+    resolveSslOption.debug = debug
     return true
   }
 }
@@ -41,6 +55,8 @@ const pool = new Pool({
   password: process.env.DB_PASSWORD,
   ssl: resolveSslOption(),
 })
+
+pool.dgSslDebug = resolveSslOption.debug
 
 // pg.Pool emits 'error' when an idle client's connection drops (e.g. DB restarts).
 // Without a listener, Node treats it as an unhandled error and kills the process.
