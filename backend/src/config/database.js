@@ -26,7 +26,17 @@ const { Pool } = require('pg')
 // gözlemlemek için (sunucu loglarına erişim yok). Sorun çözülünce
 // `dgSslDebug` ataması ve HealthService'teki okunması kaldırılabilir.
 function resolveSslOption() {
-  const debug = { dbSslEnv: process.env.DB_SSL, certPath: null, certRead: false, certError: null, certCount: 0 }
+  const debug = {
+    dbSslEnv: process.env.DB_SSL,
+    dbHost: process.env.DB_HOST,
+    dbPort: process.env.DB_PORT,
+    dbName: process.env.DB_NAME,
+    dbUser: process.env.DB_USER,
+    certPath: null,
+    certRead: false,
+    certError: null,
+    certCount: 0,
+  }
 
   if (process.env.DB_SSL !== 'true') {
     resolveSslOption.debug = debug
