@@ -1,5 +1,6 @@
 const fs = require('node:fs')
 const path = require('node:path')
+const tls = require('node:tls')
 const { Pool } = require('pg')
 
 // DB_SSL=true olduğunda TLS ile bağlanır (sertifika doğrulaması AÇIK —
@@ -18,7 +19,9 @@ const { Pool } = require('pg')
 // sertifikaları AÇIKÇA sağlamaktı: `certs/neon-ca-bundle.pem` bu zinciri
 // taşır. Dosya yoksa (`DB_CA_CERT_PATH` boş/geçersizse) sessizce `ssl: true`
 // bırakılır — yerel geliştirme ya da başka bir Postgres sağlayıcısı bundan
-// etkilenmez.
+// etkilenmez. **Ekstra sertifikalar Node'un varsayılan kök listesine EKLENİR,
+// onun YERİNE geçmez** — aşağıdaki `tls.rootCertificates` birleşimine bakın;
+// yalnızca ekstra sertifikaları vermek Render'da yetmedi (bkz. altındaki not).
 // GEÇİCİ TEŞHİS — Render'daki canlı bağlantı hatasını /health üzerinden
 // gözlemlemek için (sunucu loglarına erişim yok). Sorun çözülünce
 // `dgSslDebug` ataması ve HealthService'teki okunması kaldırılabilir.
@@ -34,19 +37,26 @@ function resolveSslOption() {
   debug.certPath = certPath
   try {
     const bundle = fs.readFileSync(certPath, 'utf8')
-    // TEK BİRLEŞİK STRING DEĞİL, DİZİ olarak geçiriliyor — Render'da (farklı
-    // Node/OpenSSL sürümü) tek bir string içine art arda eklenmiş birden
-    // fazla PEM bloğu sessizce yalnızca İLKİNİ yükledi (yerelde çalışıyordu,
-    // Render'da "self-signed certificate" ile düşüyordu — /health'teki
-    // certCount doğruydu ama TLS yalnızca ilk sertifikayı kullanıyordu).
-    // `ca: [cert1, cert2, ...]` Node'un resmi olarak önerdiği, sürümden
-    // bağımsız çalışan biçim.
-    const ca = bundle
+    const extraCerts = bundle
       .split(/(?=-----BEGIN CERTIFICATE-----)/)
       .map((block) => block.trim())
       .filter(Boolean)
+    // `ca` verilince Node'un KENDİ varsayılan kök listesinin YERİNE geçer —
+    // yalnızca ekstra sertifikaları vermek Render'da HÂLÂ "self-signed
+    // certificate" ile düşüyordu (dizi biçimine geçmek de tek başına
+    // çözmedi). Olası sebep: Neon'un ucu bir edge/CDN üzerinden farklı
+    // sunuculara göre FARKLI (ama geçerli) zincirler sunabiliyor — yerelde
+    // elle yakalanan TEK zincir Render'ın ağ yolundan görülenle birebir
+    // aynı olmayabilir. Çözüm: Node'un TÜM varsayılan kök listesini
+    // (`tls.rootCertificates`) ekstra sertifikaların YANINA ekleyip
+    // birlikte vermek — bu, `ssl: true`'nun kapsadığı HER ŞEYİ korurken
+    // (ki `ssl: true` zaten çoğu isteği doğruluyordu) yalnızca Render'ın
+    // Node sürümünün henüz tanımadığı yeni kökü de ekliyor. Doğrulama
+    // hâlâ TAM AÇIK (`rejectUnauthorized` kapatılmadı).
+    const ca = [...tls.rootCertificates, ...extraCerts]
     debug.certRead = true
-    debug.certCount = ca.length
+    debug.certCount = extraCerts.length
+    debug.totalTrustedCount = ca.length
     resolveSslOption.debug = debug
     return { ca }
   } catch (error) {
