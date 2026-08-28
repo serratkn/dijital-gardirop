@@ -69,10 +69,18 @@ hız sınırlama), `dotenv`, `@google/genai` (Gemini: görsel analizi + embeddin
 
 ### Veritabanı
 
-PostgreSQL 16 + **pgvector uzantısı**, Docker Compose ile ayağa kalkar
-(imaj: `pgvector/pgvector:pg16`, resmi `postgres:16`'nın üzerine pgvector
-ekleyen bir varyant). Container adı: `dijitalgardirop-db-1`. Kalıcılık
+**Yerel geliştirme:** PostgreSQL 16 + **pgvector uzantısı**, Docker Compose ile
+ayağa kalkar (imaj: `pgvector/pgvector:pg16`, resmi `postgres:16`'nın üzerine
+pgvector ekleyen bir varyant). Container adı: `dijitalgardirop-db-1`. Kalıcılık
 `postgres_data` adlı named volume ile sağlanır.
+
+**Production: Neon** (bkz. §9, 2026-08-28 "Render'dan Neon'a geçiş" kaydı).
+Render'ın ücretsiz Postgres'i 30 gün sonra otomatik siliniyordu — bu risk
+kapatıldı, veritabanı artık Neon'un kalıcı ücretsiz katmanında. Bağlantı
+`DB_SSL=true` ile TLS üzerinden kurulur; sertifika doğrulaması **açıktır**
+(`rejectUnauthorized` kapatılmadı) — bkz. `backend/src/config/database.js` ve
+`backend/certs/neon-ca-bundle.pem`. Vektör deposu (pgvector) AYNI veritabanının
+içinde olduğu için ayrıca taşınmasına gerek kalmadı.
 
 **Vektör depolama AYRI BİR SERVİS DEĞİLDİR** — `clothing_item_embeddings`
 tablosu bu VERİTABANININ İÇİNDE durur (bkz. §9, 2026-08-27 "ChromaDB'den
@@ -342,7 +350,6 @@ olduğu için iskelet oraya taşındı, kombin üretimi istemci tarafında anlı
 | **Fotoğraf boyutlandırma yok** | Yüklenen görsel olduğu gibi saklanır; küçük resim (thumbnail) üretilmez. Native tarafta Capacitor `width: 1600` ile ön küçültme yapar, web'de böyle bir sınır yoktur. |
 | **Selfie'ler R2'ye taşınmadı, hâlâ yalnızca yerel diskte** | Kıyafet fotoğrafları R2'ye yansıtılıyor (bkz. §8) ama selfie'ler BİLEREK bu kapsamın dışında bırakıldı: kıyafet fotoğrafları herkese açık/token'sız servis ediliyor (R2'nin genel URL modeliyle bire bir örtüşüyor), selfie'ler ise özel/token'lı bir uçtan servis ediliyor — R2'nin genel bucket'ını selfie için kullanmak bu güvenlik modelini kırardı. Doğru çözüm (özel bucket + imzalı URL ya da backend proxy) ayrı bir iştir. |
 | **Cloudflare R2 gerçek bir hesapla uçtan uca denenmedi** | Kod tarafı "yapılandırılmamış" durumda tam regresyonla doğrulandı (bkz. §8 "Fotoğraf depolama", `test-storage.js`) ama gerçek bir R2 hesabı/bucket/API token'ı henüz oluşturulmadı — asıl akış (yükle → R2'de gerçekten var mı → sil → gerçekten kalkıyor mu) ve bucket'ın CORS ayarı (paylaşım görseli akışının `fetch` ile fotoğrafı `data:` URI'ye çevirmesi için gerekli) henüz gözlemlenmedi. |
-| **PostgreSQL hâlâ Render'da, Neon'a taşınmadı** | Render'ın ücretsiz Postgres'i 30 gün sonra OTOMATİK siliniyor — bu deploy'dan değil, süre dolumundan kaynaklanan ayrı bir risk. Kullanıcı Neon'a geçmeyi seçti (kredi kartı istemeyen kalıcı ücretsiz katman, pgvector de destekliyor) ama hesap/proje oluşturma adımı henüz TAMAMLANMADI. Vektör deposu (pgvector) zaten Render'daki AYNI Postgres'in içinde olduğu için Neon'a geçildiğinde ayrıca taşınacak — migration `011` o veritabanında da uygulanmalı. |
 | **Yardım & Destek** | "Yakında" sayfasıdır, işlevi yoktur. (**Bildirimler artık gerçek** — bkz. §8 "Bildirimler sayfası".) |
 | **Android paylaşım akışı gerçek cihaz/emülatörde henüz DENENMEDİ** | Kod tarafı tamamlandı: `downloadBlob` artık `Capacitor.isNativePlatform()` ile dallanıyor, Android'de Filesystem + Share ile native paylaşım menüsünü açıyor (bkz. §8). Bu makinede yerel `./gradlew` çağrısı, ortamdaki JDK sürümleriyle (26 ve Android Studio JBR 25) Gradle 8.14.3 uyumsuzluğu yüzünden çalışmıyor (`Unsupported class file major version`) — bu, koddan bağımsız bir ortam sorunu. Doğrulama şu ana kadar yalnızca **kaynak kod seviyesinde** yapıldı (Capacitor'ın `SharePlugin`/`FilesystemPlugin` Android kaynağı okunarak `Directory.Cache` + mevcut `FileProvider` yapılandırmasının doğru çalışacağı doğrulandı) ve **web regresyonuyla** (`<a download>` yolunun bozulmadığı kanıtlandı). Gerçek bir Android Studio/emülatör çalıştırması hâlâ gerekiyor. |
 | **Gemini ücretsiz kotası günde 20 istek** | Ölçüldü (`GenerateRequestsPerDayPerProjectPerModel-FreeTier`, limit 20, `gemini-3.6-flash`). Kota dolduğunda analiz sessizce atlanır ve parça analizsiz kalır; **kendiliğinden yeniden deneyen bir mekanizma yoktur** — `analyze-existing-items.js --uygula` ertesi gün elle çalıştırılır. Gerçek kullanım ücretli plan ister. |
@@ -3014,6 +3021,58 @@ tamamlayıp kaldırıldı:
 
 > Bundan sonraki her çalışma buraya tarihiyle işlenir: eklenen özellikler, düzeltilen
 > hatalar, alınan mimari kararlar. En yeni kayıt en üstte.
+
+### 2026-08-28 — Render'dan Neon'a geçiş (production Postgres artık kalıcı)
+- **Bağlam:** Render'ın ücretsiz Postgres'i 30 gün sonra otomatik siliniyordu
+  (§4 Eksikler'de uzun süre açık kalan bir risk). Kullanıcı hesap açıp Neon'a
+  (kredi kartı istemeyen kalıcı ücretsiz katman, pgvector destekli) geçmeyi
+  seçti; bu çalışma taşımayı ve gerçek cutover'ı (Render'ın canlı env
+  değişkenlerini Neon'a çevirmeyi) tamamladı.
+- **Veri taşıma:** `pg_dump -Fc --no-owner --no-privileges` ile Render'daki
+  tüm şema + veri (7 tablo: `users`, `clothing_items`, `outfits`,
+  `outfit_items`, `categories`, `style_preferences`,
+  `clothing_item_embeddings`) yedeklendi, `pg_restore --no-owner
+  --no-privileges` ile Neon'a geri yüklendi. `--no-owner`/`--no-privileges`
+  ZORUNLUYDU: iki sağlayıcının rol adları farklı (Render'ın
+  `dijital_gardirop_user`'ı ile Neon'un `neondb_owner`'ı).
+- **Neon'un POOLED (`-pooler`) ucu yerine DİREKT uç kullanılıyor.** Pooled
+  bağlantı üzerinden `ALTER ROLE/DATABASE SET search_path` değişiklikleri
+  bazı sorgularda YANSIMADI — PgBouncer'ın bağlantı havuzlaması, halihazırda
+  açık backend bağlantılarına oturum varsayılanlarını her zaman yeniden
+  uygulamıyor. Uygulamanın kendi `pg.Pool`'u zaten kalıcı bir süreç için
+  havuzlama sağladığından Neon'un PgBouncer'ına ayrıca ihtiyaç yok; `DB_HOST`
+  bu yüzden **direkt** ucu (`-pooler` son eki OLMADAN) gösteriyor.
+- **YAKALANAN HATA (asıl cutover engelini oluşturdu) — Render'daki `DB_HOST`
+  ASLA güncellenmemiş, hâlâ eski Render-içi Postgres'in dahili adresini
+  (`dpg-...`) taşıyordu.** `DB_NAME`/`DB_USER` Neon'un değerlerine
+  güncellenmişti ama `DB_HOST` gözden kaçmıştı. Semptom yanıltıcıydı:
+  Render'ın dahili Postgres'i kendinden imzalı bir sertifika kullandığı için
+  hata "self-signed certificate" (Neon'un TLS zinciriyle ilgiliymiş gibi
+  görünen bir mesaj) olarak çıkıyordu. `/health`'e geçici bir teşhis eklenip
+  (`DB_HOST`/`DB_PORT`/`DB_NAME`/`DB_USER` — şifre HARİÇ — döndürülerek) kök
+  neden bulundu; `DB_HOST` düzeltilince bağlantı ANINDA çalıştı. Teşhis kodu
+  sorun çözülünce kaldırıldı.
+- **Bu iz sürerken TLS zinciri için de kalıcı bir sağlamlaştırma yapıldı**
+  (`backend/src/config/database.js`, `backend/certs/neon-ca-bundle.pem`):
+  Neon'un ucu Let's Encrypt'in nispeten yeni bir çapraz-imza kökünden geçiyor
+  ("Root YR") ve bazı Node/OpenSSL sürümleri bunu henüz tanımayabilir.
+  Sertifika doğrulaması **GEVŞETİLMEDİ** (`rejectUnauthorized: false`
+  YAZILMADI) — bunun yerine ara sertifikalar `certs/neon-ca-bundle.pem`'e
+  açıkça eklendi. **Kritik ayrıntı:** bu ekstra sertifikalar Node'un
+  varsayılan kök listesinin YERİNE değil YANINA verilmeli — `ca` seçeneği
+  tek başına verilirse varsayılan listenin TAMAMEN yerini alır (`ca:
+  [...tls.rootCertificates, ...extraCerts]`). Kök sertifika `tls.rootCertificates`'ten
+  alındı, harici bir URL'den İNDİRİLMEDİ.
+- **Doğrulama:** yeniden yazılmış `database.js` ile production'ın TAM
+  bağlantı yapılandırması (Neon direkt uç + `DB_SSL=true`) kullanılarak
+  `test-all-endpoints.js` (77/77) ve `test-auth.js` (71/71) çalıştırıldı;
+  canlı Render API üzerinden gerçek bir kayıt (`POST /auth/register`)
+  atılıp Neon'da doğrudan SQL ile göründüğü doğrulandı, sonra temizlendi.
+  `/api/health` canlıda `{"status":"ok","database":{"connected":true}}`
+  döndürüyor.
+- **Açık iş:** eski Render Postgres kaynağı henüz SİLİNMEDİ — bir süre
+  yedek olarak tutulup cutover'ın günler içinde sorunsuz kaldığı
+  doğrulandıktan sonra kapatılabilir.
 
 ### 2026-08-27 — ChromaDB'den pgvector'a geçiş (vektör deposu artık ayrı bir servis değil)
 - **Bağlam:** Kullanıcı SQL ve vektör veritabanlarını Render'ın dışına, kalıcı
