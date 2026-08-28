@@ -23,11 +23,6 @@ class HealthService {
       status.database.error = error.message
     }
 
-    // GEÇİCİ TEŞHİS — bkz. config/database.js > resolveSslOption yorumu.
-    if (this.healthRepository.pool?.dgSslDebug) {
-      status.database.sslDebug = this.healthRepository.pool.dgSslDebug
-    }
-
     return status
   }
 }
