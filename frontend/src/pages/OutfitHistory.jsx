@@ -12,9 +12,43 @@ import {
   fetchCategories,
   fetchOutfits,
   markOutfitAsWorn,
+  resolveImageUrl,
   toggleOutfitFavorite,
 } from '../lib/api'
 import { toCategoryNameMap } from '../lib/transformers'
+
+// `ClothingCard`'daki aynı desen: bozuk/silinmiş dosyada kırık resim ikonu
+// yerine kategori ikonuna düşülür. Ayrı bir bileşen olarak tutuldu çünkü
+// `imageFailed` state'i her parça için BAĞIMSIZ olmalı — `OutfitCard`
+// içindeki `.map()`'te doğrudan `useState` çağrılamaz.
+function OutfitItemThumb({ item, categoryNames }) {
+  const [imageFailed, setImageFailed] = useState(false)
+  const categoryName = categoryNames.get(item.category_id)
+  const CategoryIcon = CATEGORY_ICONS[categoryName]
+  const photoUrl = imageFailed ? null : resolveImageUrl(item.image_url)
+
+  return (
+    <Link
+      to={`/kiyafet/${item.id}`}
+      className="group overflow-hidden rounded-xl border border-ink/10 transition-colors hover:border-dusty-rose"
+    >
+      <div className="flex h-20 items-center justify-center overflow-hidden bg-warm-gray">
+        {photoUrl ? (
+          <img
+            src={photoUrl}
+            alt={item.name}
+            loading="lazy"
+            onError={() => setImageFailed(true)}
+            className="h-full w-full object-cover"
+          />
+        ) : (
+          CategoryIcon && <CategoryIcon size={20} strokeWidth={1.5} className="text-ink/35" />
+        )}
+      </div>
+      <p className="px-3 py-2 text-xs leading-snug text-ink/70">{item.name}</p>
+    </Link>
+  )
+}
 
 const dateFormatter = new Intl.DateTimeFormat('tr-TR', {
   day: 'numeric',
@@ -85,24 +119,9 @@ function OutfitCard({ outfit, categoryNames, onToggleFavorite, onMarkWorn, onReq
         </p>
       ) : (
         <div className="mt-5 grid grid-cols-2 gap-3 sm:grid-cols-4">
-          {outfit.items.map((item) => {
-            const categoryName = categoryNames.get(item.category_id)
-            const CategoryIcon = CATEGORY_ICONS[categoryName]
-            return (
-              <Link
-                key={item.id}
-                to={`/kiyafet/${item.id}`}
-                className="group overflow-hidden rounded-xl border border-ink/10 transition-colors hover:border-dusty-rose"
-              >
-                <div className="flex h-20 items-center justify-center bg-warm-gray">
-                  {CategoryIcon && (
-                    <CategoryIcon size={20} strokeWidth={1.5} className="text-ink/35" />
-                  )}
-                </div>
-                <p className="px-3 py-2 text-xs leading-snug text-ink/70">{item.name}</p>
-              </Link>
-            )
-          })}
+          {outfit.items.map((item) => (
+            <OutfitItemThumb key={item.id} item={item} categoryNames={categoryNames} />
+          ))}
         </div>
       )}
 
