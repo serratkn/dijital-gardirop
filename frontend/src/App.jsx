@@ -18,7 +18,7 @@ import Profile from './pages/Profile'
 import AccountInfo from './pages/AccountInfo'
 import ChangePassword from './pages/ChangePassword'
 import StylePreferences from './pages/StylePreferences'
-import ComingSoon from './pages/ComingSoon'
+import HelpSupport from './pages/HelpSupport'
 import Premium from './pages/Premium'
 import Notifications from './pages/Notifications'
 import Intro from './pages/Intro'
@@ -160,7 +160,7 @@ function App() {
       <Route path="/profil/bildirimler" element={protectedShell(<Notifications />)} />
       <Route
         path="/profil/yardim-destek"
-        element={protectedShell(<ComingSoon title="Yardım & Destek" />)}
+        element={protectedShell(<HelpSupport />)}
       />
     </Routes>
   )

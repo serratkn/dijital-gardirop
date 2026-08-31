@@ -1,4 +1,4 @@
-const rateLimit = require('express-rate-limit')
+const { rateLimit, ipKeyGenerator } = require('express-rate-limit')
 
 // LOOPBACK'ten (127.0.0.1/::1) gelen istekler authLimiter'dan MUAF tutulur.
 // Bu bir güvenlik açığı DEĞİLDİR: bir saldırgan TCP/IP'nin doğası gereği
@@ -42,7 +42,12 @@ const geminiLimiter = rateLimit({
   limit: 10,
   standardHeaders: true,
   legacyHeaders: false,
-  keyGenerator: (req) => req.userId || req.ip,
+  // `ipKeyGenerator` IPv6 adreslerini alt ağa göre normalize eder — ham
+  // `req.ip` kullanmak aynı /64 bloğundaki farklı IPv6 adreslerinin ayrı
+  // kotalar gibi görünmesine (ve limiti bypass etmesine) yol açabilirdi.
+  // Kullanıcı girişli isteklerde zaten `req.userId` öncelikli, IP yalnızca
+  // (teorik olarak hiç oluşmaması gereken) auth'suz bir çağrı için yedek.
+  keyGenerator: (req) => req.userId || ipKeyGenerator(req.ip),
   message: { error: 'Çok fazla analiz isteği yapıldı. Lütfen bir süre sonra tekrar deneyin.' },
 })
 
