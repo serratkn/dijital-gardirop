@@ -45,6 +45,16 @@ const DEFAULT_ALLOWED_ORIGINS = [
   'capacitor://localhost', // Capacitor iOS varsayılan şeması
 ]
 
+// YAKALANAN HATA — Vercel'in bu proje için verdiği URL HER YENİ DEPLOY'DA
+// değişebiliyor (`dijital-gardirop-<rastgele-hash>-<kullanıcı>.vercel.app`
+// biçiminde, "Production" olarak işaretlenmiş deployment'ın kendi tekil
+// adresi bu). Tek bir sabit URL'i .env'e yazmak her deploy'da yeniden
+// kırılırdı — bunun yerine bu projenin TÜM Vercel alt alan adları
+// (`dijital-gardirop-...vercel.app`) bir desenle kabul ediliyor. Yalnızca
+// `https://dijital-gardirop-*.vercel.app` desenine uyanlar geçer — genel bir
+// `*.vercel.app` değil, bu projenin kendi ad alanına sınırlı.
+const VERCEL_PREVIEW_ORIGIN_PATTERN = /^https:\/\/dijital-gardirop-[a-z0-9-]+\.vercel\.app$/
+
 function resolveAllowedOrigins() {
   const fromEnv = (process.env.CORS_ALLOWED_ORIGINS || '')
     .split(',')
@@ -62,7 +72,7 @@ app.use(
       // Origin header'ı OLMAYAN istekler (curl, sunucu-sunucu çağrıları,
       // Postman) reddedilmez: CORS zaten yalnızca TARAYICI kaynaklı isteklere
       // uygulanan bir tarayıcı davranışıdır, bu istemciler onun kapsamı dışında.
-      if (!origin || allowedOrigins.includes(origin)) {
+      if (!origin || allowedOrigins.includes(origin) || VERCEL_PREVIEW_ORIGIN_PATTERN.test(origin)) {
         callback(null, true)
         return
       }
