@@ -330,6 +330,10 @@ olduğu için iskelet oraya taşındı, kombin üretimi istemci tarafında anlı
   ve (kullanıcının şehri varsa) hava gerçekten soğukken bir uyarı gösterir; ikisi de
   yoksa "her şey yolunda" der. **Push/anlık bildirim DEĞİLDİR** — yalnızca sayfa
   açıldığında var olan veriden hesaplanan bir özet
+- **Yardım & Destek** — Profil > Yardım & Destek artık gerçek: beş soruluk bir SSS
+  (native `<details>`/`<summary>` ile açılır-kapanır, ek state/kütüphane yok) ve
+  bir "Bize Ulaş" mailto kartı. Uygulamadaki son `ComingSoon` yer tutucusuydu;
+  kaldırıldı
 - **Kullanım başına maliyet** — parçaya isteğe bağlı bir satın alma fiyatı eklenir;
   Kıyafet Detay'da "kullanım başına X ₺" (fiyat / o parçanın geçtiği TÜM kombinlerin
   toplam giyilme sayısı) gösterilir. Fiyat yoksa ya da parça hiç giyilmediyse bölüm
@@ -350,7 +354,6 @@ olduğu için iskelet oraya taşındı, kombin üretimi istemci tarafında anlı
 | **Fotoğraf boyutlandırma yok** | Yüklenen görsel olduğu gibi saklanır; küçük resim (thumbnail) üretilmez. Native tarafta Capacitor `width: 1600` ile ön küçültme yapar, web'de böyle bir sınır yoktur. |
 | **Selfie'ler R2'ye taşınmadı, hâlâ yalnızca yerel diskte** | Kıyafet fotoğrafları R2'ye yansıtılıyor (bkz. §8) ama selfie'ler BİLEREK bu kapsamın dışında bırakıldı: kıyafet fotoğrafları herkese açık/token'sız servis ediliyor (R2'nin genel URL modeliyle bire bir örtüşüyor), selfie'ler ise özel/token'lı bir uçtan servis ediliyor — R2'nin genel bucket'ını selfie için kullanmak bu güvenlik modelini kırardı. Doğru çözüm (özel bucket + imzalı URL ya da backend proxy) ayrı bir iştir. |
 | **Cloudflare R2 gerçek bir hesapla uçtan uca denenmedi** | Kod tarafı "yapılandırılmamış" durumda tam regresyonla doğrulandı (bkz. §8 "Fotoğraf depolama", `test-storage.js`) ama gerçek bir R2 hesabı/bucket/API token'ı henüz oluşturulmadı — asıl akış (yükle → R2'de gerçekten var mı → sil → gerçekten kalkıyor mu) ve bucket'ın CORS ayarı (paylaşım görseli akışının `fetch` ile fotoğrafı `data:` URI'ye çevirmesi için gerekli) henüz gözlemlenmedi. |
-| **Yardım & Destek** | "Yakında" sayfasıdır, işlevi yoktur. (**Bildirimler artık gerçek** — bkz. §8 "Bildirimler sayfası".) |
 | **Android paylaşım akışı gerçek cihaz/emülatörde henüz DENENMEDİ** | Kod tarafı tamamlandı: `downloadBlob` artık `Capacitor.isNativePlatform()` ile dallanıyor, Android'de Filesystem + Share ile native paylaşım menüsünü açıyor (bkz. §8). Bu makinede yerel `./gradlew` çağrısı, ortamdaki JDK sürümleriyle (26 ve Android Studio JBR 25) Gradle 8.14.3 uyumsuzluğu yüzünden çalışmıyor (`Unsupported class file major version`) — bu, koddan bağımsız bir ortam sorunu. Doğrulama şu ana kadar yalnızca **kaynak kod seviyesinde** yapıldı (Capacitor'ın `SharePlugin`/`FilesystemPlugin` Android kaynağı okunarak `Directory.Cache` + mevcut `FileProvider` yapılandırmasının doğru çalışacağı doğrulandı) ve **web regresyonuyla** (`<a download>` yolunun bozulmadığı kanıtlandı). Gerçek bir Android Studio/emülatör çalıştırması hâlâ gerekiyor. |
 | **Gemini ücretsiz kotası günde 20 istek** | Ölçüldü (`GenerateRequestsPerDayPerProjectPerModel-FreeTier`, limit 20, `gemini-3.6-flash`). Kota dolduğunda analiz sessizce atlanır ve parça analizsiz kalır; **kendiliğinden yeniden deneyen bir mekanizma yoktur** — `analyze-existing-items.js --uygula` ertesi gün elle çalıştırılır. Gerçek kullanım ücretli plan ister. |
 | **Fotoğraf değişince analiz KENDİLİĞİNDEN güncellenmez** | Maliyet koruması "dolu `ai_analysis` varsa tekrar analiz etme" der. Artık **elle tetiklenebiliyor**: Kıyafet Detay'daki "Yeniden Analiz Et" düğmesi (`POST /clothing-items/:id/analyze`) ve fotoğraf değiştirildiğinde çıkan hatırlatma. Otomatik yapılmıyor çünkü her çağrı gerçek para harcıyor. |
@@ -3021,6 +3024,58 @@ tamamlayıp kaldırıldı:
 
 > Bundan sonraki her çalışma buraya tarihiyle işlenir: eklenen özellikler, düzeltilen
 > hatalar, alınan mimari kararlar. En yeni kayıt en üstte.
+
+### 2026-08-31 — Sunum öncesi cila: Yardım & Destek gerçek sayfaya döndü, küçük düzeltmeler
+- **Bağlam:** Proje 4 gün içinde sunulacak; kullanıcı "büyük değişiklik yapmadan
+  küçük eksiklikleri hallet" dedi. Önce Profil'deki Premium/Bildirimler'in
+  "tıklanamıyor" gibi göründüğü iddiası araştırıldı — **hem yerel hem CANLI
+  (Vercel + Render) ortamda uçtan uca test edildi, ikisi de sorunsuz
+  çalışıyordu** (gerçek bir kayıt akışıyla, Playwright + sistem Chrome):
+  Premium kartı `/profil/premium`'a, Bildirimler `/profil/bildirimler`'e
+  doğru gidiyor, konsol hatası yok, CORS doğru yapılandırılmış. Kök neden
+  bulunamadı — muhtemelen kullanıcının o an baktığı tarayıcı sekmesi/önbellek
+  kaynaklı geçici bir durumdu.
+- **Bu incelemede GERÇEK bir eksiklik bulundu ve düzeltildi: `/profil/yardim-destek`
+  uygulamadaki SON `ComingSoon` yer tutucusuydu** (`App.jsx`'teki tüm rotalar
+  tek tek gözden geçirilerek doğrulandı — başka hiçbir placeholder rota kalmamıştı).
+  Yeni `pages/HelpSupport.jsx`: beş soruluk bir SSS (native `<details>`/
+  `<summary>` ile açılır-kapanır — yeni bir state/kütüphane GEREKMEDİ) ve bir
+  "Bize Ulaş" mailto kartı. `ComingSoon.jsx` artık hiçbir yerden kullanılmadığı
+  için silindi. Açık/kapalı, karanlık mod ve 390px mobilde gerçek tarayıcıda
+  doğrulandı (Playwright + sistem Chrome): temiz konsol, taşma yok.
+- **`frontend/index.html`'deki `<html lang="en">` → `lang="tr"` düzeltildi.**
+  Uygulamanın tamamı Türkçe (CLAUDE.md'nin kendi kuralı) ama kök etiket
+  yanlışlıkla İngilizce kalmıştı — ekran okuyucu telaffuzunu ve tarayıcı yazım
+  denetimini etkiliyordu.
+- **`geminiLimiter`'ın gürültülü başlangıç uyarısı düzeltildi.** Sunucu her
+  açılışında `middleware/rateLimiters.js` konsola bir `ValidationError`
+  basıyordu (`ERR_ERL_KEY_GEN_IPV6`) — **gerçek bir çökme DEĞİLDİ**
+  (express-rate-limit bu hatayı içeride yakalayıp yalnızca logluyor, asla
+  fırlatmıyor) ama gürültülüydü ve ilk bakışta bir çökme gibi okunuyordu.
+  Sebep: `keyGenerator: (req) => req.userId || req.ip` — kütüphane özel
+  `keyGenerator` fonksiyonlarının IPv6 alt ağını doğru ele almasını (kendi
+  `ipKeyGenerator` yardımcısıyla) zorunlu tutuyor. `req.ip` çağrısı
+  `ipKeyGenerator(req.ip)` ile değiştirildi; artık temiz açılıyor.
+- **Production demo verisi hazırlandı (kod değişikliği DEĞİL, veri
+  operasyonu):** gerçek demo hesabının (`deneme@gmail.com`, Neon) 20 parçası
+  da analiz edilmişti ama **hiçbirinin embedding'i yoktu** — yani Kombin
+  Öner bu hesapta HER ZAMAN sessizce rastgele seçime düşüyor, "Tarzına göre
+  seçildi" rozeti hiç çıkmıyordu. `test-scripts/create-embeddings.js --uygula`
+  production Neon'a karşı çalıştırılıp 20/20 embedding üretildi (0 atlandı,
+  0 başarısız) — artık RAG akışı bu hesapta gerçekten çalışıyor.
+- **Regresyon:** `test-all-endpoints.js` 77/77 (yerel), lint + build temiz.
+- **AÇIK RİSKLER — kod tarafında düzeltilemeyen, kullanıcının kendisinin
+  ele alması gereken sunum riskleri:**
+  1. **Şifre sıfırlama e-postası GERÇEK bir kullanıcıya hâlâ denenmedi**
+     (Resend sandbox kısıtı — bkz. §4 Eksikler). Sunumda canlı "şifremi
+     unuttum" göstermeyi planlıyorsan bu YALNIZCA Resend hesabının kendi
+     sahibinin e-postasına gidiyor; başka bir e-postayla denenirse sessizce
+     hiçbir şey gelmez (ama uygulama yine de "kontrol et" ekranını gösterir
+     — enumeration önleme ilkesi gereği, bkz. §8).
+  2. **Android APK gerçek cihaz/emülatörde hâlâ denenmedi** — bu makinedeki
+     JDK/Gradle sürüm uyuşmazlığı yüzünden (`./gradlew` çalışmıyor, bkz. §7).
+     Sunumda mobil demo planlanıyorsa ayrı bir ortamda (uyumlu JDK 17/21
+     kurulu bir makinede) önceden denenmeli.
 
 ### 2026-08-28 — Render'dan Neon'a geçiş (production Postgres artık kalıcı)
 - **Bağlam:** Render'ın ücretsiz Postgres'i 30 gün sonra otomatik siliniyordu
