@@ -734,6 +734,81 @@ console.log('    (bkz. deneme@gmail.com gardırobu: sneaker + terlik + babet + s
     )
   }
 
+  console.log('\n   c3) preferSportyStyle — GERÇEK VAKA: "spor" yazınca eşofman DEĞİL etek seçiliyordu')
+  console.log('       (deneme@gmail.com, 2026-09-01: "zara esofman" [Spor] yerine "zara sort etek"')
+  console.log('       [Günlük] çıktı — ikisi de preferFormalStyle\'a göre "resmi değil", aralarında')
+  console.log('       ayrım yapan bir katman yoktu.)')
+  {
+    const esofman = parca({
+      name: 'zara esofman',
+      category: 'Alt',
+      aiAnalysis: { veri: { stil: 'Spor', genel_aciklama: 'Bağcıklı bol paça eşofman altı, spor bir görünüm.' } },
+    })
+    const sortEtek = parca({
+      name: 'zara sort etek',
+      category: 'Alt',
+      aiAnalysis: { veri: { stil: 'Günlük', genel_aciklama: 'Gri yıkamalı mini kot etek, günlük stiller için.' } },
+    })
+    const sporContext = createMoodContext({
+      occasion: 'Spor',
+      stil_tercihi: 'Spor',
+      kacinilmasi_gerekenler: [],
+    })
+
+    const seed = parca({ name: 'seed-ust', category: 'Üst' })
+    // Gerçek vakadaki sıra: vektör benzerliği etek'i eşofmandan ÖNde getiriyordu.
+    const havuz = new Map([['Alt', [sortEtek, esofman]]])
+    const cleanItems = [seed, sortEtek, esofman]
+
+    const sonuc = buildOutfitFromCandidates({
+      seedItem: seed,
+      candidatesByCategory: havuz,
+      cleanItems,
+      seasons: null,
+      moodContext: sporContext,
+    })
+    const secilenAlt = sonuc.items.find((item) => item.category === 'Alt')?.name
+    check(
+      'KRİTİK — "Spor" stilTercihiyle GERÇEKTEN spor etiketli eşofman seçiliyor (etek DEĞİL)',
+      secilenAlt === 'zara esofman',
+      secilenAlt,
+    )
+
+    // Regresyon — yalnızca "Rahat" (spor-spesifik olmayan) stilTercihiyle bu
+    // dar katman DEVREYE GİRMEMELİ; preferFormalStyle'ın kendi kararına
+    // (ikisi de günlük, vektör sırası korunur) karışılmamalı.
+    const rahatContext = createMoodContext({
+      occasion: 'Buluşma',
+      stil_tercihi: 'Rahat',
+      kacinilmasi_gerekenler: [],
+    })
+    const sonuc2 = buildOutfitFromCandidates({
+      seedItem: seed,
+      candidatesByCategory: havuz,
+      cleanItems,
+      seasons: null,
+      moodContext: rahatContext,
+    })
+    const secilenAlt2 = sonuc2.items.find((item) => item.category === 'Alt')?.name
+    check(
+      'Yalnızca "Rahat" (spor-spesifik DEĞİL) iken dar katman devreye girmiyor — vektör sırası korunuyor',
+      secilenAlt2 === 'zara sort etek',
+      secilenAlt2,
+    )
+
+    // Regresyon: moodContext yokken hiç etkilenmiyor.
+    const sonuc3 = buildOutfitFromCandidates({
+      seedItem: seed,
+      candidatesByCategory: havuz,
+      cleanItems,
+      seasons: null,
+    })
+    check(
+      'moodContext YOKKEN preferSportyStyle devreye girmiyor — vektör sırası (etek) korunuyor',
+      sonuc3.items.find((item) => item.category === 'Alt')?.name === 'zara sort etek',
+    )
+  }
+
   console.log('\n   d) preferAvoidingKeywords — ÖNCELİKLENDİRİR, ELEMEZ')
   {
     const seed = parca({ name: 'seed-ust', category: 'Üst' })

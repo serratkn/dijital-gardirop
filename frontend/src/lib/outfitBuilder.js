@@ -296,17 +296,61 @@ function preferFormalStyle(pool, category, moodContext) {
   return pool
 }
 
+// YAKALANAN İNCE HATA (2026-09-01, gerçek kullanım) — "spor" serbest metniyle
+// istendiğinde Alt slotu "zara esofman" (stil: Spor) yerine "zara sort etek"
+// (stil: Günlük) seçti. preferFormalStyle'ın simetrik yönü İKİSİNİ DE aynı
+// kovaya (genelFormallik() === false, "resmi değil") koyuyor — resmi/günlük
+// EKSENİNDE ikisi de aynı, aralarında ayrım yapan bir üçüncü boyut yok.
+// Bu yüzden BAĞIMSIZ, DAHA DAR bir katman eklendi: stilTercihi açıkça
+// "spor/sportif" diyorsa (yalnızca genel "günlük/rahat" değil), SPESİFİK
+// olarak spor etiketli parçalar (varsa) öne alınır. preferFormalStyle'ın
+// SONRASINDA çalışır — onun ürettiği (zaten resmi-olmayan) havuzu daha da
+// daraltır, onunla ÇAKIŞMAZ.
+const SPORTIF_STIL_TERCIHI_DESENI = /\bspor\b|\bsportif\b|\bantrenman\b|\begzersiz\b|\bkoşu\b/i
+
+function stilTercihiSportifMi(stilTercihi) {
+  return Boolean(stilTercihi) && SPORTIF_STIL_TERCIHI_DESENI.test(String(stilTercihi).toLocaleLowerCase('tr-TR'))
+}
+
+// true = açıkça spor/sportif görünüyor, false = bilinmiyor (genelFormallik'in
+// aksine burada "false" YOK — "spor değil" ile "bilinmiyor" ayrımı bu dar
+// katman için gerekmiyor, yalnızca "spor OLDUĞU KESİN mi" sorusuna bakılıyor).
+function sportifMi(item) {
+  const veri = item?.aiAnalysis?.veri
+  if (!veri) return false
+
+  const metin = [veri.stil, veri.genel_aciklama, veri.alt_kategori, veri.kesim_tipi]
+    .filter(Boolean)
+    .join(' ')
+    .toLocaleLowerCase('tr-TR')
+
+  return SPORTIF_STIL_TERCIHI_DESENI.test(metin)
+}
+
+// preferFormalStyle ile AYNI "önceliklendir, eleme" deseni — spor etiketli
+// aday yoksa havuz DEĞİŞMEDEN döner (hiçbir şey elenmez).
+function preferSportyStyle(pool, category, moodContext) {
+  if (!GENEL_FORMAL_KATEGORILER.has(category)) return pool
+  if (!stilTercihiSportifMi(moodContext?.stilTercihi)) return pool
+
+  const sportifler = pool.filter((item) => sportifMi(item))
+  return sportifler.length > 0 ? sportifler : pool
+}
+
 // Bir kategori havuzuna TÜM mood-bazlı önceliklendirmeyi uygular: sırasıyla
 // kaçınılan kelimeler, sonra resmi ayakkabı kuralı (yalnızca Ayakkabı'da
 // gerçek etkisi olur), sonra genel resmiyet kuralı (Üst/Alt/Elbise/Çanta'da
 // gerçek etkisi olur — ikisi birbirini dışlar, aynı kategori için ikisi de
-// no-op olabilir ama asla ikisi de gerçek filtre uygulamaz). moodContext
-// yoksa pool DEĞİŞMEDEN döner.
+// no-op olabilir ama asla ikisi de gerçek filtre uygulamaz), son olarak
+// spor-spesifik daraltma (yalnızca stilTercihi AÇIKÇA "spor" derse devreye
+// girer, genel resmiyet katmanının ürettiği havuzu daha da daraltır).
+// moodContext yoksa pool DEĞİŞMEDEN döner.
 function applyMoodPreferences(pool, category, moodContext) {
   if (!moodContext) return pool
   const kelimeSuzulmus = preferAvoidingKeywords(pool, moodContext.kacinilanKelimeler)
   const ayakkabiSuzulmus = preferFormalShoes(kelimeSuzulmus, category, moodContext)
-  return preferFormalStyle(ayakkabiSuzulmus, category, moodContext)
+  const genelSuzulmus = preferFormalStyle(ayakkabiSuzulmus, category, moodContext)
+  return preferSportyStyle(genelSuzulmus, category, moodContext)
 }
 
 // --- Elbise: Üst+Alt ikilisine ALTERNATİF bir "gövde" seçimi ---
