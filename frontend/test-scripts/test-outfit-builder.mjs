@@ -637,6 +637,103 @@ console.log('    (bkz. deneme@gmail.com gardırobu: sneaker + terlik + babet + s
     )
   }
 
+  console.log('\n   c2) preferFormalShoes/preferFormalStyle — SİMETRİK yön (2026-09-01, "deniz kenarı" vakası)')
+  console.log('       Resmi durumda günlük ayakkabıdan kaçınma kuralının TERSİ: günlük/plaj')
+  console.log('       bağlamında resmi ayakkabıdan kaçınma. Öncesinde bu yön HİÇ yoktu.')
+  {
+    const gunlukContext = createMoodContext({
+      occasion: 'Diğer', // "deniz kenarı" gibi 6 standart occasion'a uymayan istekler
+      stil_tercihi: 'Rahat ve Yazlık',
+      kacinilmasi_gerekenler: [],
+    })
+
+    const seed = parca({ name: 'seed-ust', category: 'Üst' })
+    const cleanItems = [seed, terlik, sneaker, stiletto, babet]
+    const havuz = new Map([['Ayakkabı', [babet, terlik, sneaker, stiletto]]]) // babet/terlik'e YAKIN, gerçek vakadaki sıra
+
+    const sonuc = buildOutfitFromCandidates({
+      seedItem: seed,
+      candidatesByCategory: havuz,
+      cleanItems,
+      seasons: null,
+      moodContext: gunlukContext,
+    })
+    const secilenAyakkabi = sonuc.items.find((item) => item.category === 'Ayakkabı')?.name
+    check(
+      'KRİTİK — "Rahat ve Yazlık" + occasion "Diğer" iken stiletto SEÇİLMİYOR',
+      secilenAyakkabi !== 'stradivarius bordo stiletto',
+      secilenAyakkabi,
+    )
+    check(
+      'Bunun yerine GÜNLÜK etiketli bir ayakkabı (terlik/sneaker) seçildi',
+      secilenAyakkabi === 'parmak arası terlik' || secilenAyakkabi === 'New balance 530',
+      secilenAyakkabi,
+    )
+
+    // occasion'DAN BAĞIMSIZ çalıştığını doğrula: "Akşam yemeğine gidiyorum ama
+    // rahat olsun" — occasion formal olsa bile stilTercihi günlük sinyali
+    // veriyorsa yön YİNE günlüğe döner (preferFormalShoes'un ANA dalıyla
+    // ÇAKIŞMADIĞINI kanıtlar — ikisi karşılıklı dışlayıcı olmalı).
+    const rahatAmaAksamContext = createMoodContext({
+      occasion: 'Akşam Yemeği',
+      stil_tercihi: 'Rahat',
+      kacinilmasi_gerekenler: [],
+    })
+    const sonuc2 = buildOutfitFromCandidates({
+      seedItem: seed,
+      candidatesByCategory: havuz,
+      cleanItems,
+      seasons: null,
+      moodContext: rahatAmaAksamContext,
+    })
+    const secilen2 = sonuc2.items.find((item) => item.category === 'Ayakkabı')?.name
+    check(
+      'occasion "Akşam Yemeği" OLSA BİLE stilTercihi "Rahat" iken stiletto seçilmiyor',
+      secilen2 !== 'stradivarius bordo stiletto',
+      secilen2,
+    )
+
+    // Genel giyim (Üst/Alt/Elbise/Çanta) için de AYNI simetrik yön çalışmalı.
+    const klasikCanta = parca({
+      name: 'klasik deri çanta',
+      category: 'Çanta',
+      aiAnalysis: { veri: { stil: 'Klasik', canta_turu: 'El Çantası' } },
+    })
+    const plajCantasi = parca({
+      name: 'hasır plaj çantası',
+      category: 'Çanta',
+      aiAnalysis: { veri: { stil: 'Günlük', canta_turu: 'Hasır Çanta' } },
+    })
+    const cantaHavuzu = new Map([['Çanta', [klasikCanta, plajCantasi]]])
+    const cantaCleanItems = [seed, klasikCanta, plajCantasi]
+    const cantaSonuc = buildOutfitFromCandidates({
+      seedItem: seed,
+      candidatesByCategory: cantaHavuzu,
+      cleanItems: cantaCleanItems,
+      seasons: null,
+      moodContext: gunlukContext,
+    })
+    const secilenCanta = cantaSonuc.items.find((item) => item.category === 'Çanta')?.name
+    check(
+      'preferFormalStyle SİMETRİK yön — günlük bağlamda klasik deri çanta geri itiliyor',
+      secilenCanta === 'hasır plaj çantası',
+      secilenCanta,
+    )
+
+    // Regresyon: moodContext YOKKEN yeni dal hiç tetiklenmiyor.
+    const sonucMoodsuz = buildOutfitFromCandidates({
+      seedItem: seed,
+      candidatesByCategory: havuz,
+      cleanItems,
+      seasons: null,
+    })
+    check(
+      'moodContext YOKKEN simetrik yön devreye girmiyor (en yakın aday — babet — aynen seçiliyor)',
+      sonucMoodsuz.items.find((item) => item.category === 'Ayakkabı')?.name === 'stradivarius babet',
+      sonucMoodsuz.items.find((item) => item.category === 'Ayakkabı')?.name,
+    )
+  }
+
   console.log('\n   d) preferAvoidingKeywords — ÖNCELİKLENDİRİR, ELEMEZ')
   {
     const seed = parca({ name: 'seed-ust', category: 'Üst' })

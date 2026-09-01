@@ -179,6 +179,22 @@ function stilTercihiResmiMi(stilTercihi) {
   return Boolean(stilTercihi) && RESMI_STIL_TERCIHI_DESENI.test(String(stilTercihi).toLocaleLowerCase('tr-TR'))
 }
 
+// SİMETRİK YÖN (2026-09-01 eklendi) — "resmi durumda günlük ayakkabıdan
+// kaçın" kuralı VARDI ama tersi ("günlük/plaj bağlamında resmi ayakkabıdan
+// kaçın") HİÇ YOKTU. Gerçek vakada görüldü: "deniz kenarı" gibi altı standart
+// occasion'a UYMAYAN (occasion "Diğer"e düşen) bir istek, saf embedding
+// benzerliğine bırakılınca topuklu bir ayakkabıyı rahatça seçebiliyordu —
+// occasion bazlı FORMAL_OCCASIONS kontrolü bu durumda hiç devreye girmiyordu.
+// Occasion'a göre DEĞİL, doğrudan stilTercihi'nin İÇERİĞİNE göre tetiklenir
+// (occasion'dan bağımsız): "Akşam yemeğine gidiyorum ama rahat olsun" gibi
+// bir istekte de doğru yön budur, occasion formal olsa bile.
+const GUNLUK_STIL_TERCIHI_DESENI =
+  /\bgünlük\b|\bgündelik\b|\brahat\b|\bspor\b|\bcasual\b|\bplaj\b|\btatil\b|\byazlık\b|\byazlik\b/i
+
+function stilTercihiGunlukMu(stilTercihi) {
+  return Boolean(stilTercihi) && GUNLUK_STIL_TERCIHI_DESENI.test(String(stilTercihi).toLocaleLowerCase('tr-TR'))
+}
+
 // true = resmi görünüyor, false = günlük/spor görünüyor, null = bilinmiyor
 // (ai_analysis yok ya da hiçbir desene uymuyor).
 function ayakkabiFormalligi(item) {
@@ -200,16 +216,27 @@ function ayakkabiFormalligi(item) {
 // bir şeyler" gibi durumlarda gereksiz yere sneaker'ları arkaya atmamalı.
 function preferFormalShoes(pool, category, moodContext) {
   if (category !== 'Ayakkabı') return pool
-  if (!stilTercihiResmiMi(moodContext?.stilTercihi)) return pool
-  if (!FORMAL_OCCASIONS.includes(moodContext.occasion)) return pool
 
-  const resmiler = pool.filter((item) => ayakkabiFormalligi(item) === true)
-  if (resmiler.length > 0) return resmiler
+  if (stilTercihiResmiMi(moodContext?.stilTercihi) && FORMAL_OCCASIONS.includes(moodContext?.occasion)) {
+    const resmiler = pool.filter((item) => ayakkabiFormalligi(item) === true)
+    if (resmiler.length > 0) return resmiler
 
-  // Açıkça "resmi" etiketli bir şey yoksa, en azından KESİNLİKLE günlük
-  // olarak işaretlenmiş olanları (bilinen en kötü seçenekler) arkaya at.
-  const gunlukOlmayanlar = pool.filter((item) => ayakkabiFormalligi(item) !== false)
-  return gunlukOlmayanlar.length > 0 ? gunlukOlmayanlar : pool
+    // Açıkça "resmi" etiketli bir şey yoksa, en azından KESİNLİKLE günlük
+    // olarak işaretlenmiş olanları (bilinen en kötü seçenekler) arkaya at.
+    const gunlukOlmayanlar = pool.filter((item) => ayakkabiFormalligi(item) !== false)
+    return gunlukOlmayanlar.length > 0 ? gunlukOlmayanlar : pool
+  }
+
+  // Simetrik yön — bkz. stilTercihiGunlukMu tanımındaki not.
+  if (stilTercihiGunlukMu(moodContext?.stilTercihi)) {
+    const gunlukler = pool.filter((item) => ayakkabiFormalligi(item) === false)
+    if (gunlukler.length > 0) return gunlukler
+
+    const resmiOlmayanlar = pool.filter((item) => ayakkabiFormalligi(item) !== true)
+    return resmiOlmayanlar.length > 0 ? resmiOlmayanlar : pool
+  }
+
+  return pool
 }
 
 // preferFormalShoes'un GENELLEŞTİRİLMİŞ hâli — Üst, Alt, Elbise ve Çanta
@@ -248,14 +275,25 @@ function genelFormallik(item) {
 // occasion + GERÇEKTEN resmiyet isteyen bir stil tercihi varken devreye girer.
 function preferFormalStyle(pool, category, moodContext) {
   if (!GENEL_FORMAL_KATEGORILER.has(category)) return pool
-  if (!stilTercihiResmiMi(moodContext?.stilTercihi)) return pool
-  if (!FORMAL_OCCASIONS.includes(moodContext.occasion)) return pool
 
-  const resmiler = pool.filter((item) => genelFormallik(item) === true)
-  if (resmiler.length > 0) return resmiler
+  if (stilTercihiResmiMi(moodContext?.stilTercihi) && FORMAL_OCCASIONS.includes(moodContext?.occasion)) {
+    const resmiler = pool.filter((item) => genelFormallik(item) === true)
+    if (resmiler.length > 0) return resmiler
 
-  const gunlukOlmayanlar = pool.filter((item) => genelFormallik(item) !== false)
-  return gunlukOlmayanlar.length > 0 ? gunlukOlmayanlar : pool
+    const gunlukOlmayanlar = pool.filter((item) => genelFormallik(item) !== false)
+    return gunlukOlmayanlar.length > 0 ? gunlukOlmayanlar : pool
+  }
+
+  // Simetrik yön — bkz. stilTercihiGunlukMu tanımındaki not.
+  if (stilTercihiGunlukMu(moodContext?.stilTercihi)) {
+    const gunlukler = pool.filter((item) => genelFormallik(item) === false)
+    if (gunlukler.length > 0) return gunlukler
+
+    const resmiOlmayanlar = pool.filter((item) => genelFormallik(item) !== true)
+    return resmiOlmayanlar.length > 0 ? resmiOlmayanlar : pool
+  }
+
+  return pool
 }
 
 // Bir kategori havuzuna TÜM mood-bazlı önceliklendirmeyi uygular: sırasıyla
