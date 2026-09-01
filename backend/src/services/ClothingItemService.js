@@ -168,17 +168,21 @@ class ClothingItemService {
   // analizi (ClothingAnalysisService) için okunan yerel GEÇİCİ kopyası da
   // aynı dosya adını taşır (bkz. §8 "Fotoğraf depolama — Cloudflare R2"),
   // bu yüzden tek bir silme çağrısı ikisini de temizler. R2 silme yalnızca
-  // `imageUrl` mutlak bir HTTP(S) adresiyse denenir (yerel `/uploads/...`
+  // `imageUrl` `/r2-images/` ile başlıyorsa denenir (yerel `/uploads/...`
   // yolları R2'ye hiç yüklenmemiştir) ve BAŞARISIZLIĞI FIRLATILMAZ — bir
   // R2 objesinin silinememesi, kıyafetin kendisinin silinmesini engellememeli
   // (WeatherService/GeminiService'teki "isteğe bağlı zenginleştirme hata
   // yolu" ilkesiyle aynı ruh, burada "temizlik" için uygulanıyor).
+  //
+  // NOT — `imageUrl` artık R2'nin kendi (kararsız çıkan) r2.dev genel adresi
+  // DEĞİL, backend'in KENDİ `/r2-images/<key>` vekil (proxy) yoludur (bkz.
+  // StorageRepository.js ve server.js > `/r2-images` ucu).
   async #removeStoredImage(imageUrl) {
     if (!imageUrl) return
 
     await removeUploadedFile(fileNameFromImageUrl(imageUrl))
 
-    if (this.storageRepository?.isConfigured && /^https?:\/\//i.test(imageUrl)) {
+    if (this.storageRepository?.isConfigured && imageUrl.startsWith('/r2-images/')) {
       const key = `clothing-items/${fileNameFromImageUrl(imageUrl)}`
       try {
         await this.storageRepository.remove(key)

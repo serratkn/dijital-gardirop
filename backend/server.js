@@ -8,6 +8,7 @@ const pool = require('./src/config/database')
 const { UPLOAD_DIR } = require('./src/config/upload')
 const UserRepository = require('./src/repositories/UserRepository')
 const EmailRepository = require('./src/repositories/EmailRepository')
+const StorageRepository = require('./src/repositories/StorageRepository')
 const { AuthService } = require('./src/services/AuthService')
 const createAuthenticate = require('./src/middleware/authenticate')
 const createAuthRoutes = require('./src/routes/authRoutes')
@@ -108,6 +109,38 @@ app.use('/uploads/selfies', (req, res) => {
 // olduğu için tahmin edilemez, ayrıca <img> etiketleri Authorization başlığı
 // gönderemez. (uploads/selfies/ yukarıdaki blokla bu middleware'e hiç ulaşmaz.)
 app.use('/uploads', express.static(UPLOAD_DIR, { maxAge: '1d' }))
+
+const storageRepository = new StorageRepository()
+
+// R2'deki fotoğraflar Cloudflare'ın PAYLAŞILAN r2.dev genel adresinden
+// DEĞİL, buradan servis edilir — bkz. StorageRepository.js'teki "YAKALANAN
+// SORUN" notu: r2.dev alt alan adı bazı ağlarda ERR_SSL_PROTOCOL_ERROR
+// veriyordu (Cloudflare'ın kendisi de bu adresi "production için önerilmez"
+// olarak işaretliyor). Bu uç, zaten güvenilir olduğu doğrulanmış S3 API'si
+// üzerinden nesneyi okuyup OLDUĞU GİBİ ileten ince bir vekildir (proxy).
+// Kıyafet fotoğrafları gibi token GEREKTİRMEZ (aynı gerekçe: dosya adı
+// tahmin edilemez UUID, <img> Authorization gönderemez).
+app.get('/r2-images/:folder/:filename', async (req, res) => {
+  if (!storageRepository.isConfigured) {
+    res.status(404).json({ error: 'Bulunamadı' })
+    return
+  }
+
+  const key = `${req.params.folder}/${req.params.filename}`
+  try {
+    const { body, contentType } = await storageRepository.download(key)
+    res.set('Cache-Control', 'public, max-age=86400')
+    if (contentType) res.set('Content-Type', contentType)
+    body.pipe(res)
+  } catch (error) {
+    if (error.name === 'NoSuchKey') {
+      res.status(404).json({ error: 'Bulunamadı' })
+      return
+    }
+    console.error('R2 fotoğrafı okunamadı:', key, error.message)
+    res.status(502).json({ error: 'Fotoğraf şu anda alınamadı' })
+  }
+})
 
 // --- Korumasız uçlar ---
 app.use('/api', healthRoutes) // izleme için açık kalmalı

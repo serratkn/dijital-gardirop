@@ -125,7 +125,14 @@ async function main() {
   })
   check('yükleme 200', uploaded.status === 200, JSON.stringify(uploaded.data?.error ?? ''))
   const firstUrl = uploaded.data?.image_url
-  check('image_url göreli yol', firstUrl?.startsWith('/uploads/'), firstUrl)
+  // R2 yapılandırılmışsa `/r2-images/...`, değilse `/uploads/...` döner —
+  // ikisi de göreli yol, hangisinin kullanıldığı ortama (R2_* env
+  // değişkenleri) bağlı; bu test ikisini de kabul eder.
+  check(
+    'image_url göreli yol',
+    firstUrl?.startsWith('/uploads/') || firstUrl?.startsWith('/r2-images/'),
+    firstUrl,
+  )
   check('tam URL yazılmamış', !firstUrl?.includes('http'), firstUrl)
   check('dosya adı UUID (orijinal ad değil)', !firstUrl?.includes('foto'), firstUrl)
   check('dosya diskte var', fileExists(firstUrl))

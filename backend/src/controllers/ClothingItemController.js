@@ -282,7 +282,7 @@ class ClothingItemController extends BaseController {
       // Kayıt güncellenemediyse (yetki/doğrulama hatası) diske/R2'ye
       // yazılmış dosya öksüz kalmamalı.
       await removeUploadedFile(req.file.filename)
-      if (this.storageRepository?.isConfigured && imageUrl.startsWith('http')) {
+      if (this.storageRepository?.isConfigured && imageUrl.startsWith('/r2-images/')) {
         await this.storageRepository.remove(`clothing-items/${req.file.filename}`).catch(() => {})
       }
       this.handleError(error, res)
