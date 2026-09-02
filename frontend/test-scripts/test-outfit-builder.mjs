@@ -18,6 +18,7 @@ import {
   OUTFIT_CATEGORIES,
   buildOutfitFromCandidates,
   buildRandomOutfit,
+  createFallbackMoodContext,
   createMoodContext,
   isSameOutfit,
   pickMakeupItem,
@@ -1210,6 +1211,197 @@ console.log('\n12) matchesSkinTone — ten tonu işareti (yalnızca bilgilendiri
     'Ten tonu bilgisi kombin kurulumunu ETKİLEMİYOR (saf gösterim katmanı)',
     oncesi.items.length === 2 && oncesi.vectorCount === 1,
   )
+}
+
+// ---------------------------------------------------------------
+console.log('\n13) createFallbackMoodContext — GERÇEK VAKA: hazır durum PİLL\'leri')
+console.log('    (2026-09-02: pill\'ler moodContext\'i HER ZAMAN null\'a çekiyordu,')
+console.log('    yani serbest metinle doğru çalışan stil önceliklendirmesi')
+console.log('    pill\'lerde HİÇ devreye girmiyordu.)')
+
+{
+  const terlik = parca({
+    name: 'parmak arası terlik',
+    category: 'Ayakkabı',
+    aiAnalysis: { veri: { stil: 'Plaj', ayakkabi_turu: 'Terlik' } },
+  })
+  const sneaker = parca({
+    name: 'New balance 530',
+    category: 'Ayakkabı',
+    aiAnalysis: { veri: { stil: 'Spor', ayakkabi_turu: 'Sneaker' } },
+  })
+  const stiletto = parca({
+    name: 'stradivarius bordo stiletto',
+    category: 'Ayakkabı',
+    aiAnalysis: { veri: { stil: 'Klasik', ayakkabi_turu: 'Stiletto' } },
+  })
+  const babet = parca({
+    name: 'stradivarius babet',
+    category: 'Ayakkabı',
+    aiAnalysis: { veri: { stil: 'Klasik', ayakkabi_turu: 'Babet' } },
+  })
+  const esofman = parca({
+    name: 'zara esofman',
+    category: 'Alt',
+    aiAnalysis: { veri: { stil: 'Spor', genel_aciklama: 'Bağcıklı bol paça eşofman altı.' } },
+  })
+  const sortEtek = parca({
+    name: 'zara sort etek',
+    category: 'Alt',
+    aiAnalysis: { veri: { stil: 'Günlük', genel_aciklama: 'Gri yıkamalı mini kot etek.' } },
+  })
+  const klasikCanta = parca({
+    name: 'klasik deri çanta',
+    category: 'Çanta',
+    aiAnalysis: { veri: { stil: 'Klasik', canta_turu: 'El Çantası' } },
+  })
+  const sirtCantasi = parca({
+    name: 'kanvas sırt çantası',
+    category: 'Çanta',
+    aiAnalysis: { veri: { stil: 'Spor', canta_turu: 'Sırt Çantası' } },
+  })
+  const seed = parca({ name: 'seed-ust', category: 'Üst' })
+
+  console.log('\n   a) "Spor" PİLL\'İ — eşofman + spor ayakkabı seçilmeli, etek/topuklu DEĞİL')
+  {
+    const moodContext = createFallbackMoodContext('Spor')
+    check('createFallbackMoodContext(\'Spor\') null DEĞİL', moodContext !== null)
+
+    const havuz = new Map([
+      ['Ayakkabı', [babet, terlik, sneaker, stiletto]], // gerçek vakadaki sıra
+      ['Alt', [sortEtek, esofman]],
+      ['Çanta', [klasikCanta, sirtCantasi]],
+    ])
+    const cleanItems = [seed, terlik, sneaker, stiletto, babet, esofman, sortEtek, klasikCanta, sirtCantasi]
+
+    const sonuc = buildOutfitFromCandidates({
+      seedItem: seed,
+      candidatesByCategory: havuz,
+      cleanItems,
+      seasons: null,
+      moodContext,
+    })
+    const ayakkabi = sonuc.items.find((i) => i.category === 'Ayakkabı')?.name
+    const alt = sonuc.items.find((i) => i.category === 'Alt')?.name
+    const canta = sonuc.items.find((i) => i.category === 'Çanta')?.name
+
+    check(
+      'KRİTİK — Spor pill: resmi ayakkabı (stiletto/babet) SEÇİLMEDİ',
+      ayakkabi !== 'stradivarius bordo stiletto' && ayakkabi !== 'stradivarius babet',
+      ayakkabi,
+    )
+    check('KRİTİK — Spor pill: Alt olarak eşofman seçildi (etek DEĞİL)', alt === 'zara esofman', alt)
+    check('Spor pill: sırt çantası seçildi (klasik deri çanta DEĞİL)', canta === 'kanvas sırt çantası', canta)
+    check(
+      '"Tarzına göre seçildi" rozetinin karşılığı — vectorCount > 0 (pill\'de de akıllı eşleşme çalışıyor)',
+      sonuc.vectorCount > 0,
+      `${sonuc.vectorCount}`,
+    )
+  }
+
+  console.log('\n   b) "Akşam Yemeği" PİLL\'İ — resmi ayakkabı/çanta seçilmeli')
+  {
+    const moodContext = createFallbackMoodContext('Akşam Yemeği')
+    const havuz = new Map([
+      ['Ayakkabı', [babet, terlik, sneaker, stiletto]],
+      ['Çanta', [sirtCantasi, klasikCanta]],
+    ])
+    const cleanItems = [seed, terlik, sneaker, stiletto, babet, klasikCanta, sirtCantasi]
+
+    const sonuc = buildOutfitFromCandidates({
+      seedItem: seed,
+      candidatesByCategory: havuz,
+      cleanItems,
+      seasons: null,
+      moodContext,
+    })
+    const ayakkabi = sonuc.items.find((i) => i.category === 'Ayakkabı')?.name
+    const canta = sonuc.items.find((i) => i.category === 'Çanta')?.name
+
+    check(
+      'KRİTİK — Akşam Yemeği pill: RESMİ ayakkabı seçildi (stiletto/babet)',
+      ayakkabi === 'stradivarius bordo stiletto' || ayakkabi === 'stradivarius babet',
+      ayakkabi,
+    )
+    check('Akşam Yemeği pill: klasik deri çanta seçildi (sırt çantası DEĞİL)', canta === 'klasik deri çanta', canta)
+  }
+
+  console.log('\n   c) "İş" ve "Özel Davet" PİLL\'LERİ — aynı resmi yön')
+  {
+    for (const occasion of ['İş', 'Özel Davet']) {
+      const moodContext = createFallbackMoodContext(occasion)
+      const havuz = new Map([['Ayakkabı', [babet, terlik, sneaker, stiletto]]])
+      const cleanItems = [seed, terlik, sneaker, stiletto, babet]
+      const sonuc = buildOutfitFromCandidates({
+        seedItem: seed,
+        candidatesByCategory: havuz,
+        cleanItems,
+        seasons: null,
+        moodContext,
+      })
+      const ayakkabi = sonuc.items.find((i) => i.category === 'Ayakkabı')?.name
+      check(
+        `"${occasion}" pill: resmi ayakkabı seçildi`,
+        ayakkabi === 'stradivarius bordo stiletto' || ayakkabi === 'stradivarius babet',
+        ayakkabi,
+      )
+    }
+  }
+
+  console.log('\n   d) "Üniversite" ve "Buluşma" — REGRESYON: hâlâ nötr, eski davranış korunuyor')
+  {
+    check('createFallbackMoodContext(\'Üniversite\') null', createFallbackMoodContext('Üniversite') === null)
+    check('createFallbackMoodContext(\'Buluşma\') null', createFallbackMoodContext('Buluşma') === null)
+    check('Bilinmeyen/tanımsız bir occasion için de null', createFallbackMoodContext('Bilinmeyen Durum') === null)
+
+    // moodContext null olduğu için preferFormalShoes/Style/Sporty HİÇBİRİ
+    // devreye girmemeli — vektör sırası (babet en yakın) AYNEN korunmalı.
+    const moodContext = createFallbackMoodContext('Üniversite')
+    const havuz = new Map([['Ayakkabı', [babet, terlik, sneaker, stiletto]]])
+    const cleanItems = [seed, terlik, sneaker, stiletto, babet]
+    const sonuc = buildOutfitFromCandidates({
+      seedItem: seed,
+      candidatesByCategory: havuz,
+      cleanItems,
+      seasons: null,
+      moodContext,
+    })
+    check(
+      'Üniversite pill: vektör sırası DEĞİŞMEDİ (en yakın — babet — seçiliyor, filtre yok)',
+      sonuc.items.find((i) => i.category === 'Ayakkabı')?.name === 'stradivarius babet',
+      sonuc.items.find((i) => i.category === 'Ayakkabı')?.name,
+    )
+  }
+
+  console.log('\n   e) Serbest metin AYNI occasion\'ı üretirse, DAHA SPESİFİK bilgi (Gemini\'nin')
+  console.log('      kendi kacinilmasi_gerekenler\'i) sabit ipucunun ÜZERİNE YAZAR — regresyon yok')
+  {
+    // createMoodContext (Gemini yolundan) ile createFallbackMoodContext
+    // (pill yolundan) AYNI "Spor" occasion'ı için bile FARKLI ayrıntılar
+    // taşıyabilir (Gemini kullanıcının GERÇEK cümlesine göre daha zengin
+    // bir kacinilmasi_gerekenler listesi üretebilir) — ikisi de AYNI
+    // preferFormalShoes/Style/Sporty mekanizmasından geçtiği için ikisi de
+    // doğru sonucu üretmeli, birbirini EZMEMELİ.
+    const gerçekGeminiContext = createMoodContext({
+      occasion: 'Spor',
+      stil_tercihi: 'Rahat ve Sportif',
+      kacinilmasi_gerekenler: ['Topuklu', 'Resmi kumaş'],
+    })
+    const havuz = new Map([['Alt', [sortEtek, esofman]]])
+    const cleanItems = [seed, sortEtek, esofman]
+    const sonuc = buildOutfitFromCandidates({
+      seedItem: seed,
+      candidatesByCategory: havuz,
+      cleanItems,
+      seasons: null,
+      moodContext: gerçekGeminiContext,
+    })
+    check(
+      'Serbest metinden gelen (Gemini) "Spor" bağlamı da AYNI şekilde eşofmanı seçiyor',
+      sonuc.items.find((i) => i.category === 'Alt')?.name === 'zara esofman',
+      sonuc.items.find((i) => i.category === 'Alt')?.name,
+    )
+  }
 }
 
 console.log(`\n${'='.repeat(46)}`)

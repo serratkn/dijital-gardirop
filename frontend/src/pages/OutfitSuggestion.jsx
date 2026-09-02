@@ -28,6 +28,7 @@ import {
   OUTFIT_CATEGORIES,
   buildOutfitFromCandidates,
   buildRandomOutfit,
+  createFallbackMoodContext,
   createMoodContext,
   isSameOutfit,
   pickMakeupItem,
@@ -399,6 +400,11 @@ function OutfitSuggestion() {
     if (isLoading || hasError || !requestedOccasion) return
 
     hasAppliedRequest.current = true
+    // Ana Sayfa kartı `handlePillSelect`'i HİÇ ÇAĞIRMIYOR (doğrudan
+    // runSuggestion'a düşüyor) — bu yüzden AYNI sabit stil ipucu burada da
+    // elle uygulanmalı, yoksa "Akşam Yemeği Kombini" kartından gelen istek
+    // pill'e tıklamışçasına değil, eski (stilsiz) davranışla üretilirdi.
+    moodContextRef.current = createFallbackMoodContext(requestedOccasion)
     runSuggestion(requestedOccasion)
   }, [isLoading, hasError, requestedOccasion, runSuggestion])
 
@@ -410,9 +416,19 @@ function OutfitSuggestion() {
     // Hazır durum pill'i, önceki serbest metin çağrısından kalan mood
     // bağlamını MİRAS ALMAMALI — aksi hâlde "sade bir şıklık istiyorum"
     // sonrası "Spor" pill'ine tıklamak hâlâ akşam yemeği kısıtlarını
-    // uygulardı. Bu satır, "stil tercihi olmadan yapılan eski akış hâlâ
-    // aynı şekilde çalışıyor" regresyon garantisinin doğrudan karşılığıdır.
-    moodContextRef.current = null
+    // uygulardı.
+    //
+    // YAKALANAN HATA (2026-09-02) — burada eskiden KOŞULSUZ `null`
+    // yazılıyordu, yani pill'ler HİÇBİR stil önceliklendirmesinden
+    // geçmiyordu (yalnızca serbest metin/Gemini üzerinden geçen istekler
+    // geçiyordu). "Spor" pill'ine tıklamak bu yüzden saf vektör
+    // benzerliğine düşüp neredeyse rastgele bir ayakkabı/kıyafet
+    // seçebiliyordu. Artık sabit, ücretsiz bir occasion→stil ipucu
+    // haritasından (bkz. outfitBuilder.js > createFallbackMoodContext)
+    // besleniyor — Üniversite/Buluşma için hâlâ `null` (nötr davranış
+    // KORUNUYOR), diğer dört durum için gerçek bir stil önceliklendirmesi
+    // uygulanıyor.
+    moodContextRef.current = createFallbackMoodContext(occasion)
     textRankingRef.current = null
     runSuggestion(occasion)
   }
@@ -467,9 +483,15 @@ function OutfitSuggestion() {
       // SESSİZ GERİ DÜŞÜŞ: anahtar yok, kota doldu, zaman aşımı, ağ hatası —
       // hiçbiri kullanıcıya gösterilmez. Yorumlama sonucu yok sayılır,
       // mevcut occasion-pill akışı (ham metin) aynen çalışmaya devam eder.
-      // moodContextRef/textRankingRef null kalır: Gemini erişilemezken bile
-      // sistem eskisi gibi (daha basit ama) mantıklı bir kombin üretir.
+      // textRankingRef null kalır (arama_metni hiç üretilmedi, aranacak bir
+      // şey yok). moodContextRef ise TAMAMEN null KALMAZ — kullanıcı ham
+      // metin olarak tam olarak altı standart durumdan birini yazdıysa
+      // (ör. "Spor") Gemini çağrısı başarısız olsa BİLE sabit occasion
+      // ipucundan (bkz. createFallbackMoodContext) faydalanılır. Başka bir
+      // şey yazdıysa (haritada karşılığı yoksa) null döner, sistem eskisi
+      // gibi (daha basit ama) mantıklı bir kombin üretmeye devam eder.
       console.warn('Serbest metin yorumlanamadı, ham metin occasion olarak kullanılıyor:', error.message)
+      moodContextRef.current = createFallbackMoodContext(occasionToUse)
     } finally {
       setIsInterpreting(false)
     }

@@ -98,6 +98,57 @@ export function createMoodContext(interpretation) {
   }
 }
 
+// YAKALANAN KÖK NEDEN (2026-09-02) — hazır durum PİLL'LERİ (Üniversite, İş,
+// Akşam Yemeği, Buluşma, Spor, Özel Davet) Gemini'ye HİÇ gitmiyordu;
+// `handlePillSelect` moodContext'i doğrudan null'a çekiyordu (bkz.
+// OutfitSuggestion.jsx). Sonuç: "Spor" pill'ine tıklamak, yukarıdaki TÜM
+// stil önceliklendirme mantığını (preferFormalShoes/Style, preferSportyStyle)
+// tamamen atlayıp saf vektör benzerliğine düşüyordu — SERBEST METİNLE
+// ("spora gideceğim") AYNI niyeti yazmak doğru sonucu verirken, pill'e
+// tıklamak neredeyse rastgele bir sonuç veriyordu.
+//
+// Çözüm HER pill tıklamasında canlı bir Gemini çağrısı YAPMAK değil (gereksiz
+// maliyet/gecikme) — her sabit occasion için SABİT, ücretsiz bir stil ipucu
+// tanımlayıp bunu `createMoodContext`'in AYNI yoluna (aynı tokenizasyon/durak
+// kelime mantığı) sokmak. Böylece pill ve serbest metin AYNI önceliklendirme
+// mekanizmasından geçiyor; iki ayrı, birbirinden sapabilecek kod yolu yok.
+//
+// Üniversite ve Buluşma BİLEREK bu haritada YOK: bu iki durumda net bir
+// "resmi" ya da "spor" ön yargısı olması gerekmiyor (bir üniversite/buluşma
+// kombini hem şık hem rahat olabilir) — moodContext null kalır, MEVCUT
+// (nötr, saf vektör benzerliğine dayalı) davranış AYNEN korunur.
+const OCCASION_STYLE_HINTS = {
+  Spor: {
+    occasion: 'Spor',
+    stil_tercihi: 'Spor ve Rahat',
+    kacinilmasi_gerekenler: ['Resmi', 'Topuklu', 'Şık aksesuar'],
+  },
+  İş: {
+    occasion: 'İş',
+    stil_tercihi: 'Şık ve Sade',
+    kacinilmasi_gerekenler: ['Aşırı rahat', 'Spor'],
+  },
+  'Akşam Yemeği': {
+    occasion: 'Akşam Yemeği',
+    stil_tercihi: 'Şık',
+    kacinilmasi_gerekenler: ['Günlük', 'Spor'],
+  },
+  'Özel Davet': {
+    occasion: 'Özel Davet',
+    stil_tercihi: 'Şık',
+    kacinilmasi_gerekenler: ['Günlük', 'Spor'],
+  },
+}
+
+// Pill tıklamasında (serbest metin/Gemini YOKKEN) kullanılacak sabit
+// moodContext. Tanımsız bir occasion (Üniversite, Buluşma, ya da bilinmeyen
+// bir değer) için `null` döner — çağıran taraf bunu "eski nötr davranış"
+// olarak ele alır.
+export function createFallbackMoodContext(occasion) {
+  const hint = OCCASION_STYLE_HINTS[occasion]
+  return hint ? createMoodContext(hint) : null
+}
+
 // Bir parçanın ai_analysis metninde (stil, açıklama, tür alanları) kaçınılan
 // kelimelerden biri geçiyor mu?
 function parcaKacinilanlarlaOrtusuyorMu(item, kacinilanKelimeler) {
