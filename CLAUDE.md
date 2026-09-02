@@ -2462,11 +2462,18 @@ dendiğinde sistem parmak arası terlik önerdi — occasion doğru anlaşılmı
    listesi ("çok", "aşırı", "biraz", "gibi", "veya" vb.) elenir — aksi
    hâlde neredeyse her ifadede geçen bu kelimeler örtüşme testini anlamsız
    hâle getirirdi. `interpretation` `null`/`undefined` ise (Gemini
-   erişilemedi, kullanıcı hazır durum pill'i seçti) `createMoodContext`
-   `null` döner ve aşağıdaki HİÇBİR mekanizma devreye girmez — bu, "Gemini
-   erişilemezken hâlâ (daha basit ama) mantıklı bir kombin üretiliyor" ve
-   "stil tercihi olmadan eski akış aynen çalışıyor" garantilerinin doğrudan
-   kaynağıdır.
+   erişilemedi) `createMoodContext` `null` döner ve aşağıdaki HİÇBİR
+   mekanizma devreye girmez — bu, "Gemini erişilemezken hâlâ (daha basit
+   ama) mantıklı bir kombin üretiliyor" garantisinin doğrudan kaynağıdır.
+   **GÜNCELLEME (2026-09-02):** "kullanıcı hazır durum pill'i seçti" artık
+   bu cümlenin İSTİSNASI — pill tıklaması `createMoodContext`'i hiç
+   çağırmaz ama dört durumda (Spor/İş/Akşam Yemeği/Özel Davet) KENDİ sabit
+   `moodContext`'ini `createFallbackMoodContext`'ten alır (bkz. aşağıdaki
+   "Hazır durum pill'leri de stil önceliklendirmesinden geçiyor" bölümü ve
+   §9'daki aynı tarihli değişiklik kaydı) — "stil tercihi olmadan eski akış
+   aynen çalışıyor" garantisi artık yalnızca Üniversite/Buluşma pill'leri
+   VE Gemini gerçekten erişilemezken (fallback'in de karşılığı olmayan bir
+   metin) geçerlidir.
 2. **`preferAvoidingKeywords(pool, kacinilanKelimeler)`** — TÜM kategorilerde
    uygulanır (yalnızca ayakkabıda değil). Bir parçanın `ai_analysis.veri`
    içindeki metin alanları (`stil`, `genel_aciklama`, `alt_kategori`,
@@ -3024,6 +3031,86 @@ tamamlayıp kaldırıldı:
 
 > Bundan sonraki her çalışma buraya tarihiyle işlenir: eklenen özellikler, düzeltilen
 > hatalar, alınan mimari kararlar. En yeni kayıt en üstte.
+
+### 2026-09-02 — KRİTİK DÜZELTME: hazır durum pill'leri artık stil önceliklendirmesinden geçiyor
+- **Bağlam:** Sunuma 2 gün kala, kullanıcı gerçek gardırobunda "Spor" pill'ine tıkladı
+  ve mini etek + görece resmi bir çanta içeren, spor olmayan bir kombin aldı — oysa
+  AYNI niyeti serbest metinle ("spora gideceğim") yazmak doğru, sportif bir kombin
+  üretiyordu. İki girdinin aynı sonucu vermesi beklenirdi.
+- **Kök neden — `OutfitSuggestion.jsx > handlePillSelect`, moodContext'i KOŞULSUZ
+  `null`'a çekiyordu.** 2026-08-25/26 oturumlarında kurulan tüm stil önceliklendirme
+  zinciri (`preferAvoidingKeywords → preferFormalShoes → preferFormalStyle →
+  preferSportyStyle`, bkz. §8 "Mood bağlamı") yalnızca `moodContext` doluyken
+  çalışır ve `moodContext` yalnızca `interpretOutfitRequest`'in (Gemini) gerçek bir
+  yanıtından (`createMoodContext`) üretiliyordu. Altı hazır durum pill'i
+  (Üniversite/İş/Akşam Yemeği/Buluşma/Spor/Özel Davet) Gemini'ye HİÇ gitmiyor —
+  bilerek: her tıklamada canlı bir çağrı hem gereksiz maliyet hem gecikme olurdu.
+  Sonuç: pill'e tıklamak yukarıdaki mekanizmanın TAMAMINI atlayıp saf vektör
+  benzerliğine düşüyordu; serbest metinle aynı niyeti yazmak ise doğru çalışıyordu.
+  İki girdi aynı sonucu vermeliydi ve vermiyordu — bu bir hata, tasarım kararı değildi.
+- **Çözüm — `outfitBuilder.js > OCCASION_STYLE_HINTS` + `createFallbackMoodContext(occasion)`.**
+  Her pill tıklamasında Gemini'ye gitmek yerine, altı sabit durumdan **dördü için**
+  (Spor, İş, Akşam Yemeği, Özel Davet) sabit ve ücretsiz bir `{ occasion, stil_tercihi,
+  kacinilmasi_gerekenler }` ipucu tanımlandı ve bu, serbest metnin kullandığı **AYNI**
+  `createMoodContext`/`applyMoodPreferences` yoluna sokuldu — iki ayrı, birbirinden
+  sapabilecek kod yolu yerine TEK bir önceliklendirme mekanizması.
+  - `Spor` → `stil_tercihi: 'Spor ve Rahat'`, kaçınılan: Resmi/Topuklu/Şık aksesuar.
+  - `İş` → `'Şık ve Sade'`, kaçınılan: Aşırı rahat/Spor.
+  - `Akşam Yemeği` / `Özel Davet` → `'Şık'`, kaçınılan: Günlük/Spor.
+  - **`Üniversite` ve `Buluşma` BİLEREK haritada YOK** — bu iki durumda net bir
+    resmi/spor ön yargısı olması gerekmiyor (biri hem şık hem rahat olabilir);
+    `createFallbackMoodContext` bu ikisi (ve haritada olmayan her occasion) için
+    `null` döner, çağıran taraf bunu "eski nötr davranış" olarak ele alır —
+    vektör sırası hiç filtrelenmeden aynen korunur.
+- **Fallback ÜÇ AYRI çağrı noktasına bağlandı** (`OutfitSuggestion.jsx`):
+  `handlePillSelect` (asıl düzeltme), `handleCustomSubmit`'in `catch` bloğu
+  (Gemini yorumlama başarısız olduğunda — kullanıcı ham metin olarak tam olarak
+  bir occasion adı yazmışsa BİLE eskiden moodContext boşta kalıyordu), ve Ana
+  Sayfa'nın hızlı kombin kartlarından gelen `useEffect` (bu efekt
+  `handlePillSelect`'i hiç çağırmıyor, doğrudan `runSuggestion`'a düşüyordu —
+  düzeltilmeseydi "Akşam Yemeği Kombini" kartından gelen istek pill'e
+  tıklamışçasına değil eski, stilsiz davranışla üretilmeye devam ederdi).
+- **Serbest metin YİNE ÖNCELİKLİDİR ve fallback'i EZER.** `createMoodContext`
+  (Gemini'nin gerçek yanıtından) ile `createFallbackMoodContext` (statik harita)
+  AYNI mekanizmadan geçtiği için biri diğerini bozmaz; Gemini gerçek bir yanıt
+  ürettiyse kullanıcının YAZDIĞI cümlenin daha zengin ayrıntıları (`kacinilmasi_
+  gerekenler`, `stil_tercihi`) devrede kalır, fallback yalnızca Gemini hiç
+  çalışmadıysa (pill tıklaması, ya da yorumlama başarısız oldu) devreye girer.
+- **Doğrulama — `frontend/test-scripts/test-outfit-builder.mjs`'e 14 yeni kontrol
+  (bölüm 13), toplam 154/154:** Spor/Akşam Yemeği/İş/Özel Davet pill'lerinin
+  gerçek Gemini kelime dağarcığıyla (`stil: 'Spor'/'Klasik'/'Günlük'`) doğru yönde
+  önceliklendirme yaptığı, Üniversite/Buluşma'nın vektör sırasını HİÇ değiştirmediği
+  (regresyon), ve serbest metinden gelen Gemini bağlamının fallback'i doğru şekilde
+  ezdiği (regresyon) izole birim testleriyle kanıtlandı.
+- **Doğrulama — CANLI, gerçek demo hesabıyla (`deneme@gmail.com`), production
+  Render API'sinden çekilen GERÇEK `/companions` yanıtı ve GERÇEK Gemini
+  embedding'leriyle** (`outfitBuilder.js`'in production'a deploy edilmiş AYNI
+  kaynak kodu doğrudan import edilerek çalıştırıldı, ayrı bir kopya YAZILMADI):
+  - **"Spor" pill → zara esofman (Spor) + New balance 530 (Spor) + spor çantası
+    (Spor)** — tamamen sportif bir kombin; kullanıcının bildirdiği hatalı
+    senaryo (etek + resmi çanta) bir daha ÜRETİLMİYOR.
+  - **"Akşam Yemeği" / "Özel Davet" pill → mango etek (Minimalist) + stradivarius
+    babet (Klasik) + Guess siyah çanta (Şık)** — resmi ayakkabı ve şık çanta
+    doğru önceliklendirildi, sportif hiçbir parça seçilmedi.
+  - **"İş" pill → zara siyah kot (Günlük) + babet (Klasik) + Guess çanta (Şık)** —
+    iş ortamına uygun, aşırı rahat/spor parça geri itildi.
+  - **"Üniversite" ve "Buluşma" → REGRESYONSUZ**, moodContext `null` kaldığı için
+    sonuç bu düzeltmeden ÖNCEKİ ile BİREBİR AYNI (zara siyah kot + babet + Guess
+    çanta — saf vektör sırası, hiç filtrelenmeden).
+  - Tüm senaryolarda `vectorCount > 0` — **"Tarzına göre seçildi" rozeti artık
+    pill'den gelen sonuçlarda da doğru şekilde çıkıyor** (öncesinde bu davranışta
+    değişiklik yoktu, ama rozetin karşılık geldiği "akıllı eşleşme" artık gerçekten
+    stil-farkında bir seçim yapıyor).
+  - Serbest metin regresyonu izole birim testinde (bölüm 13e) doğrulandı; canlıda
+    ayrıca `POST /outfits/interpret` çağrılmadı — demo öncesi Gemini kotasını
+    (`geminiLimiter`, saatte 10 istek/kullanıcı) korumak için bilinçli bir tercih,
+    zaten mekanizma AYNI (`createMoodContext`/`applyMoodPreferences`) olduğu için
+    ayrı bir canlı doğrulama gerekmiyordu.
+- Regresyon: `test-outfit-builder.mjs` 154/154, `npm run lint` + `npm run build` temiz.
+- **Not — `stilTercihiResmiMi`/`stilTercihiGunlukMu`/`stilTercihiSportifMi`
+  (§8 "Mood bağlamı") bu fallback ipuçlarını da AYNI regex'lerle sınıflandırır** —
+  `'Spor ve Rahat'` → sportif, `'Şık ve Sade'`/`'Şık'` → resmi. Yeni bir sınıflandırma
+  kuralı YAZILMADI, var olan mekanizma sabit ipucu metnini de doğru okuyor.
 
 ### 2026-08-31 — Sunum öncesi cila: Yardım & Destek gerçek sayfaya döndü, küçük düzeltmeler
 - **Bağlam:** Proje 4 gün içinde sunulacak; kullanıcı "büyük değişiklik yapmadan
